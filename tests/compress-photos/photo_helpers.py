@@ -530,14 +530,32 @@ def read_ppm(path):
     return pixels.reshape(height, width, 3), maximum
 
 
+def _rgb_to_xyz(primaries, white=(0.3127, 0.3290)):
+    """RGB-to-XYZ matrix for primaries ((xr, yr), (xg, yg), (xb, yb))."""
+    xyz = np.array([[x / y, 1, (1 - x - y) / y] for x, y in primaries]).T
+    w = np.array([white[0] / white[1], 1, (1 - sum(white)) / white[1]])
+    return xyz * np.linalg.solve(xyz, w)
+
+
+SRGB_TO_P3 = np.linalg.solve(
+    _rgb_to_xyz(((0.680, 0.320), (0.265, 0.690), (0.150, 0.060))),
+    _rgb_to_xyz(((0.640, 0.330), (0.300, 0.600), (0.150, 0.060))),
+)
+
+
 def jxl_hdr_pixels(jxl, ppm):
     """
-    jxlbatch's HDR result, decoded by djxl: linear RGB in the stored primaries,
-    1.0 = SDR white.
+    jxlbatch's HDR result, decoded by djxl: linear Display P3 (as
+    apple_hdr_pixels), 1.0 = SDR white.
     """
     run(['djxl', jxl, ppm], check=True)
     pixels, maximum = read_ppm(ppm)
-    return pq_to_linear(pixels / maximum) * 10000 / SDR_WHITE_NITS
+    linear = pq_to_linear(pixels / maximum) * 10000 / SDR_WHITE_NITS
+    info = run(['jxlinfo', jxl], check=True).stdout.lower()
+    if 'srgb primaries' in info or 'primaries: srgb' in info:
+        linear = linear @ SRGB_TO_P3.T
+
+    return linear
 
 
 def apple_hdr_pixels(helper, path, out):
