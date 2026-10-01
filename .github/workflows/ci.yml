@@ -1,0 +1,58 @@
+---
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: pre-commit/action@v3.0.1
+
+  # macOS: the tests check results with Apple's own image and video
+  # frameworks, and the WebAssembly toolchain is the arm64 macOS build.
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install build and test tools
+        run: brew install --quiet cmake ninja binaryen wasmtime exiftool jpeg-xl libheif
+      # wasi-sdk and the library sources (about 800 MB), downloaded by the
+      # build scripts; refreshed when a build script changes.
+      - name: Cache downloaded toolchains and sources
+        uses: actions/cache@v6
+        with:
+          path: .deps
+          key: deps-macos-${{ hashFiles('shortcuts/*/scripts/build-wasm.sh') }}
+      - name: 'Build Compress Photos: encoder (native and WebAssembly) and shortcuts'
+        working-directory: shortcuts/compress-photos
+        run: |
+          ./scripts/build-native.sh
+          ./scripts/build-wasm.sh
+          python scripts/build_shortcuts.py --guess --no-sign
+      - name: Install test dependencies
+        run: python -m pip install pytest
+      - name: Run tests
+        run: |-
+          set +e
+          python -m pytest tests
+          status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected yet."
+            exit 0
+          fi
+          exit "$status"
