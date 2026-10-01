@@ -6,7 +6,7 @@ encoder. Every release includes the current files of all shortcuts.
 ## [Compress Photos 0.1.0] - 2026-09-30
 
 - Added
-  - _Compress to JPEG XL_: converts HEIF, JPEG and PNG photos to JPEG XL with
+  - _Compress Photos_: converts HEIF, JPEG and PNG photos to JPEG XL with
     a-Shell and saves them back to Photos, from the share sheet or from its own
     photo picker
   - _JXL-Import_: saves the converted photos when started from the share sheet

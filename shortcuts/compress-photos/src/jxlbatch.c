@@ -1,4 +1,4 @@
-// jxlbatch: converts the photos staged by the "Compress to JPEG XL" shortcut
+// jxlbatch: converts the photos staged by the "Compress Photos" shortcut
 // into JPEG XL, keeping the original EXIF/XMP metadata.
 //
 // For each job line "i|Name" in JOBFILE it reads jxl_in_i.orig (the original

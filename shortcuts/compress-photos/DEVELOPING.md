@@ -22,7 +22,7 @@ ______________________________________________________________________
 ## 1. How it works
 
 ```
-Compress to JPEG XL                          (shortcut)
+Compress Photos                              (shortcut)
    photos: from the share sheet, or else picked in its own photo picker
    asks for a quality preset, copies each original photo to a-Shell's shared
    folder as jxl_in_N.orig, writes jxl_job.txt, then runs in a-Shell:
@@ -32,9 +32,9 @@ a-Shell ▸ jxlbatch → jxl_out_N.jxl + jxl_done.txt, with progress on screen
 then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
    under its original name, adds it to the albums listed in
-   jxl_albums_N.txt (written by Compress to JPEG XL), and cleans up
+   jxl_albums_N.txt (written by Compress Photos), and cleans up
 or, from the picker:
-   a-Shell switches back to Compress to JPEG XL, which saves the JXLs,
+   a-Shell switches back to Compress Photos, which saves the JXLs,
    adds each to its original's albums, then asks to delete the
    originals whose JXL was saved
 ```
@@ -144,8 +144,8 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
    Keep Going on.
 7. **Show Notification**: `Saved <Count> photo(s) to Photos.`
 
-**Compress to JPEG XL** (Details: Show in Share Sheet, receives Images; if
-there's no input: Continue):
+**Compress Photos** (Details: Show in Share Sheet, receives Images; if there's
+no input: Continue):
 
 1. **If** Shortcut Input has any value:
    - **Set Variable** `Photos` to Shortcut Input.

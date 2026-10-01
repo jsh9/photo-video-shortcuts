@@ -1,11 +1,11 @@
 # Compress Photos: JPEG XL for iPhone Photos
 
-Select photos in Photos → Share → **Compress to JPEG XL** → pick a quality
-preset (83 is the everyday choice). JPEG XL copies are saved back to Photos,
-into the same albums as the originals, keeping the original's metadata: capture
-date, time and time zone, GPS location, camera, lens, exposure, maker notes,
-and XMP. Started from the Shortcuts app instead, it lets you pick the photos
-and then offers to delete the originals.
+Select photos in Photos → Share → **Compress Photos** → pick a quality preset
+(83 is the everyday choice). JPEG XL copies are saved back to Photos, into the
+same albums as the originals, keeping the original's metadata: capture date,
+time and time zone, GPS location, camera, lens, exposure, maker notes, and XMP.
+Started from the Shortcuts app instead, it lets you pick the photos and then
+offers to delete the originals.
 
 iOS can display JPEG XL but has no encoder, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
@@ -50,14 +50,13 @@ See [Installation](../../README.md#1-installation) in the main README.
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then stops at
       once with "File jxl_done.txt not found".
-  - **From Photos:** select photos ▸ Share ▸ **Compress to JPEG XL**. Originals
-    are never deleted this way. The share sheet's **Send As** option decides
-    the format. Its default, Automatic, converts HEIF to JPEG, so the shortcut
-    gets a JPEG copy, and the sizes shown compare against it. To send
-    originals, tap **Options** at the top of the share sheet and set Send As to
-    **Current**. iOS offers no way to make that the default, and a shortcut
-    can't set it. `jxlbatch` prints a reminder when it receives iPhone photos
-    as JPEG.
+  - **From Photos:** select photos ▸ Share ▸ **Compress Photos**. Originals are
+    never deleted this way. The share sheet's **Send As** option decides the
+    format. Its default, Automatic, converts HEIF to JPEG, so the shortcut gets
+    a JPEG copy, and the sizes shown compare against it. To send originals, tap
+    **Options** at the top of the share sheet and set Send As to **Current**.
+    iOS offers no way to make that the default, and a shortcut can't set it.
+    `jxlbatch` prints a reminder when it receives iPhone photos as JPEG.
 - Either way, pick a quality from the list (see
   [Quality presets](#21-quality-presets)).
 - a-Shell opens and shows progress for each photo. **Keep it in the foreground
@@ -99,13 +98,12 @@ smaller text:
   preset is a contact card: the number is the name, and the description is the
   company line shown under it. The default is marked "(default)" in its title.
 - Tapping a preset picks it and continues.
-- To change the presets, edit the first Text action in *Compress to JPEG XL* on
-  the phone, or `QUALITY_PRESETS` in `scripts/build_shortcuts.py` and rebuild
-  (see [DEVELOPING.md](DEVELOPING.md)).
+- To change the presets, edit the first Text action in *Compress Photos* on the
+  phone, or `QUALITY_PRESETS` in `scripts/build_shortcuts.py` and rebuild (see
+  [DEVELOPING.md](DEVELOPING.md)).
 
 Effort is fixed at 7, `cjxl`'s default. To trade a little size for speed, edit
-the Execute Command action in *Compress to JPEG XL* and change `-e 7` to
-`-e 5`.
+the Execute Command action in *Compress Photos* and change `-e 7` to `-e 5`.
 
 ## 3. What is and isn't kept
 
@@ -134,13 +132,13 @@ keeps only one file, so check which one before you merge.
 
 ## 4. Troubleshooting
 
-| Symptom                                                                        | Fix                                                                                                                                                                    |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a-Shell: `jxlbatch: command not found`                                         | `jxlbatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                             |
-| a-Shell stops after the photos, nothing is saved                               | Run **JXL-Import** from the Shortcuts app; it saves whatever finished.                                                                                                 |
-| "File jxl_done.txt not found"                                                  | No photo converted. Look in a-Shell for the error on each photo. In *Compress to JPEG XL*, it also happens when started outside the Shortcuts app (see [Use](#2-use)). |
-| a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                              |
-| a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                       |
-| A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                          |
-| A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                   |
-| `! orientation check` warning in a-Shell                                       | The converted pixels didn't match the original's orientation. Please report it with the photo's EXIF.                                                                  |
+| Symptom                                                                        | Fix                                                                                                                                                                |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| a-Shell: `jxlbatch: command not found`                                         | `jxlbatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                         |
+| a-Shell stops after the photos, nothing is saved                               | Run **JXL-Import** from the Shortcuts app; it saves whatever finished.                                                                                             |
+| "File jxl_done.txt not found"                                                  | No photo converted. Look in a-Shell for the error on each photo. In *Compress Photos*, it also happens when started outside the Shortcuts app (see [Use](#2-use)). |
+| a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                          |
+| a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                   |
+| A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                      |
+| A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                               |
+| `! orientation check` warning in a-Shell                                       | The converted pixels didn't match the original's orientation. Please report it with the photo's EXIF.                                                              |

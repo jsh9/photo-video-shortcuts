@@ -73,10 +73,10 @@ ______________________________________________________________________
    from the latest release download `compress-photos-shortcuts-v<version>.zip`
    (for example `compress-photos-shortcuts-v0.1.0.zip`). In the Files app, tap
    the ZIP to unzip it, open the folder it creates, and tap each of the two
-   shortcuts, *Compress to JPEG XL* and *JXL-Import* → Add Shortcut. **Keep the
+   shortcuts, *Compress Photos* and *JXL-Import* → Add Shortcut. **Keep the
    name JXL-Import exactly**: a-Shell starts it by name.
 
-3. **Grant permissions.** Run *Compress to JPEG XL* once from the Shortcuts app
+3. **Grant permissions.** Run *Compress Photos* once from the Shortcuts app
    with one photo. Allow it to access a-Shell and Photos when asked.
 
 How to use it: [Compress Photos](shortcuts/compress-photos/README.md).

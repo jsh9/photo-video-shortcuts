@@ -2,7 +2,7 @@
 """
 Generates the two iPhone shortcuts as signed .shortcut files.
 
-- "Compress to JPEG XL": share-sheet shortcut that stages photos in a-Shell and
+- "Compress Photos": share-sheet shortcut that stages photos in a-Shell and
   runs jxlbatch (see ../README.md).
 - "JXL-Import": started by a-Shell when encoding is done; saves the JXL files
   to Photos and cleans up.
@@ -35,7 +35,7 @@ SAMPLE = HERE / 'sample' / 'JXL Sample.plist'
 DIST = HERE.parent / 'dist'
 OUT = HERE.parent / 'build' / 'shortcuts'
 
-NAME_A = 'Compress to JPEG XL'
+NAME_A = 'Compress Photos'
 NAME_B = (
     'JXL-Import'  # a-Shell starts it by name; no spaces, so no URL escaping
 )
