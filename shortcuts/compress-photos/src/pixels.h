@@ -24,6 +24,9 @@ typedef struct {
   blob_t icc;
   int cicp_present;
   uint8_t cicp[4];  // primaries, transfer, matrix (0 = RGB), full-range flag
+  // HDR photos (PQ, by CICP): Apple's profile for the same color space, if the
+  // photo has one, with the curve Apple tone-maps the HDR with on dimmer screens.
+  blob_t hdr_icc;
 } color_t;
 
 // What heif_decode did with an HDR gain map.

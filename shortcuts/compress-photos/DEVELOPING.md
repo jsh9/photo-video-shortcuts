@@ -138,6 +138,21 @@ a JPEG XL gain map (`jhgm` box). `src/heif.c` and `src/gainmap.c`:
   Display P3 (or sRGB) primaries, written row by row from lookup tables, with
   no floating-point image. It is encoded with libjxl's usual lossy settings, as
   PQ (CICP), `intensity_target` 10000.
+- **Apple's HDR profile.** An iPhone HEIC also holds an ICC profile for the HDR
+  rendition (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB)
+  with an `hdgm` tag: the tone curve (Apple's Headroom Adaptive Gain Curve,
+  SMPTE ST 2094-50) Apple dims the HDR photo with on screens that can't show
+  all of it, down to SDR. Without it, Apple assumes a 4.926× peak and dims a PQ
+  image its standard way, so the JXL looks slightly darker than the original.
+  `jxlbatch` reads the profile from the `tmap` item (or the gain map), with its
+  own small reader of the `meta` boxes because libheif gives profiles of images
+  only, and stores it instead of the CICP label when libjxl reads it as the
+  pixels' color space (same primaries, D65, PQ). The pixels don't change; the
+  profile costs about 3 KB. In a lossy file libjxl replaces a profile it can
+  describe itself by that description, dropping the curve, so the header is set
+  as lossless while the profile is set, then as lossy. Decoding: libjxl gives
+  such a file (lossy, with a profile) as linear sRGB unless asked for another
+  color space, so the tests ask djxl for Display P3 PQ.
 - **Not used** (the photo is converted as SDR, with
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
   sRGB with the sRGB curve, a gain map in another color space, a gain map whose

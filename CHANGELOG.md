@@ -10,9 +10,11 @@ encoder. Every release includes the current files of all shortcuts.
     becomes an HDR JPEG XL that lights up in Photos like the original.
     `jxlbatch` applies the gain map and stores the HDR result as 16-bit PQ in
     Display P3, with SDR white at 203 nits, because Photos ignores JPEG XL gain
-    maps. a-Shell shows such a photo as, for example, "HDR 3.5×". On SDR
-    screens, iOS tone-maps the HDR pixels instead of showing the camera's SDR
-    version. Only `jxlbatch.wasm` needs updating.
+    maps. a-Shell shows such a photo as, for example, "HDR 3.5×". The JPEG XL
+    also keeps the HEIC's HDR color profile, with the tone curve Apple uses to
+    dim the photo on screens that can't show all of it (including SDR screens),
+    so it looks like the original there too. Only `jxlbatch.wasm` needs
+    updating.
   - A photo whose gain map can't be used is converted as SDR, with a note ("HDR
     gain map not used") in a-Shell. Photos without a gain map, and those with
     only Apple's older gain map (before iOS 18), convert exactly as before.

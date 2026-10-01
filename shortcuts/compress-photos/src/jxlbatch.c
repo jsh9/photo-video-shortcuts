@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <jxl/cms.h>
 #include <jxl/color_encoding.h>
 #include <jxl/encode.h>
 #ifdef JXLBATCH_THREADS
@@ -248,6 +249,20 @@ static int color_from_cicp(const uint8_t cicp[4], JxlColorEncoding *c) {
   return cicp[2] == 0;  // RGB only
 }
 
+// 1 if libjxl reads the ICC profile `icc` as the color space of CICP `cicp`
+// (Apple's profile for an HDR photo describes its PQ pixels exactly).
+static int profile_matches_cicp(const blob_t *icc, const uint8_t cicp[4]) {
+  JxlColorEncoding want, got;
+  JXL_BOOL cmyk = JXL_FALSE;
+  const JxlCmsInterface *cms = JxlGetDefaultCms();
+  if (!color_from_cicp(cicp, &want) || !cms ||
+      !cms->set_fields_from_icc(cms->set_fields_data, icc->data, icc->size, &got, &cmyk) || cmyk) {
+    return 0;
+  }
+  return got.color_space == want.color_space && got.white_point == want.white_point &&
+         got.primaries == want.primaries && got.transfer_function == want.transfer_function;
+}
+
 // Chunked input: libjxl reads the pixels in place, a region at a time,
 // instead of first copying the whole image (matters for 48 MP photos).
 typedef struct {
@@ -313,8 +328,10 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   const uint32_t container_bits = (uint32_t)img->bytes_per_sample * 8;
   const uint32_t bits = (uint32_t)img->bits;  // e.g. 10 for 10-bit HEIF in 16-bit samples
   const color_t *color = em->color;
-  // HDR photos are PQ (see gainmap.h), coded by CICP rather than a profile.
+  // HDR photos are PQ (see gainmap.h), coded by CICP, or by Apple's profile
+  // for them if libjxl reads it as the same color space.
   const int pq = color && !(use_icc && color->icc.size) && color->cicp_present && color->cicp[1] == 16;
+  const int hdr_icc = pq && use_icc && color->hdr_icc.size && profile_matches_cicp(&color->hdr_icc, color->cicp);
 
 #define FAIL(...)                              \
   do {                                         \
@@ -337,7 +354,11 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   info.num_extra_channels = alpha ? 1 : 0;
   info.alpha_bits = alpha ? bits : 0;
   info.alpha_exponent_bits = 0;
-  info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
+  // In lossy files, libjxl replaces a profile it can describe itself (as it
+  // can Apple's HDR profile) by that description, which would drop Apple's
+  // tone-mapping curve. It keeps the profile if the image is lossless when the
+  // profile is set, so it is set that way first.
+  info.uses_original_profile = lossless || hdr_icc ? JXL_TRUE : JXL_FALSE;
   info.orientation = JXL_ORIENT_IDENTITY;  // pixels are already upright
   if (pq) info.intensity_target = 10000;  // PQ's peak, in nits (also libjxl's default for PQ)
   if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
@@ -346,7 +367,19 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
 
   *color_desc = "sRGB";
   int color_set = 0;
-  if (use_icc && color && color->icc.size) {
+  if (hdr_icc) {
+    if (JxlEncoderSetICCProfile(enc, color->hdr_icc.data, color->hdr_icc.size) != JXL_ENC_SUCCESS) {
+      rc = ENC_BAD_ICC;
+      FAIL("ICC profile rejected");
+    }
+    info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
+    if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
+      FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
+    }
+    color_set = 1;
+    *color_desc = "Apple's HDR profile";
+  }
+  if (!color_set && use_icc && color && color->icc.size) {
     if (JxlEncoderSetICCProfile(enc, color->icc.data, color->icc.size) != JXL_ENC_SUCCESS) {
       rc = ENC_BAD_ICC;
       FAIL("ICC profile rejected");
@@ -457,7 +490,11 @@ static int encode_jxl(image_t *img, const encode_meta_t *em, const options_t *op
                       size_t *out_len, const char **color_desc, char *err, size_t err_len) {
   int rc = encode_attempt(img, em, opt, 1, out, out_len, color_desc, err, err_len);
   if (rc == ENC_BAD_ICC) {
-    say_wrap("  ", "! color profile rejected by libjxl; saved as sRGB");
+    // An HDR photo's only profile is Apple's HDR one; without it, the PQ
+    // pixels are still labeled by CICP.
+    const int hdr = em->color && em->color->hdr_icc.size && !em->color->icc.size;
+    say_wrap("  ", hdr ? "! Apple's HDR color profile rejected by libjxl; saved without it"
+                       : "! color profile rejected by libjxl; saved as sRGB");
     rc = encode_attempt(img, em, opt, 0, out, out_len, color_desc, err, err_len);
   }
   return rc == ENC_OK ? 0 : -1;

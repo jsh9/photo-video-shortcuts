@@ -58,6 +58,7 @@ void image_free(image_t *img) {
 
 void color_free(color_t *color) {
   free(color->icc.data);
+  free(color->hdr_icc.data);
   memset(color, 0, sizeof *color);
 }
 

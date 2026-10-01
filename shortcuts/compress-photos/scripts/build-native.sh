@@ -10,7 +10,7 @@ for src in jxlbatch meta pixels heif gainmap; do
   # shellcheck disable=SC2046
   cc -O2 -g -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
-    $(pkg-config --cflags libjxl libjxl_threads libheif) \
+    $(pkg-config --cflags libjxl libjxl_cms libjxl_threads libheif) \
     -c "src/$src.c" -o "build/native-obj/$src.o"
 done
 for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
@@ -18,6 +18,6 @@ for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
     -c "$src" -o "build/native-obj/$(basename "$src" .cpp).o"
 done
 # shellcheck disable=SC2046
-c++ build/native-obj/*.o $(pkg-config --libs libjxl libjxl_threads libheif) \
+c++ build/native-obj/*.o $(pkg-config --libs libjxl libjxl_cms libjxl_threads libheif) \
   -o build/jxlbatch
 echo "built build/jxlbatch"

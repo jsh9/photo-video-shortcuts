@@ -144,9 +144,12 @@ original, and a-Shell shows the photo's line as, for example,
 `HEIF 4284x5712, HDR 3.5×`: its highlights reach 3.5 times SDR white. The JXL
 is about as large as an SDR one.
 
-The trade-off: on an SDR screen, or with HDR turned off, iOS tone-maps the HDR
-pixels itself, instead of showing the SDR version the camera made, so the JXL
-may look slightly different from the original there.
+On a screen that can't show all of that brightness (an SDR screen, a dimmer
+setting, or HDR turned off), Apple dims the photo with a tone curve it derives
+from the gain map. iPhones store that curve in the HEIC, in an HDR color
+profile, and the JXL keeps it (about 3 KB), so it looks like the original there
+too. A photo without that profile gets Apple's standard dimming instead, and
+may look slightly darker than the original.
 
 This applies to photos with an ISO 21496-1 gain map, which iPhones write since
 iOS 18. A photo whose gain map `jxlbatch` can't use is converted as SDR, with a
