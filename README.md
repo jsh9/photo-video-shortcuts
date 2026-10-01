@@ -71,7 +71,7 @@ ______________________________________________________________________
 2. **Add the shortcuts.** On the iPhone, open the
    [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases), and
    from the latest release download `compress-photos-shortcuts-v<version>.zip`
-   (for example `compress-photos-shortcuts-v1.1.2.zip`). In the Files app, tap
+   (for example `compress-photos-shortcuts-v0.1.0.zip`). In the Files app, tap
    the ZIP to unzip it, open the folder it creates, and tap each of the two
    shortcuts, *Compress to JPEG XL* and *JXL-Import* → Add Shortcut. **Keep the
    name JXL-Import exactly**: a-Shell starts it by name.

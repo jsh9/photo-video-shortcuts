@@ -12,7 +12,7 @@ Placeholder. The release process, to be filled in before the first release:
 4. Attach the current files of **all** shortcuts, so the "latest" download
    links keep working for every shortcut. The notes say which files changed.
    - Each shortcut's `.shortcut` files go into one ZIP named after the shortcut
-     and its version, for example `compress-photos-shortcuts-v1.1.2.zip`.
+     and its version, for example `compress-photos-shortcuts-v0.1.0.zip`.
      Inside, the files keep their names with spaces (GitHub would replace the
      spaces in a release file's own name with dots).
    - Encoders are attached as they are, with fixed names (for example
