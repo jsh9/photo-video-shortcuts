@@ -51,10 +51,11 @@ A test whose build or tool is missing is skipped on your Mac and fails in CI.
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test_shortcuts.py`     | the generated shortcuts: blocks and variables, a-Shell actions, quality presets, version in the notes, cleanup                                                                                                                                     |
 | `test_encoder_cli.py`   | `jxlbatch` (SIMD and scalar WebAssembly, native): version, self-test, arguments, batches with failed photos, the `jxl_done.txt` format                                                                                                             |
-| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                                                                      |
+| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, HDR, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                                                                 |
+| `test_hdr.py`           | HDR photos with an ISO 21496-1 gain map (as iPhones write since iOS 18) become 16-bit PQ JPEG XL that matches Apple's own HDR rendering, upright and in every build; photos without a gain map stay SDR                                            |
 | `test_xmp.py`           | ordinary and extended JPEG XMP across all three builds: long descriptions, reordered fragments, namespaces, arrays, structures, duplicate/conflicting properties, invalid packets and orientation                                                  |
 | `test_orientation.py`   | all 8 EXIF orientations become upright pixels, exactly                                                                                                                                                                                             |
-| `test_memory.py`        | a 24 MP photo at low quality stays well under the memory iOS allows a-Shell                                                                                                                                                                        |
+| `test_memory.py`        | a 24 MP photo at low quality, and 24 MP and 48 MP HDR photos, stay well under the memory iOS allows a-Shell                                                                                                                                        |
 | `test_shortcut_flow.py` | the shortcut's a-Shell commands run as a-Shell runs them (modeled on its source), with a-Shell already open or launched by the shortcut, and the retry when its engine is still starting; then JXL-Import's reading of the results and the cleanup |
 | `test_samples.py`       | your own photos, if any (see below)                                                                                                                                                                                                                |
 
@@ -66,9 +67,10 @@ version comparisons and changelog checks.
 
 Put your own test photos in `tests/samples/compress-photos/` (any subfolders).
 `test_samples.py` runs the end-to-end checks on each of them, including the
-primary photo's namespace-qualified XMP properties with structured values. HEIF
-auxiliary images (depth, segmentation and gain maps) have their own metadata;
-those packets are not mixed into the primary photo's properties. Only
-orientation normalization and removal of `HasExtendedXMP` are allowed; without
-any samples, it is skipped. That folder is not committed: personal photos often
-contain GPS locations.
+primary photo's namespace-qualified XMP properties with structured values. A
+photo with an ISO 21496-1 gain map must become HDR and match Apple's HDR
+rendering. HEIF auxiliary images (depth, segmentation and gain maps) have their
+own metadata; those packets are not mixed into the primary photo's properties.
+Only orientation normalization and removal of `HasExtendedXMP` are allowed;
+without any samples, it is skipped. That folder is not committed: personal
+photos often contain GPS locations.

@@ -1,5 +1,6 @@
 """Fixtures for the Compress Photos tests (macOS: they use Apple's ImageIO)."""
 
+import itertools
 import json
 import shutil
 import sys
@@ -19,11 +20,13 @@ NATIVE = ph.TOOL / 'build' / 'jxlbatch'
 
 @pytest.fixture(scope='session')
 def helpers(tmp_path_factory):
-    """The Swift helpers, compiled once: make_photo and imageio_props."""
+    """
+    The Swift helpers, compiled once: make_photo, imageio_props and hdr_pixels.
+    """
     folder = tmp_path_factory.mktemp('helpers')
     return {
         name: ph.compile_swift(ph.HERE / f'{name}.swift', folder / name)
-        for name in ('make_photo', 'imageio_props')
+        for name in ('make_photo', 'imageio_props', 'hdr_pixels')
     }
 
 
@@ -85,6 +88,23 @@ def imageio(helpers):
         return {r['path']: r for r in json.loads(out)}
 
     return read
+
+
+@pytest.fixture(scope='session')
+def apple_hdr(helpers, tmp_path_factory):
+    """
+    Apple's HDR rendering of an image (Core Image, with its gain map and
+    orientation applied), as Photos shows it: linear Display P3, 1.0 = SDR
+    white.
+    """
+    folder = tmp_path_factory.mktemp('apple-hdr')
+    count = itertools.count()
+
+    def render(path):
+        out = folder / f'{next(count)}.f32'
+        return ph.apple_hdr_pixels(helpers['hdr_pixels'], path, out)
+
+    return render
 
 
 @pytest.fixture(scope='session')

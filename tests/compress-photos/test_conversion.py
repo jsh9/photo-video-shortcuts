@@ -10,6 +10,8 @@ import pytest
 from PIL import Image
 
 NAMES = list(ph.PHOTOS)
+# HDR photos become PQ: their pixels and color are checked in test_hdr.py.
+SDR_NAMES = [name for name in NAMES if name not in ph.HDR_PHOTOS]
 
 
 @pytest.mark.parametrize('name', NAMES)
@@ -67,12 +69,15 @@ def test_photos_reads_same_metadata(batch, imageio, name):
     if differ.get('color') == (None, 'sRGB IEC61966-2.1'):
         del differ['color']
 
+    if name in ph.HDR_PHOTOS:
+        differ.pop('color', None)  # HDR is stored as PQ
+
     assert not differ
     assert after['orientation'] == 1
     assert after['upright'] == before['upright']
 
 
-@pytest.mark.parametrize('name', NAMES)
+@pytest.mark.parametrize('name', SDR_NAMES)
 def test_pixels_match_apple_render(batch, name, tmp_path):
     original, jxl, _ = batch.results[name]
     reference = ph.apple_render(original, tmp_path / 'apple.png')
