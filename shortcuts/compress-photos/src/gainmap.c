@@ -190,10 +190,12 @@ void gainmap_color_name(const color_t *color, char *buf, size_t len) {
 
 int gainmap_srgb_primaries(const color_t *color) {
   if (color->icc.size) return icc_primaries(&color->icc);
-  if (color->cicp_present && color->cicp[1] == 13 && (color->cicp[0] == 1 || color->cicp[0] == 12)) {
-    return color->cicp[0];
-  }
-  return 0;
+  // No color, or unspecified (2) code points, as ImageIO writes for sRGB, means
+  // sRGB, as for SDR photos.
+  if (!color->cicp_present) return 1;
+  const int primaries = color->cicp[0] == 2 ? 1 : color->cicp[0];
+  const int transfer = color->cicp[1] == 2 ? 13 : color->cicp[1];
+  return transfer == 13 && (primaries == 1 || primaries == 12) ? primaries : 0;
 }
 
 // ---------------------------------------------------------------------------

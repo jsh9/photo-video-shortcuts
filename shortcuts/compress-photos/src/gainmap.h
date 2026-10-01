@@ -26,7 +26,7 @@ int gainmap_parse(const uint8_t *data, size_t len, gainmap_meta_t *meta, char *e
 
 // The CICP primaries of an image with the sRGB transfer curve, from its ICC
 // profile or CICP code points: 1 (sRGB) or 12 (Display P3); 0 for any other
-// color space.
+// color space. No color information, or unspecified code points, mean sRGB.
 int gainmap_srgb_primaries(const color_t *color);
 // A short name for the color, for messages: the ICC profile's description,
 // or the CICP code points.
