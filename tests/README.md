@@ -23,8 +23,8 @@ From the repository root, with [tox](https://tox.wiki):
 
 ```bash
 tox                              # build everything, then run all tests
-tox -e py                        # run the tests only (uses the existing builds)
-tox -e py -- -k orientation      # pass options to pytest
+tox -e tests                        # run the tests only (uses the existing builds)
+tox -e tests -- -k orientation      # pass options to pytest
 ```
 
 Or without tox, after building:

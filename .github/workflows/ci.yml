@@ -45,8 +45,8 @@ jobs:
       # contents) as a release would, without signing or publishing.
       - name: Release dry run
         run: python scripts/release.py compress-photos --dry-run --no-sign
-      - name: Install test dependencies
-        run: python -m pip install -r tests/requirements.txt
+      - name: Install tox
+        run: python -m pip install 'tox>=4,<5'
       # In CI, a missing build or tool fails the tests instead of skipping them.
       - name: Run tests
-        run: python -m pytest
+        run: python -m tox -e tests
