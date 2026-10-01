@@ -27,8 +27,9 @@ Compress Photos                              (shortcut)
    photos: from the share sheet, or else picked in its own photo picker
    asks for a quality preset, copies each original photo to a-Shell's shared
    folder as jxl_in_N.orig, writes jxl_job.txt, then runs in a-Shell:
-     jxlbatch -q 83 -e 7 jxl_job.txt   (after a short wait; retried if
-                                        a-Shell was still starting up)
+     jxlbatch -q 83 -e 7 jxl_job.txt   (after a short wait, in a-Shell's
+                                        Shortcuts folder; retried if a-Shell
+                                        was still starting up)
 a-Shell ▸ jxlbatch → jxl_out_N.jxl + jxl_done.txt, with progress on screen
 then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
@@ -250,8 +251,9 @@ no input: Continue):
          Extension on), a-Shell **Put File** (Overwrite on). **End If**.
    2. a-Shell **Execute Command**, Keep Going off, with these commands:
       - `sleep 2`
+      - `cd ~shortcuts`
       - `jxlbatch -q <Matches> -e 7 jxl_job.txt`
-      - `dash -c '[ -e jxl_started ] || { sleep 3; jxlbatch -q <Matches> -e 7 jxl_job.txt; }'`
+      - `jxlbatch --retry -q <Matches> -e 7 jxl_job.txt`
       - `open shortcuts://run-shortcut?name=JXL-Import`
    - **Otherwise:**
      1. The same **Execute Command**, but with `open shortcuts://` as the last
@@ -268,7 +270,10 @@ no input: Continue):
      5. **Delete Photos**: `Converted`.
    - **End If**.
 
-The wait and the retry cover a-Shell being launched by the shortcut. Its
-WebAssembly engine is still loading then, and a-Shell ends the first command
-before it runs. `jxlbatch` creates `jxl_started` when it runs, so the retry
-only happens if it didn't.
+The wait, the `cd` and the retry cover a-Shell being launched by the shortcut.
+a-Shell then restores its last session, including its folder, while it starts
+the commands, and its WebAssembly engine may still be loading, which ends the
+first `jxlbatch` before it runs. After the wait, `cd ~shortcuts` changes to the
+Shortcuts folder, where Put File saves. `jxlbatch` creates `jxl_started` when
+it runs, and `--retry` does nothing when that file exists. The retry can't go
+through `dash`: a-Shell adds `.wasm` to a command's name, dash doesn't.

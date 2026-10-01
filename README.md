@@ -64,6 +64,10 @@ ______________________________________________________________________
 
    It should end with "Self-test passed". Its encode test takes a few seconds.
 
+   If a-Shell says "The WebAssembly interpreter is not running", close a-Shell
+   (swipe it away in the app switcher), reopen it, wait a few seconds, and run
+   the command again.
+
    If a-Shell reports a WebAssembly compile error, download
    `jxlbatch-scalar.wasm` instead, saved as `jxlbatch.wasm`. That build has no
    SIMD, so it's slower.

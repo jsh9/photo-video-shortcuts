@@ -1,36 +1,136 @@
 """
 Integration: the commands the generated shortcut sends to a-Shell, run line by
-line as a-Shell runs them, against the real encoder; then JXL-Import's reading
-of the results, and the cleanup.
+line the way a-Shell runs them, against the real encoder; then JXL-Import's
+reading of the results, and the cleanup.
 
-a-Shell's own commands are stood in for: ``jxlbatch`` runs the WebAssembly
-build under wasmtime (and can fail once, like a-Shell whose WebAssembly engine
-hasn't started), ``sleep`` returns at once, and ``open`` records the URL that
-would switch back to Shortcuts.
+The model of a-Shell follows its source (a-Shell/SceneDelegate.swift and
+a-Shell-Intents/ExecuteCommandIntentHandler.swift):
+
+- The lines run in one session: a ``cd`` carries over to the lines after it,
+  and a failed line doesn't stop the rest.
+- Shortcuts run in the Shortcuts folder (``$SHORTCUTS``, ``~shortcuts``),
+  where Put File saves. But when a shortcut has to launch a-Shell, the folder
+  a-Shell restores from its last session can take over. On the iPhone,
+  jxlbatch then found the job neither in that folder nor through
+  ``$SHORTCUTS``, so a launched a-Shell here starts in ~/Documents, without
+  ``$SHORTCUTS``.
+- ``jxlbatch`` is ``~/Documents/bin/jxlbatch.wasm``, run here by wasmtime. It
+  can fail once, like a-Shell whose WebAssembly engine hasn't started.
+- dash only runs files named exactly like the command, so it can't run
+  ``jxlbatch.wasm``.
+- ``sleep`` returns at once, and ``open`` records the URL that would switch
+  back to Shortcuts.
 """
 
 import os
+import re
+import shlex
 import shutil
 import subprocess
+from pathlib import Path
 
 import photo_helpers as ph
 import pytest
 from PIL import Image
 
 QUALITY = 83
-SHIMS = {
-    'jxlbatch': """#!/bin/sh
-echo run >> "$LOG/jxlbatch.calls"
-if [ -e "$LOG/fail_once" ]; then
-  rm "$LOG/fail_once"
-  echo "The WebAssembly interpreter is not running (either crashed or not yet started)." >&2
-  exit 255
-fi
-exec wasmtime run --dir "$PWD::." "$WASM" "$@"
-""",
-    'sleep': '#!/bin/sh\nexit 0\n',
-    'open': '#!/bin/sh\necho "$@" >> "$LOG/opened"\n',
-}
+NOT_RUNNING = (
+    'The WebAssembly interpreter is not running '
+    '(either crashed or not yet started).'
+)
+LAUNCHED = pytest.mark.parametrize(
+    'launched', [False, True], ids=['a-Shell open', 'a-Shell launched']
+)
+
+
+class AShell:
+    """
+    a-Shell running a shortcut's commands. ``launched``: the shortcut had to
+    launch a-Shell, which then starts in the folder of its last session.
+    """
+
+    def __init__(self, root, wasm, launched):
+        self.shortcuts = root / 'Shortcuts'
+        self.documents = root / 'Documents'
+        self.bin = self.documents / 'bin'
+        shims = root / 'shims'
+        for folder in (self.shortcuts, self.bin, shims):
+            folder.mkdir(parents=True)
+
+        # As on the iPhone: a .wasm file, not an executable.
+        shutil.copy(wasm, self.bin / 'jxlbatch.wasm')
+        (shims / 'sleep').write_text('#!/bin/sh\nexit 0\n')
+        (shims / 'sleep').chmod(0o755)
+        self.path = f'{shims}:{self.bin}:{os.environ["PATH"]}'
+        self.env = {} if launched else {'SHORTCUTS': str(self.shortcuts)}
+        self.cwd = self.documents if launched else self.shortcuts
+        self.engine_ready = True
+        self.output = ''
+        self.opened = []
+
+    def run(self, command):
+        for line in command.split('\n'):
+            if line.strip():
+                self.line(line)
+
+    def line(self, line):
+        name, *args = shlex.split(line)
+        if name == 'cd':
+            self.cd(args[0] if args else '')
+        elif name == 'sleep':
+            pass
+        elif name == 'open':
+            self.opened.append(args[0])
+        elif (self.bin / f'{name}.wasm').exists():
+            self.wasm(self.bin / f'{name}.wasm', args)
+        else:  # dash, rm and other commands
+            self.shell(line)
+
+    def cd(self, target):
+        # Bookmarks, then $VARIABLES; plain "cd" goes to ~/Documents.
+        bookmarks = {'~shortcuts': self.shortcuts, '~group': self.shortcuts}
+        if target in bookmarks:
+            self.cwd = bookmarks[target]
+            return
+
+        target = re.sub(r'\$(\w+)', lambda m: self.env.get(m[1], ''), target)
+        folder = self.cwd / target if target else self.documents
+        if folder.is_dir():
+            self.cwd = folder.resolve()
+        else:
+            self.output += f'cd: {target}: No such file or directory\n'
+
+    def wasm(self, path, args):
+        if not self.engine_ready:
+            self.engine_ready = True
+            self.output += NOT_RUNNING + '\n'
+            return
+
+        env = dict(self.env, PWD=str(self.cwd))
+        command = ['wasmtime', 'run', '--dir', f'{self.cwd}::.']
+        if 'SHORTCUTS' in env:  # by its absolute path, as in a-Shell
+            command += ['--dir', f'{self.shortcuts}::{self.shortcuts}']
+
+        for name, value in env.items():
+            command += ['--env', f'{name}={value}']
+
+        self.record(ph.run([*command, path, *args], cwd=self.cwd))
+
+    def shell(self, line):
+        env = dict(os.environ, PATH=self.path, **self.env)
+        self.record(
+            subprocess.run(
+                line,
+                shell=True,
+                cwd=self.cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+        )
+
+    def record(self, result):
+        self.output += result.stdout + result.stderr
 
 
 @pytest.fixture(scope='module')
@@ -49,30 +149,11 @@ def actions(gen):
 
 @pytest.fixture
 def ashell(tmp_path, wasm):
-    """Runs a-Shell command text in a staged folder; returns the log folder."""
+    """Starts the a-Shell model: ``ashell(launched=False)``."""
     ph.need(shutil.which('dash'), 'dash is needed (part of macOS)')
-    bin_dir, log = tmp_path / 'bin', tmp_path / 'log'
-    bin_dir.mkdir()
-    log.mkdir()
-    for name, script in SHIMS.items():
-        (bin_dir / name).write_text(script)
-        (bin_dir / name).chmod(0o755)
-
-    env = dict(
-        os.environ,
-        PATH=f'{bin_dir}:{os.environ["PATH"]}',
-        LOG=str(log),
-        WASM=str(wasm.command[-1]),
+    return lambda launched=False: AShell(
+        tmp_path / 'a-Shell', Path(wasm.command[-1]), launched
     )
-
-    def run(command, folder):
-        # a-Shell runs each line in turn and carries on after errors.
-        for line in command.split('\n'):
-            if line.strip():
-                subprocess.run(line, shell=True, cwd=folder, env=env)
-
-    run.log = log
-    return run
 
 
 def batch_command(actions, url):
@@ -96,7 +177,6 @@ def stage_like_shortcut(actions, folder, photos):
         if ph.ident(a) == 'is.workflow.actions.gettext'
         and '|' in str(ph.params(a)['WFTextActionText'])
     )
-    folder.mkdir()
     lines = []
     for i, photo in enumerate(photos, 1):
         shutil.copy(photo, folder / f'jxl_in_{i}.orig')
@@ -112,6 +192,7 @@ def import_results(folder):
     jxl_done.txt read the way JXL-Import reads it: split each line at "|"; the
     first item is the file, the last is the name, item 2 the index.
     """
+    assert (folder / 'jxl_done.txt').exists(), 'nothing was converted'
     results = []
     for line in (folder / 'jxl_done.txt').read_text().split('\n'):
         parts = line.split('|')
@@ -120,6 +201,12 @@ def import_results(folder):
     return results
 
 
+def batches_started(shell):
+    """How many times jxlbatch started converting the batch."""
+    return len(re.findall(r'jxlbatch: \d+ photos?,', shell.output))
+
+
+@LAUNCHED
 @pytest.mark.parametrize(
     ('start', 'url'),
     [
@@ -127,48 +214,60 @@ def import_results(folder):
         ('Shortcuts app', 'shortcuts://'),
     ],
 )
-def test_convert_and_return(actions, ashell, photos, tmp_path, start, url):
-    folder = tmp_path / 'ashell'
+def test_convert_and_return(actions, ashell, photos, launched, start, url):
+    shell = ashell(launched)
     originals = [photos['heic_p3'], photos['jpeg']]
-    stage_like_shortcut(actions, folder, originals)
-    ashell(batch_command(actions, url), folder)
-    assert (ashell.log / 'opened').read_text().split() == [url]
-    results = import_results(folder)
+    stage_like_shortcut(actions, shell.shortcuts, originals)
+    shell.run(batch_command(actions, url))
+    assert shell.opened == [url]
+    results = import_results(shell.shortcuts)
     assert [index for _, _, index in results] == [1, 2]
     for jxl, name, index in results:
         assert jxl.exists()
         assert name == f'{originals[index - 1].stem}.jxl'
 
 
-def test_retries_when_engine_not_ready(actions, ashell, photos, tmp_path):
-    folder = tmp_path / 'ashell'
-    stage_like_shortcut(actions, folder, [photos['jpeg']])
-    (ashell.log / 'fail_once').touch()
-    ashell(batch_command(actions, 'shortcuts://'), folder)
-    assert len((ashell.log / 'jxlbatch.calls').read_text().split()) == 2
-    assert len(import_results(folder)) == 1
+@LAUNCHED
+def test_retries_when_engine_not_ready(actions, ashell, photos, launched):
+    shell = ashell(launched)
+    stage_like_shortcut(actions, shell.shortcuts, [photos['jpeg']])
+    shell.engine_ready = False
+    shell.run(batch_command(actions, 'shortcuts://'))
+    assert NOT_RUNNING in shell.output
+    assert batches_started(shell) == 1, shell.output
+    assert len(import_results(shell.shortcuts)) == 1
 
 
 def test_no_retry_once_started(actions, ashell, tmp_path):
     # jxlbatch ran but converted nothing: running it again wouldn't help.
-    folder = tmp_path / 'ashell'
+    shell = ashell()
     gif = tmp_path / 'not-a-photo.gif'
     Image.new('RGB', (8, 8)).save(gif)
-    stage_like_shortcut(actions, folder, [gif])
-    ashell(batch_command(actions, 'shortcuts://'), folder)
-    assert len((ashell.log / 'jxlbatch.calls').read_text().split()) == 1
-    assert not (folder / 'jxl_done.txt').exists()
+    stage_like_shortcut(actions, shell.shortcuts, [gif])
+    shell.run(batch_command(actions, 'shortcuts://'))
+    assert batches_started(shell) == 1, shell.output
+    assert not (shell.shortcuts / 'jxl_done.txt').exists()
 
 
-def test_cleanup_leaves_nothing(actions, ashell, photos, tmp_path):
-    folder = tmp_path / 'ashell'
-    stage_like_shortcut(actions, folder, [photos['jpeg']])
-    ashell(batch_command(actions, 'shortcuts://'), folder)
-    (folder / 'jxl_albums_1.txt').write_text('Holidays')
+def test_missing_job_says_where_it_looked(ashell):
+    # So a failure on the iPhone shows why the job wasn't found.
+    shell = ashell(launched=True)
+    shell.run(f'jxlbatch -q {QUALITY} -e 7 jxl_job.txt')
+    message = ' '.join(shell.output.split())
+    assert 'cannot find jxl_job.txt' in message
+    assert f'$PWD ({shell.documents})' in message
+    assert '$SHORTCUTS (not set)' in message
+
+
+def test_cleanup_leaves_nothing(actions, ashell, photos):
+    shell = ashell()
+    stage_like_shortcut(actions, shell.shortcuts, [photos['jpeg']])
+    shell.run(batch_command(actions, 'shortcuts://'))
+    (shell.shortcuts / 'jxl_albums_1.txt').write_text('Holidays')
     cleanup = next(
         c
         for c in ph.ashell_commands(actions['import'], {})
         if c.startswith('rm ')
     )
-    ashell(cleanup, folder)
-    assert sorted(p.name for p in folder.iterdir()) == []
+    shell.run(cleanup)
+    assert sorted(p.name for p in shell.shortcuts.iterdir()) == []

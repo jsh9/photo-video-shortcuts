@@ -561,17 +561,20 @@ def run_jxlbatch(b, quality, then):
     """
     a-Shell command: run jxlbatch, then the command ``then``.
 
-    When this launches a-Shell, its WebAssembly engine may still be loading,
-    and a-Shell then ends jxlbatch before it runs. So wait 2 s first, and if
-    jxlbatch still didn't start (no jxl_started file), wait and run it again.
+    When this launches a-Shell, a-Shell restores its last session (its folder
+    too) while it starts these commands, and its WebAssembly engine may still
+    be loading, which ends jxlbatch before it runs. So wait 2 s, change to the
+    Shortcuts folder (~shortcuts, where Put File saves), and run jxlbatch; then
+    run it with --retry, which does nothing if the first run started (it
+    created jxl_started). Not through dash: a-Shell adds ".wasm" to a command's
+    name, dash doesn't, so it can't find jxlbatch.
     """
     b.ashell_execute(
-        'sleep 2\njxlbatch -q ',
+        'sleep 2\ncd ~shortcuts\njxlbatch -q ',
         quality,
-        f' -e {EFFORT} jxl_job.txt\n'
-        "dash -c '[ -e jxl_started ] || { sleep 3; jxlbatch -q ",
+        f' -e {EFFORT} jxl_job.txt\njxlbatch --retry -q ',
         quality,
-        f" -e {EFFORT} jxl_job.txt; }}'\n" + then,
+        f' -e {EFFORT} jxl_job.txt\n' + then,
         keep_going=False,
         open_app='open',
     )

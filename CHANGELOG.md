@@ -3,6 +3,21 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.1.1] - 2026-10-01
+
+- Fixed
+  - "File jxl_done.txt not found" when _Compress Photos_ had to launch a-Shell:
+    a-Shell could run the shortcut's commands outside its Shortcuts folder, and
+    the retry for its WebAssembly engine still starting never ran (dash can't
+    run `jxlbatch.wasm`). The shortcut now changes to the Shortcuts folder and
+    retries with `jxlbatch --retry`. Update both the shortcuts and
+    `jxlbatch.wasm`.
+- Changed
+  - When `jxlbatch` can't find the job file, it lists where it looked,
+    including the values of `$PWD` and `$SHORTCUTS`
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/4
+
 ## [Compress Photos 0.1.0] - 2026-09-30
 
 - Added
