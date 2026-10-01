@@ -10,7 +10,7 @@ ______________________________________________________________________
 **Table of Contents**
 
 - [1. How it works](#1-how-it-works)
-  - [1.1. Extended XMP](#11-extended-xmp)
+  - [1.1. XMP](#11-xmp)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -57,10 +57,21 @@ below quality ~70 and holds the whole image, which takes about 2.7 GB for 24
 MP, more than iOS lets a-Shell use. The cost is files about 2.5% larger at
 those qualities, with the same visual quality (SSIMULACRA2).
 
-### 1.1. Extended XMP
+### 1.1. XMP
 
-JPEG APP1 extended XMP fragments are assembled by GUID, total length and
-offset, including fragments stored out of order. The standard packet's
+Ordinary XMP is copied byte for byte, whatever its format: photos from other
+apps often carry XMP that isn't strict XML (trailing NUL bytes, Latin-1 text,
+HTML entities, undeclared prefixes), and such photos still convert. In a JPEG,
+the first nonempty XMP packet is used; empty or repeated packets are ignored.
+
+The only change is the orientation: each TIFF `Orientation` value is set to 1
+by changing that one digit in place. The XML parser only finds which prefix is
+bound to the TIFF namespace, so alternate prefixes work; when the packet isn't
+well-formed XML, the conventional `tiff:` prefix is assumed.
+
+Extended XMP, which a JPEG uses for XMP over 64 KB, is the only case that needs
+XML parsing. Its fragments are assembled by GUID, total length and offset,
+including fragments stored out of order. The standard packet's
 namespace-qualified `HasExtendedXMP` reference must match. Coverage must be
 complete and must not overlap; the assembled extension is limited to **16
 MiB**.
@@ -70,14 +81,16 @@ MiB**.
 scope, arrays, structures and Unicode, and removes the JPEG-only
 `HasExtendedXMP` property. Identical properties for the same RDF subject
 coalesce; conflicting values fail rather than choosing a value. The result goes
-into the existing uncompressed `xml ` box. TIFF orientation is read and reset
-by its namespace URI, so alternate XML prefixes work too.
+into the existing uncompressed `xml ` box.
 
-The internal `meta_extract` interface accepts an error buffer. Missing,
-overlapping, mismatched, oversized or invalid packets fail that photo with a
-message; other photos continue. Failed photos are absent from `jxl_done.txt`,
-so the shortcut cannot offer to delete their originals. The CLI and job/result
-formats stay the same. No HDR gain-map conversion is added here.
+The internal `meta_extract` interface accepts an error buffer. When extended
+XMP is present but can't be merged (missing, overlapping, mismatched, oversized
+or invalid fragments, or conflicting values), that photo fails with a message
+rather than losing metadata; other photos continue. A `HasExtendedXMP`
+reference whose fragments are no longer in the file is kept as it is. Failed
+photos are absent from `jxl_done.txt`, so the shortcut cannot offer to delete
+their originals. The CLI and job/result formats stay the same. No HDR gain-map
+conversion is added here.
 
 ## 2. Layout
 

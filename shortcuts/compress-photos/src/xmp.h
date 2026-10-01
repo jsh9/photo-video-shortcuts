@@ -14,10 +14,13 @@ int xmp_extended_guid(const uint8_t *xmp, size_t len, char guid[33], char *err, 
 int xmp_merge_extended(const uint8_t *base, size_t base_len, const uint8_t *extended,
                        size_t extended_len, uint8_t **out, size_t *out_len,
                        char *err, size_t err_len);
+// TIFF orientation in an XMP packet. Both work on the packet's bytes and never
+// fail: the XML parser only resolves which prefix names the TIFF namespace,
+// falling back to "tiff:" when the packet isn't well-formed XML.
 int xmp_orientation(const uint8_t *xmp, size_t len);  // 1..8, 0 if absent
-// Replaces the malloc-owned packet only when orientation changes. Returns -1
-// on invalid XML/allocation failure; leaves the original buffer intact then.
-int xmp_reset_orientation(uint8_t **xmp, size_t *len, char *err, size_t err_len);
+// Sets every orientation value to 1 in place, changing only those digits.
+// Returns the number of values changed.
+int xmp_reset_orientation(uint8_t *xmp, size_t len);
 
 #ifdef __cplusplus
 }

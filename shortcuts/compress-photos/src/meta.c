@@ -487,12 +487,14 @@ static int fragment_order(const void *a, const void *b) {
 
 static int assemble_xmp(meta_t *m, xmp_fragment_t *parts, size_t count,
                         char *err, size_t err_len) {
+  // Without extended fragments there is nothing to merge: the standard packet
+  // is kept byte for byte, even if it isn't strict XML or names an extension
+  // that is no longer in the file.
+  if (!count) return 0;
   char guid[33];
   const int reference = xmp_extended_guid(m->xmp.data, m->xmp.size, guid, err, err_len);
   if (reference < 0) return -1;
-  if (!reference && !count) return 0;
   if (!reference) return metadata_error(err, err_len, "extended XMP has no HasExtendedXMP reference");
-  if (!count) return metadata_error(err, err_len, "extended XMP fragments are missing");
   const uint32_t total = parts[0].total;
   if (!total || total > MAX_EXTENDED_XMP)
     return metadata_error(err, err_len, "extended XMP exceeds the 16 MiB limit or has zero length");
@@ -545,25 +547,18 @@ static int parse_jpeg(const uint8_t *b, size_t n, meta_t *m, char *err, size_t e
     pos += 2;
     if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
     if (marker == 0xD9 || marker == 0xDA) break;
-    if (pos + 2 > n || rd16be(b + pos) < 2 || rd16be(b + pos) > n - pos) {
-      metadata_error(err, err_len, "truncated JPEG metadata segment");
-      goto done;
-    }
+    if (pos + 2 > n || rd16be(b + pos) < 2 || rd16be(b + pos) > n - pos) break;
     const size_t seg_len = rd16be(b + pos), dn = seg_len - 2;
     const uint8_t *d = b + pos + 2;
     if (marker == 0xE1) {
       if (!m->exif.size && dn > 6 && !memcmp(d, "Exif\0\0", 6) && is_tiff(d + 6, dn - 6)) {
         if (blob_set(&m->exif, d + 6, dn - 6)) goto done;
       } else if (dn >= sizeof kXmpSig && !memcmp(d, kXmpSig, sizeof kXmpSig)) {
-        if (m->xmp.size) {
-          metadata_error(err, err_len, "multiple standard JPEG XMP packets");
+        // The first nonempty packet is the photo's XMP; empty or repeated
+        // packets are ignored, as other readers do.
+        if (!m->xmp.size && dn > sizeof kXmpSig &&
+            blob_set(&m->xmp, d + sizeof kXmpSig, dn - sizeof kXmpSig))
           goto done;
-        }
-        if (blob_set(&m->xmp, d + sizeof kXmpSig, dn - sizeof kXmpSig)) goto done;
-        if (!m->xmp.size) {
-          metadata_error(err, err_len, "empty JPEG XMP packet");
-          goto done;
-        }
       } else if (dn >= sizeof kExtSig && !memcmp(d, kExtSig, sizeof kExtSig)) {
         if (dn < sizeof kExtSig + 40) {
           metadata_error(err, err_len, "truncated extended XMP fragment header");

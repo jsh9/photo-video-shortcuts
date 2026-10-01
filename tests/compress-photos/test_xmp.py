@@ -57,9 +57,11 @@ def extended_pair(extended=None, body='', attrs='', **kwargs):
 
 
 def jpeg(path, base, parts=(), extension_first=False):
+    """A JPEG with ``base`` (or each packet in a list) as standard XMP."""
     buffer = io.BytesIO()
     ph.scene(97, 61).save(buffer, format='JPEG', quality=95)
-    segments = [app1(STANDARD + base)]
+    bases = base if isinstance(base, list) else [base]
+    segments = [app1(STANDARD + b) for b in bases]
     extra = [app1(p) for p in parts]
     segments = extra + segments if extension_first else segments + extra
     path.write_bytes(
@@ -69,6 +71,12 @@ def jpeg(path, base, parts=(), extension_first=False):
 
 
 def xml_box(path):
+    packets = xml_boxes(path)
+    assert len(packets) == 1
+    return packets[0]
+
+
+def xml_boxes(path):
     data = path.read_bytes()
     offset, packets = 0, []
     while offset < len(data):
@@ -87,8 +95,7 @@ def xml_box(path):
 
         offset += length
 
-    assert len(packets) == 1
-    return packets[0]
+    return packets
 
 
 def canonical(e):
@@ -342,7 +349,6 @@ FAILURES = [
     ('oversized', '16 MiB'),
     ('total', 'total length'),
     ('no-reference', 'reference'),
-    ('no-fragments', 'missing'),
     ('header', 'header'),
     ('bounds', 'declared length'),
     ('invalid-extended', 'invalid'),
@@ -384,8 +390,6 @@ def test_invalid_xmp_fails_only_that_photo(
         )
     elif failure == 'no-reference':
         base = packet()
-    elif failure == 'no-fragments':
-        parts = []
     elif failure == 'header':
         parts[0] = parts[0][: len(EXTENDED) + 39]
     elif failure == 'bounds':
@@ -474,3 +478,82 @@ def test_exiftool_extended_description(encoder, tmp_path, need_tools):
     out = convert(encoder, tmp_path / 'job', photo)
     assert ph.xmp_properties(photo) == ph.xmp_properties(out)
     assert ph.xmp_tags(out)['Description'] == LONG_DESCRIPTION
+
+
+# Standard (non-extended) XMP is copied byte for byte: the strict XML checks
+# above apply only when extended XMP has to be merged. Photos from other apps
+# often carry XMP that isn't strict XML; they must still convert.
+QUIRKS = {
+    'trailing NUL': packet('<dc:description>x</dc:description>') + b'\0',
+    'Latin-1 text': packet('<dc:description>cafe</dc:description>').replace(
+        b'cafe', b'caf\xe9'
+    ),
+    'HTML entity': packet('<dc:description>a&nbsp;b</dc:description>'),
+    'undeclared prefix': packet('<photoshop:City>Paris</photoshop:City>'),
+    'not XML': b'<invalid>',
+    'extension no longer in the file': extended_pair()[0],
+}
+
+
+@pytest.mark.parametrize('name', QUIRKS)
+def test_standard_xmp_kept_as_is(encoder, tmp_path, name):
+    payload = QUIRKS[name]
+    out = convert(
+        encoder, tmp_path / 'job', jpeg(tmp_path / 'quirk.jpg', payload)
+    )
+    assert xml_box(out) == payload
+
+
+ORIENTED = {
+    # Well-formed: the prefix bound to the TIFF namespace ("t" here) is used.
+    'well-formed': (
+        b'<?xpacket begin="\xef\xbb\xbf"?>\n'
+        + packet(attrs='t:Orientation="6"')
+        + b'\n<?xpacket end="w"?>',
+        b't:Orientation="6"',
+        b't:Orientation="1"',
+    ),
+    # Not strict XML: the conventional "tiff:" prefix is assumed.
+    'not strict XML': (
+        packet(
+            '<tiff:Orientation>8</tiff:Orientation>',
+            declarations=f'xmlns:tiff="{TIFF}"',
+        )
+        + b'\0',
+        b'<tiff:Orientation>8<',
+        b'<tiff:Orientation>1<',
+    ),
+}
+
+
+@pytest.mark.parametrize('name', ORIENTED)
+def test_orientation_reset_changes_only_that_digit(encoder, tmp_path, name):
+    payload, before, after = ORIENTED[name]
+    out = convert(
+        encoder, tmp_path / 'job', jpeg(tmp_path / 'oriented.jpg', payload)
+    )
+    assert xml_box(out) == payload.replace(before, after)
+    # Without EXIF, the XMP orientation turned the 97x61 pixels upright.
+    assert ph.decode_jxl(out, tmp_path / 'out.png').size == (61, 97)
+
+
+@pytest.mark.parametrize(
+    'packets,kept',
+    [
+        ([b'', packet(body='<dc:format>A</dc:format>')], 1),
+        (
+            [
+                packet(body='<dc:format>A</dc:format>'),
+                packet(body='<dc:format>B</dc:format>'),
+            ],
+            0,
+        ),
+        ([b''], None),
+    ],
+    ids=['empty then packet', 'two packets', 'only empty'],
+)
+def test_first_nonempty_packet_kept(encoder, tmp_path, packets, kept):
+    out = convert(
+        encoder, tmp_path / 'job', jpeg(tmp_path / 'packets.jpg', packets)
+    )
+    assert xml_boxes(out) == ([] if kept is None else [packets[kept]])

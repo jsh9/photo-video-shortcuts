@@ -322,40 +322,71 @@ extern "C" int xmp_merge_extended(const uint8_t *base, size_t base_len, const ui
   return serialize(a, out, out_len, err, err_len);
 }
 
-extern "C" int xmp_orientation(const uint8_t *x, size_t len) {
+// Orientation is read and reset on the packet's own bytes, so a packet is never
+// rewritten (or rejected) just to change one digit. Real-world XMP is often not
+// strict XML: trailing NULs, Latin-1 text, HTML entities, undeclared prefixes.
+namespace {
+// Qualified names (e.g. "tiff:Orientation") bound to the TIFF namespace. When
+// the packet isn't well-formed XML, assume the conventional prefix.
+std::vector<std::string> orientation_names(const uint8_t *x, size_t len) {
   XMLDocument doc;
-  if (!parse(doc, x, len)) return 0;
-  int orientation = 0;
-  auto read = [&](const char *v) {
-    if (!orientation && v && v[0] >= '1' && v[0] <= '8' && !v[1]) orientation = v[0] - '0';
+  if (!parse(doc, x, len)) return {"tiff:Orientation"};
+  std::vector<std::string> names;
+  auto add = [&](const char *name) {
+    if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
   };
   walk(doc.RootElement(), [&](XMLElement *e) {
-    if (named(e, e->Name(), TIFF, "Orientation")) read(e->GetText());
-    for (const XMLAttribute *a = e->FirstAttribute(); a; a = a->Next()) if (named(e, a->Name(), TIFF, "Orientation", true)) read(a->Value());
+    if (named(e, e->Name(), TIFF, "Orientation")) add(e->Name());
+    for (const XMLAttribute *a = e->FirstAttribute(); a; a = a->Next())
+      if (named(e, a->Name(), TIFF, "Orientation", true)) add(a->Name());
   });
+  return names;
+}
+
+// Each single-digit value (1-8) of `name`, as an attribute (name="6") or an
+// element (<name>6</name>): calls fn with a pointer to the digit.
+template <typename F> void orientation_digits(uint8_t *x, size_t len, const std::string &name, F fn) {
+  const std::string text(reinterpret_cast<const char *>(x), len);
+  for (size_t at = text.find(name); at != std::string::npos; at = text.find(name, at + 1)) {
+    // Only a whole name: "t:Orientation" must not match "xt:Orientation".
+    if (at == 0 || !std::strchr("< \t\r\n", text[at - 1])) continue;
+    size_t i = at + name.size();
+    while (i < len && std::strchr(" \t\r\n", text[i])) ++i;
+    char close = '<';
+    if (i < len && text[i] == '=') {
+      ++i;
+      while (i < len && std::strchr(" \t\r\n", text[i])) ++i;
+      if (i >= len || (text[i] != '"' && text[i] != '\'')) continue;
+      close = text[i++];
+    } else if (i < len && text[i] == '>') {
+      ++i;
+    } else {
+      continue;
+    }
+    if (i + 1 < len && text[i] >= '1' && text[i] <= '8' && text[i + 1] == close) fn(x + i);
+  }
+}
+}  // namespace
+
+extern "C" int xmp_orientation(const uint8_t *x, size_t len) {
+  int orientation = 0;
+  for (const std::string &name : orientation_names(x, len)) {
+    orientation_digits(const_cast<uint8_t *>(x), len, name, [&](uint8_t *digit) {
+      if (!orientation) orientation = *digit - '0';
+    });
+  }
   return orientation;
 }
 
-extern "C" int xmp_reset_orientation(uint8_t **x, size_t *len, char *err, size_t err_len) {
-  XMLDocument doc;
-  if (!parse(doc, *x, *len)) return fail(err, err_len, "invalid XML");
-  bool changed = false;
-  walk(doc.RootElement(), [&](XMLElement *e) {
-    if (named(e, e->Name(), TIFF, "Orientation") && e->GetText() && std::strcmp(e->GetText(), "1")) {
-      e->SetText("1"); changed = true;
-    }
-    for (const XMLAttribute *a = e->FirstAttribute(); a; a = a->Next()) {
-      if (named(e, a->Name(), TIFF, "Orientation", true) && std::strcmp(a->Value(), "1")) {
-        e->SetAttribute(a->Name(), "1"); changed = true;
+extern "C" int xmp_reset_orientation(uint8_t *x, size_t len) {
+  int changed = 0;
+  for (const std::string &name : orientation_names(x, len)) {
+    orientation_digits(x, len, name, [&](uint8_t *digit) {
+      if (*digit != '1') {
+        *digit = '1';
+        ++changed;
       }
-    }
-  });
-  if (!changed) return 0;
-  uint8_t *copy = nullptr;
-  size_t size = 0;
-  if (serialize(doc, &copy, &size, err, err_len)) return -1;
-  std::free(*x);
-  *x = copy;
-  *len = size;
-  return 1;
+    });
+  }
+  return changed;
 }
