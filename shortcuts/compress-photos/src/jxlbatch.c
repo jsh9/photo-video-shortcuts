@@ -661,7 +661,10 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
     memcpy(xmp, src_xmp->data, src_xmp->size);
     xmp_len = src_xmp->size;
-    xmp_reset_orientation(xmp, xmp_len);
+    if (xmp_reset_orientation(&xmp, &xmp_len) < 0) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
   }
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len};

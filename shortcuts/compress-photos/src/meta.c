@@ -488,9 +488,14 @@ static int fragment_order(const void *a, const void *b) {
 static int assemble_xmp(meta_t *m, xmp_fragment_t *parts, size_t count,
                         char *err, size_t err_len) {
   // Without extended fragments there is nothing to merge: the standard packet
-  // is kept byte for byte, even if it isn't strict XML or names an extension
-  // that is no longer in the file.
-  if (!count) return 0;
+  // is kept byte for byte, even if it isn't strict XML. But if it refers to
+  // extended XMP, the fragments may have been missed, and converting would
+  // lose them (and the original may then be deleted), so the photo fails.
+  if (!count) {
+    if (m->xmp.size && xmp_has_extended_reference(m->xmp.data, m->xmp.size))
+      return metadata_error(err, err_len, "extended XMP fragments are missing");
+    return 0;
+  }
   char guid[33];
   const int reference = xmp_extended_guid(m->xmp.data, m->xmp.size, guid, err, err_len);
   if (reference < 0) return -1;
@@ -547,7 +552,11 @@ static int parse_jpeg(const uint8_t *b, size_t n, meta_t *m, char *err, size_t e
     pos += 2;
     if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
     if (marker == 0xD9 || marker == 0xDA) break;
-    if (pos + 2 > n || rd16be(b + pos) < 2 || rd16be(b + pos) > n - pos) break;
+    // A damaged segment could hide metadata after it; fail rather than lose it.
+    if (pos + 2 > n || rd16be(b + pos) < 2 || rd16be(b + pos) > n - pos) {
+      metadata_error(err, err_len, "truncated JPEG metadata segment");
+      goto done;
+    }
     const size_t seg_len = rd16be(b + pos), dn = seg_len - 2;
     const uint8_t *d = b + pos + 2;
     if (marker == 0xE1) {

@@ -64,10 +64,15 @@ apps often carry XMP that isn't strict XML (trailing NUL bytes, Latin-1 text,
 HTML entities, undeclared prefixes), and such photos still convert. In a JPEG,
 the first nonempty XMP packet is used; empty or repeated packets are ignored.
 
-The only change is the orientation: each TIFF `Orientation` value is set to 1
-by changing that one digit in place. The XML parser only finds which prefix is
-bound to the TIFF namespace, so alternate prefixes work; when the packet isn't
-well-formed XML, the conventional `tiff:` prefix is assumed.
+The only change is the orientation: each TIFF `Orientation` value other than 1
+is replaced with `1`, and every other byte stays the same. A tolerant scanner
+in `src/xmp.cpp` finds the value without requiring strict XML. It doesn't look
+for markup inside comments, CDATA, processing instructions or attribute values,
+so text that merely looks like the property isn't read or changed. It resolves
+the namespace of each prefix, so `tiff:` bound to another namespace is ignored
+and alternate prefixes work; an undeclared `tiff:` prefix is assumed to be the
+TIFF namespace. It decodes character references (`&#54;` is 6). The same
+scanner finds the `HasExtendedXMP` reference.
 
 Extended XMP, which a JPEG uses for XMP over 64 KB, is the only case that needs
 XML parsing. Its fragments are assembled by GUID, total length and offset,
@@ -86,8 +91,9 @@ into the existing uncompressed `xml ` box.
 The internal `meta_extract` interface accepts an error buffer. When extended
 XMP is present but can't be merged (missing, overlapping, mismatched, oversized
 or invalid fragments, or conflicting values), that photo fails with a message
-rather than losing metadata; other photos continue. A `HasExtendedXMP`
-reference whose fragments are no longer in the file is kept as it is. Failed
+rather than losing metadata; other photos continue. This includes a
+`HasExtendedXMP` reference with no fragments in the file, and a JPEG metadata
+segment that is cut short, since either could mean metadata is lost. Failed
 photos are absent from `jxl_done.txt`, so the shortcut cannot offer to delete
 their originals. The CLI and job/result formats stay the same. No HDR gain-map
 conversion is added here.

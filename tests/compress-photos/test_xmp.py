@@ -360,6 +360,8 @@ FAILURES = [
     ('invalid-character', 'invalid'),
     ('duplicate-namespace-attribute', 'invalid'),
     ('empty', 'zero length'),
+    ('no-fragments', 'missing'),
+    ('no-fragments-not-strict-xml', 'missing'),
     ('invalid-utf8', 'invalid'),
 ]
 
@@ -390,6 +392,10 @@ def test_invalid_xmp_fails_only_that_photo(
         )
     elif failure == 'no-reference':
         base = packet()
+    elif failure == 'no-fragments':
+        parts = []
+    elif failure == 'no-fragments-not-strict-xml':
+        base, parts = base + b'\0', []
     elif failure == 'header':
         parts[0] = parts[0][: len(EXTENDED) + 39]
     elif failure == 'bounds':
@@ -491,7 +497,6 @@ QUIRKS = {
     'HTML entity': packet('<dc:description>a&nbsp;b</dc:description>'),
     'undeclared prefix': packet('<photoshop:City>Paris</photoshop:City>'),
     'not XML': b'<invalid>',
-    'extension no longer in the file': extended_pair()[0],
 }
 
 
@@ -504,6 +509,8 @@ def test_standard_xmp_kept_as_is(encoder, tmp_path, name):
     assert xml_box(out) == payload
 
 
+ROTATIONS = {6: Image.Transpose.ROTATE_270, 8: Image.Transpose.ROTATE_90}
+# name: (packet, raw value before, after, orientation the pixels get)
 ORIENTED = {
     # Well-formed: the prefix bound to the TIFF namespace ("t" here) is used.
     'well-formed': (
@@ -512,8 +519,8 @@ ORIENTED = {
         + b'\n<?xpacket end="w"?>',
         b't:Orientation="6"',
         b't:Orientation="1"',
+        6,
     ),
-    # Not strict XML: the conventional "tiff:" prefix is assumed.
     'not strict XML': (
         packet(
             '<tiff:Orientation>8</tiff:Orientation>',
@@ -522,19 +529,94 @@ ORIENTED = {
         + b'\0',
         b'<tiff:Orientation>8<',
         b'<tiff:Orientation>1<',
+        8,
+    ),
+    'undeclared tiff prefix': (
+        packet(attrs='tiff:Orientation="6"'),
+        b'tiff:Orientation="6"',
+        b'tiff:Orientation="1"',
+        6,
+    ),
+    'character reference': (
+        packet(attrs='t:Orientation="&#54;"'),
+        b't:Orientation="&#54;"',
+        b't:Orientation="1"',
+        6,
+    ),
+    'element character reference': (
+        packet('<t:Orientation>&#56;</t:Orientation>'),
+        b'<t:Orientation>&#56;<',
+        b'<t:Orientation>1<',
+        8,
+    ),
+    # Text that looks like the property, with the same prefix and before the
+    # real value, must not be read or changed: in CDATA, a comment, another
+    # attribute's value, or an element where the prefix means another
+    # namespace.
+    'lookalike in CDATA': (
+        packet(
+            '<dc:description><![CDATA[<t:Orientation>8</t:Orientation>]]>'
+            '</dc:description><t:Orientation>6</t:Orientation>'
+        ),
+        b'<t:Orientation>6<',
+        b'<t:Orientation>1<',
+        6,
+    ),
+    'lookalike in a comment': (
+        packet(
+            '<!-- <t:Orientation>8</t:Orientation> -->'
+            '<t:Orientation>6</t:Orientation>'
+        ),
+        b'<t:Orientation>6<',
+        b'<t:Orientation>1<',
+        6,
+    ),
+    'lookalike in an attribute value': (
+        packet(
+            '<t:Orientation>6</t:Orientation>',
+            attrs='dc:format="a t:Orientation=\'8\' b"',
+        ),
+        b'<t:Orientation>6<',
+        b'<t:Orientation>1<',
+        6,
+    ),
+    'same prefix, another namespace': (
+        packet(
+            '<c:Note xmlns:t="https://example.org/not-tiff/"'
+            ' t:Orientation="8"/><t:Orientation>6</t:Orientation>'
+        ),
+        b'<t:Orientation>6<',
+        b'<t:Orientation>1<',
+        6,
+    ),
+    'tiff prefix of another namespace': (
+        packet(
+            attrs='tiff:Orientation="8" t:Orientation="6"',
+            declarations='xmlns:tiff="https://example.org/not-tiff/"',
+        ),
+        b't:Orientation="6"',
+        b't:Orientation="1"',
+        6,
     ),
 }
 
 
 @pytest.mark.parametrize('name', ORIENTED)
-def test_orientation_reset_changes_only_that_digit(encoder, tmp_path, name):
-    payload, before, after = ORIENTED[name]
-    out = convert(
-        encoder, tmp_path / 'job', jpeg(tmp_path / 'oriented.jpg', payload)
-    )
+def test_orientation_reset_changes_only_that_value(encoder, tmp_path, name):
+    payload, before, after, orientation = ORIENTED[name]
+    assert payload.count(before) == 1
+    photo = jpeg(tmp_path / 'oriented.jpg', payload)
+    out = convert(encoder, tmp_path / 'job', photo)
     assert xml_box(out) == payload.replace(before, after)
-    # Without EXIF, the XMP orientation turned the 97x61 pixels upright.
-    assert ph.decode_jxl(out, tmp_path / 'out.png').size == (61, 97)
+    # Without EXIF, the XMP orientation turns the pixels upright.
+    reference = Image.open(photo).transpose(ROTATIONS[orientation])
+    decoded = ph.decode_jxl(out, tmp_path / 'out.png')
+    assert decoded.size == reference.size
+    # stb_image and libjpeg round a few decoded JPEG samples differently.
+    difference = np.asarray(decoded, dtype=int) - np.asarray(
+        reference, dtype=int
+    )
+    assert np.max(np.abs(difference)) <= 2
 
 
 @pytest.mark.parametrize(
