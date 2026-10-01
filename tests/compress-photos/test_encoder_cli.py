@@ -54,6 +54,24 @@ def test_missing_job_file(encoder, tmp_path):
     assert 'cannot find jxl_job.txt' in result.stdout
 
 
+def test_retry_skips_a_started_batch(encoder, tmp_path):
+    # The shortcut's retry line, after jxlbatch already ran.
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    (tmp_path / 'jxl_started').touch()
+    result = encoder.run(['--retry', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'jxlbatch: 1 photo' not in result.stdout
+    assert not (tmp_path / 'jxl_done.txt').exists()
+
+
+def test_retry_runs_a_batch_not_started(encoder, tmp_path):
+    # The shortcut's retry line, after a-Shell couldn't start jxlbatch.
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    result = encoder.run(['--retry', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'Done: 1 of 1 converted' in result.stdout
+
+
 def test_batch_continues_after_failed_photos(encoder, tmp_path):
     # 1: a PNG, 2: a GIF (unsupported), 3: missing, 4: a JPEG
     ph.scene(64, 48).save(tmp_path / 'jxl_in_1.orig', 'PNG')
