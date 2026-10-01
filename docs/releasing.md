@@ -25,9 +25,7 @@ Each shortcut has its own version in `shortcuts/<name>/VERSION`, shared by its
 encoder (for example `jxlbatch --version`). The build scripts read it from
 there.
 
-The first release remains **0.1.0**: GitHub has no published releases yet. The
-metadata and release-validation fixes belong in its existing changelog entry.
-After publication, bump only the tools that change.
+Bump only the tools that change.
 
 ## 2. Required files
 

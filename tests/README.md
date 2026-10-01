@@ -47,16 +47,16 @@ A test whose build or tool is missing is skipped on your Mac and fails in CI.
 
 `compress-photos/`:
 
-| File                    | What it checks                                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_shortcuts.py`     | the generated shortcuts: blocks and variables, a-Shell actions, quality presets, version in the notes, cleanup                                                                                    |
-| `test_encoder_cli.py`   | `jxlbatch` (SIMD and scalar WebAssembly, native): version, self-test, arguments, batches with failed photos, the `jxl_done.txt` format                                                            |
-| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                     |
-| `test_xmp.py`           | ordinary and extended JPEG XMP across all three builds: long descriptions, reordered fragments, namespaces, arrays, structures, duplicate/conflicting properties, invalid packets and orientation |
-| `test_orientation.py`   | all 8 EXIF orientations become upright pixels, exactly                                                                                                                                            |
-| `test_memory.py`        | a 24 MP photo at low quality stays well under the memory iOS allows a-Shell                                                                                                                       |
-| `test_shortcut_flow.py` | the shortcut's a-Shell commands run as a-Shell runs them, including the retry when a-Shell is still starting, then JXL-Import's reading of the results and the cleanup                            |
-| `test_samples.py`       | your own photos, if any (see below)                                                                                                                                                               |
+| File                    | What it checks                                                                                                                                                                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_shortcuts.py`     | the generated shortcuts: blocks and variables, a-Shell actions, quality presets, version in the notes, cleanup                                                                                                                                     |
+| `test_encoder_cli.py`   | `jxlbatch` (SIMD and scalar WebAssembly, native): version, self-test, arguments, batches with failed photos, the `jxl_done.txt` format                                                                                                             |
+| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                                                                      |
+| `test_xmp.py`           | ordinary and extended JPEG XMP across all three builds: long descriptions, reordered fragments, namespaces, arrays, structures, duplicate/conflicting properties, invalid packets and orientation                                                  |
+| `test_orientation.py`   | all 8 EXIF orientations become upright pixels, exactly                                                                                                                                                                                             |
+| `test_memory.py`        | a 24 MP photo at low quality stays well under the memory iOS allows a-Shell                                                                                                                                                                        |
+| `test_shortcut_flow.py` | the shortcut's a-Shell commands run as a-Shell runs them (modeled on its source), with a-Shell already open or launched by the shortcut, and the retry when its engine is still starting; then JXL-Import's reading of the results and the cleanup |
+| `test_samples.py`       | your own photos, if any (see below)                                                                                                                                                                                                                |
 
 `scripts/`: release manifests, missing/empty/stale outputs, signed and unsigned
 ZIP contents and CRCs, encoder versions, mocked GitHub baselines, per-tool

@@ -31,9 +31,10 @@
 #define JXLBATCH_VERSION "dev"
 #endif
 #define DONE_FILE "jxl_done.txt"
-// Created as soon as a batch starts. When a shortcut cold-starts a-Shell, its
+// Created as soon as a batch starts. When a shortcut launches a-Shell, its
 // WebAssembly engine may not be loaded yet and the first command fails
-// without running; the shortcut retries when this file is missing.
+// without running; the shortcut then runs jxlbatch --retry, which does
+// nothing when this file exists.
 #define STARTED_FILE "jxl_started"
 
 #if defined(__wasm_simd128__)
@@ -48,6 +49,7 @@ typedef struct {
   float quality;
   int effort;
   const char *dir;
+  int retry;  // --retry: skip a batch that a run already started
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -727,6 +729,24 @@ done:
 // them from the shell's current folder (which a-Shell sets to the Shortcuts
 // folder before running a shortcut's commands), while absolute paths outside
 // the current folder lose their leading "/" and fail.
+// Says where the job was looked for, so a failure in a-Shell shows why.
+static void say_not_found(const options_t *opt, const char *job) {
+  const char *pwd = getenv("PWD"), *shortcuts = getenv("SHORTCUTS");
+  say("ERROR: cannot find %s\nLooked in:\n", job);
+  if (opt->dir) say("  -C (%s)\n", opt->dir);
+  say("  the current folder\n");
+  say("  $PWD (%s)\n", pwd && *pwd ? pwd : "not set");
+  say("  $SHORTCUTS (%s)\n", shortcuts && *shortcuts ? shortcuts : "not set");
+}
+
+static int file_exists(const char *dir, const char *name) {
+  char *path = path_join(dir, name);
+  FILE *f = path ? fopen(path, "rb") : NULL;
+  free(path);
+  if (f) fclose(f);
+  return f != NULL;
+}
+
 static char *find_dir(const options_t *opt, const char *job) {
   const char *candidates[] = {opt->dir, ".", getenv("PWD"), getenv("SHORTCUTS")};
   for (size_t i = 0; i < sizeof candidates / sizeof candidates[0]; i++) {
@@ -770,10 +790,15 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     dir = find_dir(opt, job_arg);
   }
   if (!dir) {
-    say_wrap("", "ERROR: cannot find %s (looked in -C, the current folder, $PWD and $SHORTCUTS)", job_arg);
+    say_not_found(opt, job_arg);
     return 1;
   }
-  char *job_path = path_join(strcmp(dir, ".") == 0 ? NULL : dir, job);
+  const char *dir_for_files = strcmp(dir, ".") == 0 ? NULL : dir;
+  if (opt->retry && file_exists(dir_for_files, STARTED_FILE)) {
+    free(dir);
+    return 0;
+  }
+  char *job_path = path_join(dir_for_files, job);
   uint8_t *data = NULL;
   size_t len = 0;
   job_t *jobs = NULL;
@@ -787,7 +812,6 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     return 1;
   }
   free(data);
-  const char *dir_for_files = strcmp(dir, ".") == 0 ? NULL : dir;
   char *started = path_join(dir_for_files, STARTED_FILE);
   if (started) write_file(started, (const uint8_t *)"", 0);
   free(started);
@@ -1006,16 +1030,17 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
+  say("usage: jxlbatch [--retry] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
       "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
-      "  -C  folder holding JOBFILE and the jxl_in_* files\n");
+      "  -C  folder holding JOBFILE and the jxl_in_* files\n"
+      "  --retry  do nothing if a run already started this batch\n");
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL};
+  options_t opt = {83.0f, 7, NULL, 0};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
@@ -1044,6 +1069,8 @@ int main(int argc, char **argv) {
       } else {
         opt.dir = v;
       }
+    } else if (!strcmp(a, "--retry")) {
+      opt.retry = 1;
     } else if (!strcmp(a, "--selftest")) {
       mode = 1;
     } else if (!strcmp(a, "--memtest")) {
