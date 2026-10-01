@@ -53,3 +53,26 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ---------------------------------------------------------------------------
+# This project
+
+# macOS
+.DS_Store
+
+# Downloaded toolchains and library sources, shared by every tool's
+# scripts/build-wasm.sh
+/.deps/
+
+# Build outputs. The .shortcut and .wasm files in dist/ are published on
+# GitHub Releases, not committed.
+build/
+dist/
+
+# Python and formatter caches
+__pycache__/
+.ruff_cache/
+
+# Test photos and videos: personal, and may contain GPS locations
+/tests/samples/
+testdata/
