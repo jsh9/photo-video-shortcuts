@@ -1,5 +1,6 @@
 #include "meta.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,15 +49,6 @@ static int blob_set(blob_t *b, const uint8_t *p, size_t n) {
   memcpy(b->data, p, n);
   b->size = n;
   return 0;
-}
-
-static const uint8_t *find_bytes(const uint8_t *hay, size_t hn, const char *needle) {
-  size_t nn = strlen(needle);
-  if (nn == 0 || hn < nn) return NULL;
-  for (size_t i = 0; i + nn <= hn; i++) {
-    if (hay[i] == (uint8_t)needle[0] && memcmp(hay + i, needle, nn) == 0) return hay + i;
-  }
-  return NULL;
 }
 
 file_format_t detect_format(const uint8_t *b, size_t n) {
@@ -473,50 +465,148 @@ static int join_jpeg_icc(const uint8_t *const *parts, const size_t *lens, int co
   return 0;
 }
 
-static int parse_jpeg(const uint8_t *b, size_t n, meta_t *m) {
+#define MAX_EXTENDED_XMP (16u * 1024u * 1024u)
+
+typedef struct {
+  char guid[33];
+  uint32_t total, offset;
+  const uint8_t *data;
+  size_t size;
+} xmp_fragment_t;
+
+static int metadata_error(char *err, size_t n, const char *message) {
+  if (n) snprintf(err, n, "%s", message);
+  return -1;
+}
+
+static int fragment_order(const void *a, const void *b) {
+  const uint32_t x = ((const xmp_fragment_t *)a)->offset;
+  const uint32_t y = ((const xmp_fragment_t *)b)->offset;
+  return x < y ? -1 : x > y;
+}
+
+static int assemble_xmp(meta_t *m, xmp_fragment_t *parts, size_t count,
+                        char *err, size_t err_len) {
+  // Without extended fragments there is nothing to merge: the standard packet
+  // is kept byte for byte, even if it isn't strict XML. But if it refers to
+  // extended XMP, the fragments may have been missed, and converting would
+  // lose them (and the original may then be deleted), so the photo fails.
+  if (!count) {
+    if (m->xmp.size && xmp_has_extended_reference(m->xmp.data, m->xmp.size))
+      return metadata_error(err, err_len, "extended XMP fragments are missing");
+    return 0;
+  }
+  char guid[33];
+  const int reference = xmp_extended_guid(m->xmp.data, m->xmp.size, guid, err, err_len);
+  if (reference < 0) return -1;
+  if (!reference) return metadata_error(err, err_len, "extended XMP has no HasExtendedXMP reference");
+  const uint32_t total = parts[0].total;
+  if (!total || total > MAX_EXTENDED_XMP)
+    return metadata_error(err, err_len, "extended XMP exceeds the 16 MiB limit or has zero length");
+  qsort(parts, count, sizeof *parts, fragment_order);
+  size_t covered = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const xmp_fragment_t *p = &parts[i];
+    if (strcmp(p->guid, guid))
+      return metadata_error(err, err_len, "extended XMP GUID does not match HasExtendedXMP");
+    if (p->total != total)
+      return metadata_error(err, err_len, "extended XMP fragments disagree on total length");
+    if (!p->size || p->offset > total || p->size > total - p->offset)
+      return metadata_error(err, err_len, "extended XMP fragment is truncated or outside its declared length");
+    if (p->offset < covered)
+      return metadata_error(err, err_len, "extended XMP fragments overlap");
+    if (p->offset > covered)
+      return metadata_error(err, err_len, "extended XMP fragments are missing");
+    covered += p->size;
+  }
+  if (covered != total)
+    return metadata_error(err, err_len, "extended XMP fragments are missing or truncated");
+  uint8_t *extended = (uint8_t *)malloc(total);
+  if (!extended) return -1;
+  for (size_t i = 0; i < count; ++i)
+    memcpy(extended + parts[i].offset, parts[i].data, parts[i].size);
+  uint8_t *merged = NULL;
+  size_t merged_len = 0;
+  const int rc = xmp_merge_extended(m->xmp.data, m->xmp.size, extended, total,
+                                    &merged, &merged_len, err, err_len);
+  free(extended);
+  if (rc) return rc;
+  free(m->xmp.data);
+  m->xmp.data = merged;
+  m->xmp.size = merged_len;
+  return 0;
+}
+
+static int parse_jpeg(const uint8_t *b, size_t n, meta_t *m, char *err, size_t err_len) {
   static const char kXmpSig[] = "http://ns.adobe.com/xap/1.0/";  // + NUL
-  const size_t xmp_sig_len = sizeof kXmpSig;                     // incl. NUL
-  static const char kIccSig[] = "ICC_PROFILE";                   // + NUL
+  static const char kExtSig[] = "http://ns.adobe.com/xmp/extension/";
+  static const char kIccSig[] = "ICC_PROFILE";
   const uint8_t *icc_parts[256] = {0};
   size_t icc_lens[256] = {0};
-  int icc_count = 0;
-  size_t pos = 2;
-  while (pos + 4 <= n) {
-    if (b[pos] != 0xFF) {
-      pos++;
-      continue;
-    }
-    uint8_t marker = b[pos + 1];
-    if (marker == 0xFF) {
-      pos++;
-      continue;
-    }
+  int icc_count = 0, rc = -1;
+  xmp_fragment_t *parts = NULL;
+  size_t count = 0, capacity = 0, pos = 2;
+  while (pos + 2 <= n) {
+    if (b[pos] != 0xFF || b[pos + 1] == 0xFF) { pos++; continue; }
+    const uint8_t marker = b[pos + 1];
     pos += 2;
     if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
-    if (marker == 0xD9 || marker == 0xDA) break;  // EOI / start of scan
-    if (pos + 2 > n) break;
-    size_t seg_len = rd16be(b + pos);
-    if (seg_len < 2 || seg_len > n - pos) break;
+    if (marker == 0xD9 || marker == 0xDA) break;
+    // A damaged segment could hide metadata after it; fail rather than lose it.
+    if (pos + 2 > n || rd16be(b + pos) < 2 || rd16be(b + pos) > n - pos) {
+      metadata_error(err, err_len, "truncated JPEG metadata segment");
+      goto done;
+    }
+    const size_t seg_len = rd16be(b + pos), dn = seg_len - 2;
     const uint8_t *d = b + pos + 2;
-    size_t dn = seg_len - 2;
     if (marker == 0xE1) {
-      if (!m->exif.size && dn > 6 && memcmp(d, "Exif\0\0", 6) == 0 && is_tiff(d + 6, dn - 6)) {
-        if (blob_set(&m->exif, d + 6, dn - 6) != 0) return -1;
-      } else if (!m->xmp.size && dn > xmp_sig_len && memcmp(d, kXmpSig, xmp_sig_len) == 0) {
-        if (blob_set(&m->xmp, d + xmp_sig_len, dn - xmp_sig_len) != 0) return -1;
+      if (!m->exif.size && dn > 6 && !memcmp(d, "Exif\0\0", 6) && is_tiff(d + 6, dn - 6)) {
+        if (blob_set(&m->exif, d + 6, dn - 6)) goto done;
+      } else if (dn >= sizeof kXmpSig && !memcmp(d, kXmpSig, sizeof kXmpSig)) {
+        // The first nonempty packet is the photo's XMP; empty or repeated
+        // packets are ignored, as other readers do.
+        if (!m->xmp.size && dn > sizeof kXmpSig &&
+            blob_set(&m->xmp, d + sizeof kXmpSig, dn - sizeof kXmpSig))
+          goto done;
+      } else if (dn >= sizeof kExtSig && !memcmp(d, kExtSig, sizeof kExtSig)) {
+        if (dn < sizeof kExtSig + 40) {
+          metadata_error(err, err_len, "truncated extended XMP fragment header");
+          goto done;
+        }
+        if (count == capacity) {
+          size_t next = capacity ? capacity * 2 : 8;
+          xmp_fragment_t *grown = (xmp_fragment_t *)realloc(parts, next * sizeof *parts);
+          if (!grown) goto done;
+          parts = grown;
+          capacity = next;
+        }
+        xmp_fragment_t *p = &parts[count++];
+        const uint8_t *header = d + sizeof kExtSig;
+        for (size_t i = 0; i < 32; ++i) {
+          char c = header[i];
+          p->guid[i] = c >= 'a' && c <= 'f' ? c - 'a' + 'A' : c;
+        }
+        p->guid[32] = 0;
+        p->total = rd32be(header + 32);
+        p->offset = rd32be(header + 36);
+        p->data = header + 40;
+        p->size = dn - sizeof kExtSig - 40;
       }
-    } else if (marker == 0xE2 && dn > sizeof kIccSig + 2 && memcmp(d, kIccSig, sizeof kIccSig) == 0) {
-      const int seq = d[sizeof kIccSig], count = d[sizeof kIccSig + 1];
-      if (seq >= 1 && seq <= count && (icc_count == 0 || icc_count == count)) {
-        icc_count = count;
+    } else if (marker == 0xE2 && dn > sizeof kIccSig + 2 && !memcmp(d, kIccSig, sizeof kIccSig)) {
+      const int seq = d[sizeof kIccSig], number = d[sizeof kIccSig + 1];
+      if (seq >= 1 && seq <= number && (icc_count == 0 || icc_count == number)) {
+        icc_count = number;
         icc_parts[seq] = d + sizeof kIccSig + 2;
         icc_lens[seq] = dn - sizeof kIccSig - 2;
       }
     }
     pos += seg_len;
   }
-  if (icc_count) return join_jpeg_icc(icc_parts, icc_lens, icc_count, m);
-  return 0;
+  if (assemble_xmp(m, parts, count, err, err_len)) goto done;
+  rc = icc_count ? join_jpeg_icc(icc_parts, icc_lens, icc_count, m) : 0;
+done:
+  free(parts);
+  return rc;
 }
 
 // ---------------------------------------------------------------------------
@@ -602,15 +692,19 @@ static int parse_png(const uint8_t *b, size_t n, meta_t *m) {
   return 0;
 }
 
-int meta_extract(const uint8_t *buf, size_t len, meta_t *m) {
+int meta_extract(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_len) {
   memset(m, 0, sizeof *m);
+  if (err_len) err[0] = 0;
   m->format = detect_format(buf, len);
+  int rc = 0;
   switch (m->format) {
-    case FMT_HEIF: return parse_heif(buf, len, m);
-    case FMT_JPEG: return parse_jpeg(buf, len, m);
-    case FMT_PNG: return parse_png(buf, len, m);
-    default: return 0;
+    case FMT_HEIF: rc = parse_heif(buf, len, m); break;
+    case FMT_JPEG: rc = parse_jpeg(buf, len, m, err, err_len); break;
+    case FMT_PNG: rc = parse_png(buf, len, m); break;
+    default: break;
   }
+  if (rc && err_len && !err[0]) metadata_error(err, err_len, "out of memory reading metadata");
+  return rc;
 }
 
 void meta_free(meta_t *m) {
@@ -756,46 +850,4 @@ int exif_patch(uint8_t *p, size_t n, uint32_t w, uint32_t h) {
     changed += patch_uint(&t, ifd_find(&t, exif, 0xA003), h);
   }
   return changed;
-}
-
-// ---------------------------------------------------------------------------
-// XMP tiff:Orientation, either as attribute (tiff:Orientation="6") or
-// element (<tiff:Orientation>6</tiff:Orientation>).
-
-static uint8_t *xmp_orientation_digit(const uint8_t *x, size_t n) {
-  static const char kKey[] = "tiff:Orientation";
-  const uint8_t *p = x;
-  size_t left = n;
-  while (left > 0) {
-    const uint8_t *hit = find_bytes(p, left, kKey);
-    if (!hit) return NULL;
-    const uint8_t *q = hit + sizeof kKey - 1;
-    const uint8_t *end = x + n;
-    while (q < end && (*q == ' ' || *q == '\t')) q++;
-    if (q < end && *q == '=') {
-      q++;
-      while (q < end && (*q == ' ' || *q == '\t')) q++;
-      if (q < end && (*q == '"' || *q == '\'')) q++;
-    } else if (q < end && *q == '>') {
-      q++;
-    } else {
-      q = NULL;
-    }
-    if (q && q < end && *q >= '1' && *q <= '8') return (uint8_t *)q;
-    left = (size_t)(end - (hit + 1));
-    p = hit + 1;
-  }
-  return NULL;
-}
-
-int xmp_orientation(const uint8_t *x, size_t n) {
-  uint8_t *d = xmp_orientation_digit(x, n);
-  return d ? *d - '0' : 0;
-}
-
-int xmp_reset_orientation(uint8_t *x, size_t n) {
-  uint8_t *d = xmp_orientation_digit(x, n);
-  if (!d || *d == '1') return 0;
-  *d = '1';
-  return 1;
 }

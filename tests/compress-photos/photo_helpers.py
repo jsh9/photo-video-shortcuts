@@ -259,6 +259,30 @@ def xmp_tags(path):
     return tags
 
 
+def xmp_properties(path):
+    """Primary-photo XMP, namespace-qualified with structured values."""
+    args = ['exiftool', '-j', '-G1', '-struct', '-n', '-XMP:all']
+    if path.suffix.lower() in {'.heic', '.heif'}:
+        # HEIF can contain distinct XMP packets for depth/segmentation/gain-map
+        # images. Compare the primary photo's packet, including its toolkit
+        # attribute, without combining metadata from those auxiliary images.
+        packet = run(['exiftool', '-b', '-Main:XMP', path], check=True).stdout
+        if not packet:
+            return {}
+
+        out = run([*args, '-'], input=packet, check=True).stdout
+    else:
+        out = run([*args, path], check=True).stdout
+
+    tags = json.loads(out)[0]
+    tags.pop('SourceFile', None)
+    tags.pop('XMP-xmpNote:HasExtendedXMP', None)
+    if 'XMP-tiff:Orientation' in tags:
+        tags['XMP-tiff:Orientation'] = 1
+
+    return tags
+
+
 def boxes(path):
     """exiftool's dump of the JPEG XL container boxes."""
     return run(['exiftool', '-v2', path]).stdout

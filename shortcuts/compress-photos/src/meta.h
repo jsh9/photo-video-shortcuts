@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "xmp.h"
 
 typedef struct {
   uint8_t *data;
@@ -27,8 +28,8 @@ file_format_t detect_format(const uint8_t *buf, size_t len);
 const char *format_name(file_format_t format);
 
 // Fills `m` with whatever metadata the file contains. Never fails on missing
-// metadata; returns -1 only on allocation failure.
-int meta_extract(const uint8_t *buf, size_t len, meta_t *m);
+// metadata; returns -1 with a descriptive error if it cannot be preserved.
+int meta_extract(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_len);
 void meta_free(meta_t *m);
 
 // EXIF helpers; `tiff` points at the TIFF header.
@@ -39,8 +40,5 @@ int exif_string(const uint8_t *tiff, size_t len, uint16_t tag, char *buf, size_t
 // Sets Orientation to 1 and PixelXDimension/PixelYDimension to w/h, for the
 // tags that exist. Returns the number of tags changed.
 int exif_patch(uint8_t *tiff, size_t len, uint32_t w, uint32_t h);
-
-int xmp_orientation(const uint8_t *xmp, size_t len);  // 1..8, 0 if absent
-int xmp_reset_orientation(uint8_t *xmp, size_t len);  // 1 if changed
 
 #endif

@@ -44,6 +44,8 @@ jobs:
       # Builds every shortcut's release files and checks them (versions, ZIP
       # contents) as a release would, without signing or publishing.
       - name: Release dry run
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python scripts/release.py compress-photos --dry-run --no-sign
       - name: Install tox
         run: python -m pip install 'tox>=4,<5'
