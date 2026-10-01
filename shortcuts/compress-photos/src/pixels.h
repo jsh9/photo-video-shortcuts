@@ -26,10 +26,19 @@ typedef struct {
   uint8_t cicp[4];  // primaries, transfer, matrix (0 = RGB), full-range flag
 } color_t;
 
+// What heif_decode did with an HDR gain map.
+typedef struct {
+  double headroom;  // > 0: the image is HDR, peaking at this many times SDR white
+  char note[128];  // why the photo's gain map wasn't used, if it wasn't
+} hdr_info_t;
+
 // JPEG or PNG. Pixels are as stored (EXIF orientation not applied).
 int stb_decode(const uint8_t *buf, size_t len, image_t *img, char *err, size_t err_len);
-// HEIF/HEIC primary image, upright (irot/imir applied), with its color.
-int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, char *err, size_t err_len);
+// HEIF/HEIC primary image, upright (irot/imir applied), with its color. With
+// `hdr`, a photo with an ISO 21496-1 gain map becomes HDR: 16-bit PQ with SDR
+// white at 203 nits (see gainmap.h).
+int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
+                size_t err_len);
 void heif_decoder_version(char *buf, size_t len);
 
 void image_free(image_t *img);

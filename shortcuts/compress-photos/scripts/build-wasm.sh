@@ -182,7 +182,7 @@ build_variant() {
   cc="$WASI_SDK/bin/clang --target=wasm32-wasip1 --sysroot=$WASI_SDK/share/wasi-sysroot"
   objdir="$bdir/jxlbatch-obj"
   mkdir -p "$objdir"
-  for src in jxlbatch meta pixels heif; do
+  for src in jxlbatch meta pixels heif gainmap; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
   done

@@ -313,6 +313,8 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   const uint32_t container_bits = (uint32_t)img->bytes_per_sample * 8;
   const uint32_t bits = (uint32_t)img->bits;  // e.g. 10 for 10-bit HEIF in 16-bit samples
   const color_t *color = em->color;
+  // HDR photos are PQ (see gainmap.h), coded by CICP rather than a profile.
+  const int pq = color && !(use_icc && color->icc.size) && color->cicp_present && color->cicp[1] == 16;
 
 #define FAIL(...)                              \
   do {                                         \
@@ -337,6 +339,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   info.alpha_exponent_bits = 0;
   info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
   info.orientation = JXL_ORIENT_IDENTITY;  // pixels are already upright
+  if (pq) info.intensity_target = 10000;  // PQ's peak, in nits (also libjxl's default for PQ)
   if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
     FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
   }
@@ -355,7 +358,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
     JxlColorEncoding ce;
     if (color_from_cicp(color->cicp, &ce) && JxlEncoderSetColorEncoding(enc, &ce) == JXL_ENC_SUCCESS) {
       color_set = 1;
-      *color_desc = ce.primaries == JXL_PRIMARIES_P3 ? "Display P3 (CICP)" : "CICP";
+      *color_desc = ce.primaries == JXL_PRIMARIES_P3 ? (pq ? "Display P3 PQ (CICP)" : "Display P3 (CICP)") : "CICP";
     }
   }
   if (!color_set) {
@@ -557,6 +560,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   memset(&img, 0, sizeof img);
   color_t color;
   memset(&color, 0, sizeof color);
+  hdr_info_t hdr;
+  memset(&hdr, 0, sizeof hdr);
   char err[256] = "";
   int ok = 0;
   const double t0 = now_seconds();
@@ -598,12 +603,13 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   uint32_t orig_w = 0, orig_h = 0;
   const int have_dims = src_exif->size && exif_pixel_dims(src_exif->data, src_exif->size, &orig_w, &orig_h);
 
-  // Decode. HEIF comes out upright; JPEG and PNG pixels are as stored, with
-  // their orientation in EXIF (or XMP).
+  // Decode. HEIF comes out upright, and HDR if it has a gain map; JPEG and
+  // PNG pixels are as stored, with their orientation in EXIF (or XMP).
   int orient = 1;
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
-    if (heif_decode(orig, orig_len, &img, &color, err, sizeof err) != 0) goto done;
+    if (heif_decode(orig, orig_len, &img, &color, &hdr, err, sizeof err) != 0) goto done;
+    if (hdr.note[0]) say_wrap("  ", "! HDR gain map not used (%s); saved as SDR", hdr.note);
   } else {
     const meta_t *pm = decode_orig ? &mo : &mp;
     if (stb_decode(decode_orig ? orig : png, decode_orig ? orig_len : png_len, &img, err, sizeof err) != 0) {
@@ -695,12 +701,17 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   ok = 1;
 
   {
-    // e.g. "HEIF 3024x4032" and "2.4 MB -> 1.2 MB (50%), 4.1 s"
-    char in_s[32], out_s[32];
+    // e.g. "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s"
+    char in_s[32], out_s[32], depth[32] = "";
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
+    if (hdr.headroom > 0) {
+      snprintf(depth, sizeof depth, ", HDR %.1f\u00d7", hdr.headroom);
+    } else if (img.bits > 8) {
+      snprintf(depth, sizeof depth, ", 10-bit");
+    }
     say_wrap("  ", "%s %ux%u%s%s%s", format_name(orig_format == FMT_UNKNOWN ? pixel_format : orig_format), img.w,
-             img.h, img.bits > 8 ? ", 10-bit" : "", img.channels == 2 || img.channels == 4 ? ", alpha" : "",
+             img.h, depth, img.channels == 2 || img.channels == 4 ? ", alpha" : "",
              exif_len || xmp_len ? "" : ", no metadata");
     say_wrap("  ", "%s -> %s (%.0f%%), %.1f s", in_s, out_s, orig_size > 0 ? 100.0 * jxl_len / orig_size : 0.0,
              now_seconds() - t0);
@@ -927,9 +938,10 @@ static int selftest_large_io(const char *dir) {
 static int selftest_heif(void) {
   image_t img;
   color_t color;
+  hdr_info_t hdr;
   char err[256] = "";
   say("\nHEIF decoding:\n");
-  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, &img, &color, err, sizeof err) != 0) {
+  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, &img, &color, &hdr, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     return -1;
   }
