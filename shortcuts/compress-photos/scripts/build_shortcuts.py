@@ -34,6 +34,8 @@ HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / 'sample' / 'JXL Sample.plist'
 DIST = HERE.parent / 'dist'
 OUT = HERE.parent / 'build' / 'shortcuts'
+# Shared by the shortcuts and jxlbatch; shown in each shortcut's first note.
+VERSION = (HERE.parent / 'VERSION').read_text(encoding='utf-8').strip()
 
 NAME_A = 'Compress Photos'
 NAME_B = (
@@ -630,6 +632,7 @@ CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_done.txt jxl_st
 def build_compress(sample):
     b = Builder(sample)
     b.comment(
+        f'{NAME_A} {VERSION}. '
         'Converts photos to JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
@@ -706,6 +709,7 @@ def build_compress(sample):
 def build_import(sample):
     b = Builder(sample)
     b.comment(
+        f'{NAME_B} ({NAME_A} {VERSION}). '
         'Started by a-Shell when jxlbatch finishes. Saves the converted JPEG XL '
         'files to Photos. Keep this name: a-Shell starts it by name.'
     )

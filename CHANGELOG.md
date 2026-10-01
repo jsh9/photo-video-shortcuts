@@ -18,6 +18,7 @@ encoder. Every release includes the current files of all shortcuts.
   - `jxlbatch`, the WebAssembly encoder (libjxl 0.11.2, libheif 1.23.5), with a
     `--selftest`
 - Maintenance
-  - Repository layout, documentation, pre-commit hooks and GitHub Actions
+  - Repository layout, documentation, pre-commit hooks, GitHub Actions and a
+    release script
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/1

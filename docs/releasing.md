@@ -1,20 +1,54 @@
 # Releasing
 
-Placeholder. The release process, to be filled in before the first release:
+Releases are published by `scripts/release.py` from a Mac: signing the
+shortcuts needs macOS and an Apple ID, so it can't run in GitHub Actions.
 
-1. Bump the changed shortcut's version (its shortcut files and its encoder
-   share one version) and update [CHANGELOG.md](../CHANGELOG.md).
-2. Build every shortcut's release files on a Mac: each `scripts/build-wasm.sh`
-   and `scripts/build_shortcuts.py`. Signing the shortcuts needs macOS and an
-   Apple ID, so releases are built locally.
-3. Tag the release after the shortcut that changed, for example
-   `compress-photos-v1.2.0`.
-4. Attach the current files of **all** shortcuts, so the "latest" download
-   links keep working for every shortcut. The notes say which files changed.
-   - Each shortcut's `.shortcut` files go into one ZIP named after the shortcut
-     and its version, for example `compress-photos-shortcuts-v0.1.0.zip`.
-     Inside, the files keep their names with spaces (GitHub would replace the
-     spaces in a release file's own name with dots).
-   - Encoders are attached as they are, with fixed names (for example
-     `jxlbatch.wasm`), so the "latest" download link in the README always
-     works.
+<!--TOC-->
+
+______________________________________________________________________
+
+**Table of Contents**
+
+- [1. Versions](#1-versions)
+- [2. Steps](#2-steps)
+
+______________________________________________________________________
+
+<!--TOC-->
+
+## 1. Versions
+
+Each shortcut has its own version in `shortcuts/<name>/VERSION`, shared by its
+`.shortcut` files (shown in the note at the top of each shortcut) and its
+encoder (for example `jxlbatch --version`). The build scripts read it from
+there.
+
+## 2. Steps
+
+1. Bump the shortcut's `VERSION` and add its entry to
+   [CHANGELOG.md](../CHANGELOG.md), with the release date:
+   `## [Compress Photos 0.2.0] - 2026-10-15`.
+2. Merge to `main`.
+3. On an up-to-date `main`, run:
+   ```bash
+   python3 scripts/release.py compress-photos
+   ```
+
+The script:
+
+- checks that `main` is clean and the same as on GitHub, that the tag (for
+  example `compress-photos-v0.2.0`) doesn't exist yet, and that the changelog
+  has a dated entry for the version;
+- builds every shortcut, not only the one being released, because every release
+  carries the current files of all shortcuts, so the README's "latest" download
+  links keep working;
+- checks that each file was rebuilt in this run and that each encoder reports
+  its shortcut's version;
+- zips each shortcut's `.shortcut` files into `<name>-shortcuts-v<version>.zip`
+  (inside, the files keep their names with spaces, which GitHub would turn into
+  dots in a release file's own name);
+- shows the files and release notes (the changelog entry, plus which shortcuts
+  changed) and asks before publishing with `gh release create`.
+
+To build and check without publishing, run it with `--dry-run`. CI runs
+`--dry-run --no-sign` on every push.

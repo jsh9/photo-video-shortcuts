@@ -26,7 +26,10 @@
 #include "pixels.h"
 #include "selftest_heic.h"
 
-#define JXLBATCH_VERSION "1.1.2"
+// The build scripts set this from ../VERSION, shared with the shortcuts.
+#ifndef JXLBATCH_VERSION
+#define JXLBATCH_VERSION "dev"
+#endif
 #define DONE_FILE "jxl_done.txt"
 // Created as soon as a batch starts. When a shortcut cold-starts a-Shell, its
 // WebAssembly engine may not be loaded yet and the first command fails

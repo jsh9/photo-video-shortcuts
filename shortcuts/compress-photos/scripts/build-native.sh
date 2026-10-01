@@ -5,8 +5,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p build
+VERSION=$(cat VERSION)  # shared by the encoder and the shortcuts
 # shellcheck disable=SC2046
 cc -O2 -g -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS \
+  -DJXLBATCH_VERSION="\"$VERSION\"" \
   src/jxlbatch.c src/meta.c src/pixels.c src/heif.c \
   $(pkg-config --cflags --libs libjxl libjxl_threads libheif) \
   -o build/jxlbatch

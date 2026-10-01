@@ -60,6 +60,7 @@ those qualities, with the same visual quality (SSIMULACRA2).
 
 | Path                         | What it is                                                                                                                                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                     |
 | `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `selftest_heic.h` (tiny HEIC for `--selftest`) |
 | `third_party/`               | `stb_image.h` (JPEG and PNG decoding)                                                                                                                                                                              |
 | `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                            |
@@ -108,7 +109,8 @@ python3 scripts/build_shortcuts.py --guess
   `scripts/sample/JXL Sample.plist`, and later runs copy the exact format from
   it.
 - The quality presets are `QUALITY_PRESETS` near the top of the script.
-- Releases ship the two `.shortcut` files in one ZIP,
+- Releases are built and published by `scripts/release.py` at the repository
+  root. They ship the two `.shortcut` files in one ZIP,
   `compress-photos-shortcuts-v<version>.zip`; see
   [docs/releasing.md](../../docs/releasing.md).
 

@@ -12,6 +12,7 @@ set -eu
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 REPO=$(cd ../.. && pwd)
+VERSION=$(cat VERSION)  # shared by the encoder and the shortcuts
 
 WASI_SDK_VERSION=34
 LIBJXL_VERSION=v0.11.2
@@ -183,7 +184,7 @@ build_variant() {
   mkdir -p "$objdir"
   for src in jxlbatch meta pixels heif; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
-      -I"$prefix/include" -c "src/$src.c" -o "$objdir/$src.o"
+      -I"$prefix/include" -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
   done
   # 8 MiB stack (the 64 KiB default can silently overflow into the heap) and
   # stack-first layout, so an overflow traps instead of corrupting memory.
