@@ -3,8 +3,8 @@ Optional: your own photos in tests/samples/compress-photos/ (not committed;
 real iPhone photos have things test photos can't, such as HEIC tiles, Apple
 maker notes and HDR gain maps). Skipped when there are none. A photo with an
 ISO 21496-1 gain map (iPhone, iOS 18 or later), such as hdr/chinatown.heic,
-must become HDR and match Apple's HDR rendering; other photos must match
-Apple's SDR rendering.
+must become HDR and match Apple's HDR rendering, keeping Apple's HDR profile
+(tone curve) if it has one; other photos must match Apple's SDR rendering.
 """
 
 import numpy as np
@@ -61,6 +61,11 @@ def test_sample(sample_batch, imageio, apple_hdr, sample, tmp_path):
     if headroom:
         # HDR (PQ): compare with Apple's HDR rendering
         assert f', HDR {headroom:.1f}×' in ph.photo_output(output, sample.stem)
+        # with Apple's HDR profile (tone curve), if the photo has one
+        profile = ph.hdr_profile(sample)
+        if profile:
+            assert ph.jxl_profile(jxl, tmp_path) == profile
+
         apple = apple_hdr(sample)
         ours = ph.jxl_hdr_pixels(jxl, tmp_path / 'hdr.ppm')
         assert ours.shape == apple.shape

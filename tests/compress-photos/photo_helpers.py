@@ -530,32 +530,279 @@ def read_ppm(path):
     return pixels.reshape(height, width, 3), maximum
 
 
-def _rgb_to_xyz(primaries, white=(0.3127, 0.3290)):
-    """RGB-to-XYZ matrix for primaries ((xr, yr), (xg, yg), (xb, yb))."""
-    xyz = np.array([[x / y, 1, (1 - x - y) / y] for x, y in primaries]).T
-    w = np.array([white[0] / white[1], 1, (1 - sum(white)) / white[1]])
-    return xyz * np.linalg.solve(xyz, w)
-
-
-SRGB_TO_P3 = np.linalg.solve(
-    _rgb_to_xyz(((0.680, 0.320), (0.265, 0.690), (0.150, 0.060))),
-    _rgb_to_xyz(((0.640, 0.330), (0.300, 0.600), (0.150, 0.060))),
-)
-
-
 def jxl_hdr_pixels(jxl, ppm):
     """
     jxlbatch's HDR result, decoded by djxl: linear Display P3 (as
     apple_hdr_pixels), 1.0 = SDR white.
     """
-    run(['djxl', jxl, ppm], check=True)
+    # Asked for Display P3 PQ explicitly: a lossy JPEG XL with an ICC profile
+    # (Apple's HDR profile) otherwise decodes to linear sRGB, clipping HDR.
+    run(['djxl', jxl, ppm, '--color_space=RGB_D65_DCI_Rel_PeQ'], check=True)
     pixels, maximum = read_ppm(ppm)
-    linear = pq_to_linear(pixels / maximum) * 10000 / SDR_WHITE_NITS
-    info = run(['jxlinfo', jxl], check=True).stdout.lower()
-    if 'srgb primaries' in info or 'primaries: srgb' in info:
-        linear = linear @ SRGB_TO_P3.T
+    return pq_to_linear(pixels / maximum) * 10000 / SDR_WHITE_NITS
 
-    return linear
+
+def jxl_profile(jxl, folder):
+    """The ICC profile stored in a JPEG XL (None if it has a color label)."""
+    icc = Path(folder) / 'stored.icc'
+    icc.unlink(missing_ok=True)
+    run(['djxl', jxl, Path(folder) / 'stored.ppm', f'--orig_icc_out={icc}'])
+    info = run(['jxlinfo', jxl], check=True).stdout
+    return icc.read_bytes() if 'ICC profile' in info else None
+
+
+# ---------------------------------------------------------------------------
+# Apple's HDR color profile in a HEIC: Display P3 + PQ, with the tone curve
+# Apple derived from the gain map ('hdgm' tag), on the 'tmap' item or the
+# gain map item.
+
+
+def _box(kind, payload):
+    return (
+        struct.pack('>I4s', 8 + len(payload), kind.encode('latin-1')) + payload
+    )
+
+
+def _meta(data):
+    """The top-level 'meta' box: (box start, end, [(type, start, end)])."""
+    start = 0
+    for kind, payload, end in _boxes(data):
+        if kind == 'meta':
+            return start, end, list(_boxes(data, payload + 4, end))
+
+        start = end
+
+    raise AssertionError('no meta box')
+
+
+def _gain_map_items(data, children):
+    """(tmap item ID, gain map item ID) of a HEIF: the tmap's 'dimg' inputs."""
+    boxes = {k: (s, e) for k, s, e in children}
+    start, end = boxes['iinf']
+    start += 4 + (2 if data[start] == 0 else 4)
+    tmap = None
+    for kind, s, _ in _boxes(data, start, end):
+        if kind == 'infe' and data[s] >= 2:
+            id_size = 2 if data[s] == 2 else 4
+            if data[s + 4 + id_size + 2 : s + 4 + id_size + 6] == b'tmap':
+                tmap = _uint(data, s + 4, id_size)
+
+    start, end = boxes['iref']
+    id_size = 2 if data[start] == 0 else 4
+    for kind, s, _ in _boxes(data, start + 4, end):
+        if kind == 'dimg' and _uint(data, s, id_size) == tmap:
+            first = s + id_size + 2  # after the count: the photo, the gain map
+            return tmap, _uint(data, first + id_size, id_size)
+
+    raise AssertionError('no tmap item with a gain map')
+
+
+def _ipma_entries(payload):
+    """'ipma' payload: (version, flags, [[item, [(essential, index)]]])."""
+    version, flags = payload[0], _uint(payload, 1, 3)
+    id_size, index_size = (2 if version == 0 else 4), (2 if flags & 1 else 1)
+    flag = 0x8000 if flags & 1 else 0x80
+    entries, pos = [], 8
+    for _ in range(_uint(payload, 4, 4)):
+        item, count = _uint(payload, pos, id_size), payload[pos + id_size]
+        pos += id_size + 1
+        values = [
+            _uint(payload, pos + i * index_size, index_size)
+            for i in range(count)
+        ]
+        entries.append([
+            item,
+            [(bool(v & flag), v & (flag - 1)) for v in values],
+        ])
+        pos += count * index_size
+
+    return version, flags, entries
+
+
+def _item_profile(data, children, item):
+    """The ICC profile in ``item``'s 'colr' property, or None."""
+    boxes = {k: (s, e) for k, s, e in children}
+    props, indices = [], []
+    for kind, s, e in _boxes(data, *boxes['iprp']):
+        if kind == 'ipco':
+            props = list(_boxes(data, s, e))
+        elif kind == 'ipma':
+            for entry, pairs in _ipma_entries(data[s:e])[2]:
+                if entry == item:
+                    indices += [index for _, index in pairs]
+
+    for index in indices:
+        kind, s, e = props[index - 1] if index else ('', 0, 0)
+        if kind == 'colr' and data[s : s + 4] in (b'prof', b'rICC'):
+            return data[s + 4 : e]
+
+    return None
+
+
+def icc_tags(icc):
+    """An ICC profile's tags: {signature: data}."""
+    count = _uint(icc, 128, 4)
+    tags = {}
+    for i in range(count):
+        signature, offset, size = struct.unpack(
+            '>4sII', icc[132 + 12 * i : 144 + 12 * i]
+        )
+        tags[signature.decode('latin-1')] = icc[offset : offset + size]
+
+    return tags
+
+
+def add_icc_tag(icc, signature, data):
+    """A copy of an ICC profile with one more tag."""
+    tags = {**icc_tags(icc), signature: data}
+    table_end = 132 + 12 * len(tags)
+    table, body = struct.pack('>I', len(tags)), b''
+    for name, value in tags.items():
+        body += b'\0' * (-(table_end + len(body)) % 4)
+        table += struct.pack(
+            '>4sII', name.encode('latin-1'), table_end + len(body), len(value)
+        )
+        body += value
+
+    out = bytearray(icc[:128] + table + body)
+    out[0:4] = struct.pack('>I', len(out))
+    out[84:100] = bytes(16)  # profile ID: none
+    return bytes(out)
+
+
+def hdr_profile(heic):
+    """
+    Apple's HDR profile in a HEIC: the ICC profile with an 'hdgm' tag on its
+    'tmap' item or gain map item (as jxlbatch looks for it), or None.
+    """
+    data = Path(heic).read_bytes()
+    _, _, children = _meta(data)
+    for item in _gain_map_items(data, children):
+        icc = _item_profile(data, children, item)
+        if icc and 'hdgm' in icc_tags(icc):
+            return icc
+
+    return None
+
+
+def with_item_profile(heic, item, icc, out):
+    """
+    Writes a copy of a HEIC with ICC profile ``icc`` added to its 'tmap' item
+    (item='tmap') or its gain map (item='gain map'), as a 'colr' property.
+    """
+    data = Path(heic).read_bytes()
+    meta_start, meta_end, children = _meta(data)
+    tmap, gain_map = _gain_map_items(data, children)
+    target = tmap if item == 'tmap' else gain_map
+    boxes = {k: (s, e) for k, s, e in children}
+    count = sum(
+        len(list(_boxes(data, s, e)))
+        for k, s, e in _boxes(data, *boxes['iprp'])
+        if k == 'ipco'
+    )
+    iprp = b''
+    for kind, s, e in _boxes(data, *boxes['iprp']):
+        payload = data[s:e]
+        if kind == 'ipco':
+            payload += _box('colr', b'prof' + icc)
+        elif kind == 'ipma':
+            payload = _ipma_with(payload, target, count + 1)
+            target = None  # added once
+
+        iprp += _box(kind, payload)
+
+    iprp = _box('iprp', iprp)
+    old_iprp = next(e - s for k, s, e in children if k == 'iprp')
+    delta = len(iprp) - 8 - old_iprp
+    meta = data[meta_start + 8 : meta_start + 12]  # 'meta' version and flags
+    for kind, s, e in children:
+        if kind == 'iprp':
+            meta += iprp
+        elif kind == 'iloc':
+            meta += _box(kind, _iloc_moved(data[s:e], meta_end, delta))
+        else:
+            meta += _box(kind, data[s:e])
+
+    meta = _box('meta', meta)
+    assert len(meta) - (meta_end - meta_start) == delta, 'unexpected box sizes'
+    Path(out).write_bytes(data[:meta_start] + meta + data[meta_end:])
+
+
+def _ipma_with(payload, item, index):
+    """'ipma' payload with property ``index`` associated to ``item``."""
+    version, flags, entries = _ipma_entries(payload)
+    if item is not None:
+        entry = next((e for e in entries if e[0] == item), None)
+        if entry is None:
+            entry = [item, []]
+            entries = sorted(entries + [entry])
+
+        entry[1].append((False, index))
+
+    if index > 0x7F:
+        flags |= 1  # 16-bit indices
+
+    id_size, wide = (2 if version == 0 else 4), flags & 1
+    out = (
+        bytes([version])
+        + flags.to_bytes(3, 'big')
+        + len(entries).to_bytes(4, 'big')
+    )
+    for entry_item, pairs in entries:
+        out += entry_item.to_bytes(id_size, 'big') + bytes([len(pairs)])
+        for essential, i in pairs:
+            value = (
+                (0x8000 if essential else 0) | i
+                if wide
+                else (0x80 if essential else 0) | i
+            )
+            out += value.to_bytes(2 if wide else 1, 'big')
+
+    return out
+
+
+def _iloc_moved(payload, after, delta):
+    """
+    'iloc' payload with file offsets at or after ``after`` moved by delta.
+    """
+    out = bytearray(payload)
+    version = payload[0]
+    offset_size, length_size = payload[4] >> 4, payload[4] & 15
+    base_size = payload[5] >> 4
+    index_size = payload[5] & 15 if version else 0
+    id_size = 4 if version == 2 else 2
+    pos = 6
+    count = _uint(payload, pos, id_size)
+    pos += id_size
+    for _ in range(count):
+        pos += id_size
+        method = 0
+        if version:
+            method = _uint(payload, pos, 2) & 15
+            pos += 2
+
+        pos += 2  # data_reference_index
+        base_pos, base = pos, _uint(payload, pos, base_size)
+        pos += base_size
+        extents = _uint(payload, pos, 2)
+        pos += 2
+        for k in range(extents):
+            pos += index_size
+            offset = _uint(payload, pos, offset_size)
+            if method == 0 and base + offset >= after:
+                if base_size and k == 0:
+                    base += delta
+                    out[base_pos : base_pos + base_size] = base.to_bytes(
+                        base_size, 'big'
+                    )
+                elif not base_size:
+                    out[pos : pos + offset_size] = (offset + delta).to_bytes(
+                        offset_size, 'big'
+                    )
+
+            pos += offset_size + length_size
+
+    return bytes(out)
 
 
 def apple_hdr_pixels(helper, path, out):
