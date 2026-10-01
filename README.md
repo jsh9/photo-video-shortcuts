@@ -7,10 +7,10 @@ On iPhone, the heavy lifting runs in
 because iOS has no JPEG XL encoder or quality-controlled video encoder of its
 own.
 
-| Shortcut                                     | What it does                                              | iPhone             | Mac     |
-| -------------------------------------------- | --------------------------------------------------------- | ------------------ | ------- |
-| [Compress Photos](shortcuts/compress-photos) | HEIF, JPEG and PNG photos → JPEG XL, saved back to Photos | Yes (with a-Shell) | Planned |
-| [Compress Videos](shortcuts/compress-videos) | Videos → smaller H.265 or AV1 copies                      | Coming soon        | Planned |
+| Shortcut                                               | What it does                                              | iPhone             | Mac     |
+| ------------------------------------------------------ | --------------------------------------------------------- | ------------------ | ------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | HEIF, JPEG and PNG photos → JPEG XL, saved back to Photos | Yes (with a-Shell) | Planned |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies                      | Coming soon        | Planned |
 
 <!--TOC-->
 
@@ -40,37 +40,46 @@ ______________________________________________________________________
 
 1. Install [a-Shell](https://apps.apple.com/app/a-shell/id1473805438) from the
    App Store. It's free.
-2. Open a-Shell and create the folder for the encoders:
+2. Open a-Shell and create the folder for the encoders. Type or paste this
+   line, then tap Return:
    ```
    mkdir -p ~/Documents/bin
    ```
 
 #### 1.1.2. Compress Photos
 
-1. **Install the encoder.** In a-Shell, run:
+1. **Install the encoder.** In a-Shell, paste this command and tap Return to
+   download the encoder:
 
    ```
    curl -L -o ~/Documents/bin/jxlbatch.wasm https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch.wasm
+   ```
+
+   When the download has finished and the prompt is back, paste this command
+   and tap Return to check that the encoder works:
+
+   ```
    jxlbatch --selftest
    ```
 
-   The self-test should end with "Self-test passed". Its encode test takes a
-   few seconds.
+   It should end with "Self-test passed". Its encode test takes a few seconds.
 
    If a-Shell reports a WebAssembly compile error, download
    `jxlbatch-scalar.wasm` instead, saved as `jxlbatch.wasm`. That build has no
    SIMD, so it's slower.
 
 2. **Add the shortcuts.** On the iPhone, open the
-   [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases),
-   download `Compress to JPEG XL.shortcut` and `JXL-Import.shortcut`, and open
-   each → Add Shortcut. **Keep the name JXL-Import exactly**: a-Shell starts it
-   by name.
+   [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases), and
+   from the latest release download `compress-photos-shortcuts-v<version>.zip`
+   (for example `compress-photos-shortcuts-v1.1.2.zip`). In the Files app, tap
+   the ZIP to unzip it, open the folder it creates, and tap each of the two
+   shortcuts, *Compress to JPEG XL* and *JXL-Import* → Add Shortcut. **Keep the
+   name JXL-Import exactly**: a-Shell starts it by name.
 
 3. **Grant permissions.** Run *Compress to JPEG XL* once from the Shortcuts app
    with one photo. Allow it to access a-Shell and Photos when asked.
 
-How to use it: [Compress Photos](shortcuts/compress-photos).
+How to use it: [Compress Photos](shortcuts/compress-photos/README.md).
 
 #### 1.1.3. Compress Videos
 
@@ -99,4 +108,4 @@ which files each release changed; download only those, the same way as above.
 ## 4. License
 
 GPL-3.0-or-later; see [LICENSE](LICENSE). The release files include third-party
-libraries under their own licenses; see [licenses/](licenses).
+libraries under their own licenses; see [licenses](licenses/README.md).

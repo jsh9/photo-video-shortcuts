@@ -92,8 +92,8 @@ python3 scripts/build_shortcuts.py --guess
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC) and a 12 MP encode. Running it in a-Shell checks the
   phone.
-- **Tests** will live in [`tests/compress-photos/`](../../tests) (not added
-  yet).
+- **Tests** will live in [`tests/compress-photos/`](../../tests/README.md) (not
+  added yet).
 
 ## 4. Generating the shortcuts
 
@@ -108,6 +108,9 @@ python3 scripts/build_shortcuts.py --guess
   `scripts/sample/JXL Sample.plist`, and later runs copy the exact format from
   it.
 - The quality presets are `QUALITY_PRESETS` near the top of the script.
+- Releases ship the two `.shortcut` files in one ZIP,
+  `compress-photos-shortcuts-v<version>.zip`; see
+  [docs/releasing.md](../../docs/releasing.md).
 
 ## 5. Building the shortcuts by hand (fallback)
 
