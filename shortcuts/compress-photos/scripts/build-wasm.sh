@@ -186,6 +186,11 @@ build_variant() {
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
   done
+  for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
+    "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \
+      -std=c++11 -O3 $flags -fno-exceptions -Wall -Wextra \
+      -c "$src" -o "$objdir/$(basename "$src" .cpp).o"
+  done
   # 8 MiB stack (the 64 KiB default can silently overflow into the heap) and
   # stack-first layout, so an overflow traps instead of corrupting memory.
   "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \

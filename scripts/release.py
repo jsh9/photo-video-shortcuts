@@ -9,7 +9,7 @@ all shortcuts, so the README's "latest" download links always work:
 
 - <name>-shortcuts-v<version>.zip: the shortcut's .shortcut files, inside a
   folder of the same name (the files keep their names with spaces);
-- the shortcut's encoders (dist/*.wasm), with fixed names.
+- the encoders declared in the tool's release.json, with fixed names.
 
 Before publishing, it checks the git state, the changelog entry, that every
 file was rebuilt in this run, and that each encoder reports its VERSION. It
@@ -23,6 +23,8 @@ Usage::
 """
 
 import argparse
+import base64
+import json
 import re
 import shutil
 import subprocess
@@ -31,6 +33,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 import check_changelog  # scripts/check_changelog.py
 
@@ -77,6 +80,52 @@ class Tool:
             raise ReleaseError(
                 f'{path / "VERSION"}: "{self.version}" is not X.Y.Z'
             )
+
+        manifest = path / 'release.json'
+        try:
+            declared = json.loads(manifest.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as e:
+            raise ReleaseError(
+                f'{manifest}: cannot read release manifest: {e}'
+            ) from e
+
+        if not isinstance(declared, dict) or set(declared) != {
+            'encoders',
+            'shortcuts',
+        }:
+            raise ReleaseError(
+                f'{manifest}: expected encoders and shortcuts lists'
+            )
+
+        names = []
+        for key, suffix in (('encoders', '.wasm'), ('shortcuts', '.shortcut')):
+            files = declared[key]
+            if not isinstance(files, list) or (
+                key == 'shortcuts' and not files
+            ):
+                raise ReleaseError(
+                    f'{manifest}: {key} must be a list (shortcuts cannot be empty)'
+                )
+
+            for name in files:
+                if (
+                    not isinstance(name, str)
+                    or '/' in name
+                    or '\\' in name
+                    or not name.endswith(suffix)
+                    or name == suffix
+                ):
+                    raise ReleaseError(
+                        f'{manifest}: invalid {key} filename: {name!r}'
+                    )
+
+            names.extend(files)
+
+        if len(names) != len(set(names)):
+            raise ReleaseError(f'{manifest}: duplicate filenames')
+
+        self.encoder_names = declared['encoders']
+        self.shortcut_names = declared['shortcuts']
 
     @property
     def tag(self):
@@ -151,24 +200,24 @@ def build(tool, sign):
 
 
 def fresh(path, since):
-    """A build output, which must have been written in this run."""
-    if path.stat().st_mtime < since:
-        raise ReleaseError(
-            f'{path} was not rebuilt in this run (left over from an earlier '
-            'build?); delete it and run again'
-        )
+    """A nonempty, declared output written during the current tool build."""
+    if not path.is_file():
+        raise ReleaseError(f'{path}: required release file is missing')
+
+    stat = path.stat()
+    if not stat.st_size:
+        raise ReleaseError(f'{path}: required release file is empty')
+
+    if stat.st_mtime < since:
+        raise ReleaseError(f'{path} was not rebuilt in this run')
 
     return path
 
 
 def encoders(tool, since):
-    found = [
-        fresh(p, since) for p in sorted((tool.path / 'dist').glob('*.wasm'))
+    return [
+        fresh(tool.path / 'dist' / name, since) for name in tool.encoder_names
     ]
-    if (tool.path / 'scripts' / 'build-wasm.sh').exists() and not found:
-        raise ReleaseError(f'{tool.name}: no dist/*.wasm after the build')
-
-    return found
 
 
 def check_encoder_version(tool, wasm):
@@ -184,48 +233,243 @@ def check_encoder_version(tool, wasm):
 
 
 def shortcut_files(tool, sign, since):
-    """(path, name inside the ZIP) for each of the tool's shortcuts."""
-    if sign:
-        files = [
-            (p, p.name)
-            for p in sorted((tool.path / 'dist').glob('*.shortcut'))
-        ]
-    else:  # unsigned build: build/shortcuts/<name>.unsigned.wflow
-        files = [
-            (p, p.name.replace('.unsigned.wflow', '.shortcut'))
-            for p in sorted(
-                (tool.path / 'build' / 'shortcuts').glob('*.unsigned.wflow')
-            )
-        ]
+    """Declared shortcuts, mapped to unsigned build filenames in CI."""
+    files = []
+    for name in tool.shortcut_names:
+        path = (
+            tool.path / 'dist' / name
+            if sign
+            else tool.path
+            / 'build'
+            / 'shortcuts'
+            / (name[: -len('.shortcut')] + '.unsigned.wflow')
+        )
+        files.append((fresh(path, since), name))
 
-    if not files:
-        raise ReleaseError(f'{tool.name}: no shortcuts after the build')
+    return files
 
-    return [(fresh(p, since), name) for p, name in files]
+
+def verify_zip(tool, path, files):
+    """Reopen the ZIP and check its exact members, CRCs, and source bytes."""
+    expected = [f'{tool.zip_name}/{name}' for name in tool.shortcut_names]
+    sources = {f'{tool.zip_name}/{name}': src for src, name in files}
+    try:
+        with zipfile.ZipFile(path) as z:
+            members = z.namelist()
+            if sorted(members) != sorted(expected) or set(sources) != set(
+                expected
+            ):
+                raise ReleaseError(
+                    f'{path}: ZIP members do not match release.json'
+                )
+
+            bad = z.testzip()
+            if bad:
+                raise ReleaseError(f'{path}: ZIP CRC failure: {bad}')
+
+            for name in expected:
+                if z.read(name) != sources[name].read_bytes():
+                    raise ReleaseError(
+                        f'{path}: ZIP contents differ from {sources[name]}'
+                    )
+    except (OSError, zipfile.BadZipFile, RuntimeError) as e:
+        raise ReleaseError(f'{path}: cannot verify ZIP: {e}') from e
 
 
 def make_zip(tool, files):
-    """
-    <name>-shortcuts-v<version>.zip, with the files in a folder of that name.
-    """
+    """Package only the manifest's complete list, then verify the archive."""
+    names = [name for _, name in files]
+    if sorted(names) != sorted(tool.shortcut_names):
+        raise ReleaseError(
+            f'{tool.name}: shortcut files do not match release.json'
+        )
+
     path = OUT / f'{tool.zip_name}.zip'
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         for src, name in files:
             z.write(src, f'{tool.zip_name}/{name}')
 
+    verify_zip(tool, path, files)
     return path
 
 
-def release_notes(tool, tools, entry):
-    lines = [entry, '', '## Files in this release', '']
+def github(endpoint, missing_ok=False, paginate=False):
+    """Read GitHub JSON; only an explicit 404 can mean a missing VERSION."""
+    cmd = ['gh', 'api', endpoint]
+    if paginate:
+        cmd += ['--paginate', '--slurp']
+
+    try:
+        result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+    except OSError as e:
+        raise ReleaseError(f'cannot read GitHub release baseline: {e}') from e
+
+    if result.returncode:
+        if missing_ok and '(HTTP 404)' in result.stderr:
+            return None
+
+        raise ReleaseError(
+            f'cannot read GitHub release baseline: {result.stderr.strip()}'
+        )
+
+    try:
+        return json.loads(result.stdout)
+    except ValueError as e:
+        raise ReleaseError(
+            'cannot read GitHub release baseline: invalid JSON'
+        ) from e
+
+
+def published_baseline(tools):
+    """
+    Latest published stable release and each included tool's VERSION there.
+    """
+    repo = run(
+        [
+            'gh',
+            'repo',
+            'view',
+            '--json',
+            'nameWithOwner',
+            '--jq',
+            '.nameWithOwner',
+        ],
+        capture=True,
+    ).strip()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+        raise ReleaseError(
+            'cannot read GitHub release baseline: invalid repository name'
+        )
+
+    pages = github(f'repos/{repo}/releases', paginate=True)
+    if not isinstance(pages, list) or any(
+        not isinstance(p, list) or any(not isinstance(r, dict) for r in p)
+        for p in pages
+    ):
+        raise ReleaseError(
+            'cannot read GitHub release baseline: invalid release list'
+        )
+
+    stable = [
+        r
+        for page in pages
+        for r in page
+        if not r.get('draft') and not r.get('prerelease')
+    ]
+    if not stable:
+        return {'tag': None, 'versions': {}}
+
+    latest = max(stable, key=lambda r: r.get('published_at') or '')
+    tag = latest.get('tag_name')
+    if not tag:
+        raise ReleaseError(
+            'cannot read GitHub release baseline: release has no tag'
+        )
+
+    # Verify that the tag still exists before treating a missing VERSION as a
+    # new tool. A deleted tag must not make all tools appear new.
+    ref = github(f'repos/{repo}/git/ref/tags/{quote(tag, safe="")}')
+    if not isinstance(ref, dict) or ref.get('ref') != f'refs/tags/{tag}':
+        raise ReleaseError(
+            f'cannot read GitHub release baseline: invalid tag {tag}'
+        )
+
+    versions = {}
+    for tool in tools:
+        data = github(
+            f'repos/{repo}/contents/shortcuts/{quote(tool.name, safe="")}/VERSION?ref={quote(tag, safe="")}',
+            missing_ok=True,
+        )
+        if data is None:
+            continue
+
+        try:
+            if data['encoding'] != 'base64':
+                raise ValueError('unsupported encoding')
+
+            version = (
+                base64
+                .b64decode(data['content'], validate=False)
+                .decode('utf-8')
+                .strip()
+            )
+        except (KeyError, TypeError, ValueError, UnicodeError) as e:
+            raise ReleaseError(
+                f'cannot read {tool.name}/VERSION at {tag}'
+            ) from e
+
+        if not SEMVER.fullmatch(version):
+            raise ReleaseError(f'{tool.name}/VERSION at {tag} is not X.Y.Z')
+
+        versions[tool.name] = version
+
+    return {'tag': tag, 'versions': versions}
+
+
+def comparison_baseline(tools, dry_run):
+    try:
+        return published_baseline(tools)
+    except (ReleaseError, OSError) as e:
+        if not dry_run:
+            raise ReleaseError(f'release comparison unavailable: {e}') from e
+
+        print(f'note: release comparisons unavailable (offline dry run): {e}')
+        return None
+
+
+def tool_states(tools, baseline):
+    if baseline is None:
+        return {t.name: 'comparison unavailable' for t in tools}
+
+    previous = baseline['versions']
+    return {
+        t.name: (
+            'new'
+            if t.name not in previous
+            else 'unchanged'
+            if t.version == previous[t.name]
+            else 'updated'
+        )
+        for t in tools
+    }
+
+
+def require_updated(tool, states):
+    if states[tool.name] == 'unchanged':
+        raise ReleaseError(
+            f'{tool.title} {tool.version} is unchanged from the latest published release; bump VERSION before publishing'
+        )
+
+
+def release_notes(tool, tools, baseline, entries):
+    states = tool_states(tools, baseline)
+    if baseline is None:
+        lines = [
+            'Release comparisons unavailable: the GitHub baseline could not be read.',
+            '',
+        ]
+    elif baseline['tag'] is None:
+        lines = [
+            'First release: no published, non-prerelease release exists.',
+            '',
+        ]
+    else:
+        lines = [f'Compared with `{baseline["tag"]}`.', '']
+
+    # The selected tool keeps the title/tag; every changed tool gets its notes.
+    for t in [tool] + [t for t in tools if t.name != tool.name]:
+        if states[t.name] in ('new', 'updated') or (
+            baseline is None and t is tool
+        ):
+            lines += [f'## {t.title} {t.version}', '', entries[t.name], '']
+
+    lines += ['## Files in this release', '']
     for t in tools:
-        state = 'updated in this release' if t is tool else 'unchanged'
-        lines.append(f'- {t.title} {t.version} ({state})')
+        lines.append(f'- {t.title} {t.version} (**{states[t.name]}**)')
 
     lines += [
         '',
-        'Each release includes the current files of every shortcut. Update '
-        'only the shortcuts marked as updated; see the README for how.',
+        'Each release includes the current files of every shortcut. Update only the tools marked new or updated; see the README for how.',
     ]
     return '\n'.join(lines) + '\n'
 
@@ -263,26 +507,33 @@ def main():
             + ', '.join(t.name for t in tools)
         )
 
-    # In a dry run (e.g. CI on a pull request) the git state and the changelog
-    # are reported, not enforced.
-    entry = f'{tool.title} {tool.version}'
-    for check in (lambda: changelog_entry(tool), lambda: check_git(tool)):
-        try:
-            entry = check() or entry
-        except ReleaseError as e:
-            if not args.dry_run:
-                raise
+    baseline = comparison_baseline(tools, args.dry_run)
+    states = tool_states(tools, baseline)
+    if not args.dry_run:
+        require_updated(tool, states)
 
-            print(f'note (ignored in a dry run): {e}')
+    entries = {
+        t.name: changelog_entry(t)
+        for t in tools
+        if states[t.name] in ('new', 'updated')
+        or (baseline is None and t is tool)
+    }
+    try:
+        check_git(tool)
+    except ReleaseError as e:
+        if not args.dry_run:
+            raise
+
+        print(f'note (ignored in a dry run): {e}')
 
     sign = not args.no_sign
-    since = time.time() - 1
     if OUT.exists():
         shutil.rmtree(OUT)
 
     OUT.mkdir(parents=True)
     assets = []
     for t in tools:
+        since = time.time()
         build(t, sign)
         for wasm in encoders(t, since):
             check_encoder_version(t, wasm)
@@ -294,7 +545,7 @@ def main():
     if len(names) != len(set(names)):
         raise ReleaseError(f'two release files share a name: {names}')
 
-    notes = release_notes(tool, tools, entry)
+    notes = release_notes(tool, tools, baseline, entries)
     print(f'\nRelease {tool.tag} ("{tool.title} {tool.version}"), files:')
     for a in assets:
         print(f'  {a.name}  ({a.stat().st_size / 1e3:,.0f} KB)')

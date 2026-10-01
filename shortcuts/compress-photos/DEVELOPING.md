@@ -10,6 +10,7 @@ ______________________________________________________________________
 **Table of Contents**
 
 - [1. How it works](#1-how-it-works)
+  - [1.1. Extended XMP](#11-extended-xmp)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -56,16 +57,39 @@ below quality ~70 and holds the whole image, which takes about 2.7 GB for 24
 MP, more than iOS lets a-Shell use. The cost is files about 2.5% larger at
 those qualities, with the same visual quality (SSIMULACRA2).
 
+### 1.1. Extended XMP
+
+JPEG APP1 extended XMP fragments are assembled by GUID, total length and
+offset, including fragments stored out of order. The standard packet's
+namespace-qualified `HasExtendedXMP` reference must match. Coverage must be
+complete and must not overlap; the assembled extension is limited to **16
+MiB**.
+
+`src/xmp.cpp` wraps vendored TinyXML2 11.0.0 behind the C interface in
+`src/xmp.h`. It merges RDF properties into one valid packet, retains namespace
+scope, arrays, structures and Unicode, and removes the JPEG-only
+`HasExtendedXMP` property. Identical properties for the same RDF subject
+coalesce; conflicting values fail rather than choosing a value. The result goes
+into the existing uncompressed `xml ` box. TIFF orientation is read and reset
+by its namespace URI, so alternate XML prefixes work too.
+
+The internal `meta_extract` interface accepts an error buffer. Missing,
+overlapping, mismatched, oversized or invalid packets fail that photo with a
+message; other photos continue. Failed photos are absent from `jxl_done.txt`,
+so the shortcut cannot offer to delete their originals. The CLI and job/result
+formats stay the same. No HDR gain-map conversion is added here.
+
 ## 2. Layout
 
-| Path                         | What it is                                                                                                                                                                                                         |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                     |
-| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `selftest_heic.h` (tiny HEIC for `--selftest`) |
-| `third_party/`               | `stb_image.h` (JPEG and PNG decoding)                                                                                                                                                                              |
-| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                            |
-| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                            |
-| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                         |
+| Path                         | What it is                                                                                                                                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                  |
+| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                          |
+| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` (tiny HEIC for `--selftest`) |
+| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                               |
+| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                 |
+| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                 |
+| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                              |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).
@@ -80,6 +104,9 @@ Run these from this folder (`shortcuts/compress-photos`):
 python3 scripts/build_shortcuts.py --guess
 ```
 
+- TinyXML2 is vendored with its license and compiled into the native, SIMD
+  WebAssembly and scalar WebAssembly builds. Native C sources are compiled with
+  `cc`, XML sources with `c++`; WebAssembly uses wasi-sdk's Clang/Clang++.
 - **Prerequisites:** Homebrew `jpeg-xl libheif cmake ninja binaryen`.
 - **What `build-wasm.sh` does:** it downloads wasi-sdk 34, libjxl v0.11.2,
   libheif v1.23.5 and libde265 v1.1.3 into the repository's `.deps/` folder,

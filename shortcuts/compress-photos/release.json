@@ -1,0 +1,4 @@
+{
+  "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm"],
+  "shortcuts": ["Compress Photos.shortcut", "JXL-Import.shortcut"]
+}

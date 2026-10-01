@@ -578,8 +578,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
     goto done;
   }
-  if ((have_orig && meta_extract(orig, orig_len, &mo) != 0) || (png && meta_extract(png, png_len, &mp) != 0)) {
-    snprintf(err, sizeof err, "out of memory reading metadata");
+  if ((have_orig && meta_extract(orig, orig_len, &mo, err, sizeof err) != 0) || (png && meta_extract(png, png_len, &mp, err, sizeof err) != 0)) {
     goto done;
   }
   const double orig_size = (double)(have_orig ? orig_len : png_len);
@@ -662,7 +661,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
     memcpy(xmp, src_xmp->data, src_xmp->size);
     xmp_len = src_xmp->size;
-    xmp_reset_orientation(xmp, xmp_len);
+    if (xmp_reset_orientation(&xmp, &xmp_len, err, sizeof err) < 0) goto done;
   }
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len};

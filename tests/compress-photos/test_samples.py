@@ -42,6 +42,7 @@ def test_sample(sample_batch, imageio, sample, tmp_path):
         if k not in ph.EXIF_ALLOWED_DIFF and before.get(k) != after.get(k)
     )
     assert not changed, changed
+    assert ph.xmp_properties(sample) == ph.xmp_properties(jxl)
     assert 'brob' not in ph.boxes(jxl)
 
     props = imageio(sample, jxl)
