@@ -66,13 +66,25 @@ the first nonempty XMP packet is used; empty or repeated packets are ignored.
 
 The only change is the orientation: each TIFF `Orientation` value other than 1
 is replaced with `1`, and every other byte stays the same. A tolerant scanner
-in `src/xmp.cpp` finds the value without requiring strict XML. It doesn't look
-for markup inside comments, CDATA, processing instructions or attribute values,
-so text that merely looks like the property isn't read or changed. It resolves
-the namespace of each prefix, so `tiff:` bound to another namespace is ignored
-and alternate prefixes work; an undeclared `tiff:` prefix is assumed to be the
-TIFF namespace. It decodes character references (`&#54;` is 6). The same
-scanner finds the `HasExtendedXMP` reference.
+in `src/xmp.cpp` finds the value without requiring strict XML:
+
+- Like other XMP readers, it reads only top-level properties: the attributes
+  and child elements of each `rdf:Description` directly inside `rdf:RDF`. A
+  field of a structure, such as the metadata of a placed image that Adobe apps
+  keep in `xmpMM:Pantry`, isn't the photo's own.
+- It doesn't look for markup inside comments, CDATA, processing instructions or
+  attribute values, so text that merely looks like the property isn't read or
+  changed.
+- An element's value is its text and CDATA (`<![CDATA[6]]>` is 6); comments and
+  processing instructions inside it are skipped. A qualified value (one written
+  with `rdf:value`) isn't read.
+- It resolves the namespace of each prefix, so `tiff:` bound to another
+  namespace is ignored and alternate prefixes work; an undeclared `tiff:`
+  prefix is assumed to be the TIFF namespace.
+- It decodes character references in values and in namespace declarations
+  (`&#54;` is 6).
+
+The same scanner finds the `HasExtendedXMP` reference.
 
 Extended XMP, which a JPEG uses for XMP over 64 KB, is the only case that needs
 XML parsing. Its fragments are assembled by GUID, total length and offset,

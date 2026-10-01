@@ -288,20 +288,23 @@ def test_xpacket_wrapper_and_processing_instructions(
     assert properties(xml_box(out)) == properties(payload, True)
 
 
-@pytest.mark.parametrize('element', [False, True])
-def test_extended_reference_uses_namespace(encoder, tmp_path, element):
+@pytest.mark.parametrize(
+    'form', ['attribute', 'element', 'CDATA', 'escaped namespace']
+)
+def test_extended_reference_uses_namespace(encoder, tmp_path, form):
     base, ext, parts = extended_pair()
     guid = hashlib.md5(ext).hexdigest().lower()
-    if element:
-        base = packet(
-            f'<notice:HasExtendedXMP>{guid}</notice:HasExtendedXMP>',
-            declarations=f'xmlns:notice="{NOTE}"',
-        )
+    note = NOTE.replace('/', '&#47;') if form == 'escaped namespace' else NOTE
+    declarations = f'xmlns:notice="{note}"'
+    if form == 'element':
+        body = f'<notice:HasExtendedXMP>{guid}</notice:HasExtendedXMP>'
+    elif form == 'CDATA':
+        body = f'<notice:HasExtendedXMP><![CDATA[{guid}]]></notice:HasExtendedXMP>'
     else:
-        base = packet(
-            attrs=f'notice:HasExtendedXMP="{guid}"',
-            declarations=f'xmlns:notice="{NOTE}"',
-        )
+        body = ''
+
+    attrs = '' if body else f'notice:HasExtendedXMP="{guid}"'
+    base = packet(body, attrs, declarations=declarations)
 
     out = convert(
         encoder,
@@ -362,6 +365,8 @@ FAILURES = [
     ('empty', 'zero length'),
     ('no-fragments', 'missing'),
     ('no-fragments-not-strict-xml', 'missing'),
+    ('no-fragments-cdata-reference', 'missing'),
+    ('no-fragments-escaped-namespace', 'missing'),
     ('invalid-utf8', 'invalid'),
 ]
 
@@ -396,6 +401,19 @@ def test_invalid_xmp_fails_only_that_photo(
         parts = []
     elif failure == 'no-fragments-not-strict-xml':
         base, parts = base + b'\0', []
+    elif failure == 'no-fragments-cdata-reference':
+        guid = hashlib.md5(ext).hexdigest().upper()
+        base = packet(
+            f'<n:HasExtendedXMP><![CDATA[{guid}]]></n:HasExtendedXMP>'
+        )
+        parts = []
+    elif failure == 'no-fragments-escaped-namespace':
+        guid = hashlib.md5(ext).hexdigest().upper()
+        base = packet(
+            attrs=f'm:HasExtendedXMP="{guid}"',
+            declarations=f'xmlns:m="{NOTE.replace("/", "&#47;")}"',
+        )
+        parts = []
     elif failure == 'header':
         parts[0] = parts[0][: len(EXTENDED) + 39]
     elif failure == 'bounds':
@@ -549,10 +567,31 @@ ORIENTED = {
         b'<t:Orientation>1<',
         8,
     ),
+    'CDATA value': (
+        packet('<t:Orientation><![CDATA[6]]></t:Orientation>'),
+        b'<![CDATA[6]]>',
+        b'<![CDATA[1]]>',
+        6,
+    ),
+    'comment in the value': (
+        packet('<t:Orientation><!-- from the camera --> 8 </t:Orientation>'),
+        b'--> 8 <',
+        b'--> 1 <',
+        8,
+    ),
+    'escaped namespace declaration': (
+        packet(
+            attrs='u:Orientation="6"',
+            declarations=f'xmlns:u="{TIFF.replace("/", "&#47;")}"',
+        ),
+        b'u:Orientation="6"',
+        b'u:Orientation="1"',
+        6,
+    ),
     # Text that looks like the property, with the same prefix and before the
     # real value, must not be read or changed: in CDATA, a comment, another
-    # attribute's value, or an element where the prefix means another
-    # namespace.
+    # attribute's value, an element where the prefix means another namespace,
+    # or a field of a structure (not a top-level property).
     'lookalike in CDATA': (
         packet(
             '<dc:description><![CDATA[<t:Orientation>8</t:Orientation>]]>'
@@ -582,8 +621,8 @@ ORIENTED = {
     ),
     'same prefix, another namespace': (
         packet(
-            '<c:Note xmlns:t="https://example.org/not-tiff/"'
-            ' t:Orientation="8"/><t:Orientation>6</t:Orientation>'
+            '<t:Orientation xmlns:t="https://example.org/not-tiff/">8'
+            '</t:Orientation><t:Orientation>6</t:Orientation>'
         ),
         b'<t:Orientation>6<',
         b'<t:Orientation>1<',
@@ -596,6 +635,16 @@ ORIENTED = {
         ),
         b't:Orientation="6"',
         b't:Orientation="1"',
+        6,
+    ),
+    'field of a structure': (
+        packet(
+            '<c:Record rdf:parseType="Resource">'
+            '<t:Orientation>8</t:Orientation></c:Record>'
+            '<c:Note t:Orientation="8"/><t:Orientation>6</t:Orientation>'
+        ),
+        b'<t:Orientation>6<',
+        b'<t:Orientation>1<',
         6,
     ),
 }

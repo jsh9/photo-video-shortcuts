@@ -9,6 +9,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace tinyxml2;
@@ -182,18 +183,19 @@ std::string value(const XMLElement *e) {
     if (!declaration(a->Name())) attributes.push_back(token(expanded(e, a->Name(), true)) + token(a->Value()));
   }
   std::sort(attributes.begin(), attributes.end());
+  const bool elements = e->FirstChildElement() != nullptr;  // once: it walks the children
   std::string body;
   for (const XMLNode *n = e->FirstChild(); n; n = n->NextSibling()) {
     if (n->ToElement()) body += "E" + token(expanded(n->ToElement(), n->Value())) + token(value(n->ToElement()));
     else if (n->ToText()) {
       const std::string text = n->Value();
-      if (e->FirstChildElement() && text.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+      if (elements && text.find_first_not_of(" \t\r\n") == std::string::npos) continue;
       body += "T" + token(text);
     }
   }
   // Attribute-form simple properties and element-form simple properties have
   // the same RDF value. Comments/processing instructions are not properties.
-  if (attributes.empty() && !e->FirstChildElement()) {
+  if (attributes.empty() && !elements) {
     std::string text;
     for (const XMLNode *n = e->FirstChild(); n; n = n->NextSibling()) if (n->ToText()) text += n->Value();
     return "S" + token(text);
@@ -327,37 +329,128 @@ extern "C" int xmp_merge_extended(const uint8_t *base, size_t base_len, const ui
 // value: a packet is never rewritten or rejected for this. Real-world XMP is
 // often not strict XML (trailing NULs, Latin-1 text, HTML entities), so the
 // scanner follows only markup: tags, quoted attribute values, comments, CDATA,
-// processing instructions and namespace declarations. Text in descriptions,
-// comments or other attributes is never mistaken for a property.
+// processing instructions and namespace declarations. As in other XMP readers,
+// only top-level properties count: text in descriptions, comments or other
+// attributes, and fields of structures, are never mistaken for one.
 namespace {
-struct Property {
+struct Name {
   std::string uri, prefix, local;
-  size_t begin, end;  // the raw value: an attribute value or element text
 };
 
-// Every namespace-qualified attribute, and the text of every element that holds
-// only text, in document order. Stops at markup it can't follow.
-std::vector<Property> scan(const uint8_t *x, size_t len) {
-  const std::string s(reinterpret_cast<const char *>(x), len);
+// Part of a value: character data, whose references are decoded, or the inside
+// of a CDATA section, which is literal.
+struct Run {
+  size_t begin, end;
+  bool literal;
+};
+
+struct Property {
+  Name name;
+  std::vector<Run> runs;  // an attribute value, or an element's text and CDATA
+};
+
+// A name, by namespace; an undeclared conventional prefix (e.g. "tiff:")
+// counts too, since malformed packets often omit the declaration.
+bool is(const Name &n, const char *uri, const char *prefix, const char *local) {
+  return n.local == local && (n.uri == uri || (n.uri.empty() && n.prefix == prefix));
+}
+
+bool whitespace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+// The ASCII character a reference stands for, by the text between "&" and ";"
+// ("amp", "#54" or "#x36"); 0 for any other reference.
+char referenced(const std::string &name) {
+  static const std::map<std::string, char> entities = {
+      {"amp", '&'}, {"lt", '<'}, {"gt", '>'}, {"quot", '"'}, {"apos", '\''}};
+  const auto entity = entities.find(name);
+  if (entity != entities.end()) return entity->second;
+  if (name.size() < 2 || name[0] != '#') return 0;
+  const bool hex = name[1] == 'x';
+  const std::string digits = name.substr(hex ? 2 : 1);
+  if (digits.empty() || digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos)
+    return 0;
+  const unsigned long code = std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10);
+  return code < 0x80 ? static_cast<char>(code) : 0;
+}
+
+// One character of a value and the raw bytes it came from. References to
+// ASCII characters are decoded; anything else stays as written.
+struct Character {
+  char c;
+  size_t begin, end;
+};
+
+std::vector<Character> characters(const std::string &s, const std::vector<Run> &runs) {
+  std::vector<Character> out;
+  for (const Run &r : runs) {
+    for (size_t i = r.begin; i < r.end;) {
+      char c = s[i];
+      size_t next = i + 1;
+      if (c == '&' && !r.literal) {
+        // The references decoded here are short, which bounds the search.
+        const size_t limit = std::min(r.end, i + 16);
+        size_t semicolon = i + 1;
+        while (semicolon < limit && s[semicolon] != ';') ++semicolon;
+        const char decoded = semicolon < limit ? referenced(s.substr(i + 1, semicolon - i - 1)) : 0;
+        if (decoded) {
+          c = decoded;
+          next = semicolon + 1;
+        }
+      }
+      out.push_back({c, i, next});
+      i = next;
+    }
+  }
+  return out;
+}
+
+// A property's value: its characters without surrounding whitespace.
+std::vector<Character> trimmed(const std::string &s, const Property &p) {
+  std::vector<Character> v = characters(s, p.runs);
+  const auto blank = [](const Character &c) { return whitespace(c.c); };
+  v.erase(std::find_if_not(v.rbegin(), v.rend(), blank).base(), v.end());
+  v.erase(v.begin(), std::find_if_not(v.begin(), v.end(), blank));
+  return v;
+}
+
+// The top-level properties, in document order: the attributes and the child
+// elements of each node element (rdf:Description) directly inside rdf:RDF. An
+// element counts only if it holds nothing but text, CDATA, comments and
+// processing instructions. Stops at markup it can't follow.
+std::vector<Property> scan(const std::string &s) {
+  struct Element {
+    std::string qualified;  // as written, to match its end tag
+    Name name;
+    std::vector<std::pair<std::string, std::string>> declarations;
+    std::vector<Run> text;
+    bool children;
+  };
   std::vector<Property> found;
-  std::vector<std::vector<std::pair<std::string, std::string>>> scopes;
-  auto lookup = [&](const std::string &prefix) {
-    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
-      for (const auto &d : *it)
-        if (d.first == prefix) return d.second;
-    return std::string(prefix == "xml" ? XML : "");
+  std::vector<Element> open;
+  auto resolve = [&](const std::string &qualified, bool attribute) -> Name {
+    const size_t colon = qualified.find(':');
+    Name n;
+    n.prefix = colon == std::string::npos ? "" : qualified.substr(0, colon);
+    n.local = colon == std::string::npos ? qualified : qualified.substr(colon + 1);
+    // Unprefixed attributes have no namespace.
+    if (attribute && n.prefix.empty()) return n;
+    for (auto e = open.rbegin(); e != open.rend(); ++e)
+      for (const auto &d : e->declarations)
+        if (d.first == n.prefix) {
+          n.uri = d.second;
+          return n;
+        }
+    if (n.prefix == "xml") n.uri = XML;
+    return n;
   };
-  auto qualified = [](const std::string &name, std::string &prefix, std::string &local) {
-    const size_t colon = name.find(':');
-    prefix = colon == std::string::npos ? "" : name.substr(0, colon);
-    local = colon == std::string::npos ? name : name.substr(colon + 1);
-  };
-  auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  // Whether open[i] is directly inside rdf:RDF.
+  auto in_rdf = [&](size_t i) { return i >= 1 && is(open[i - 1].name, RDF, "rdf", "RDF"); };
   // The position just past `close`, searching from `from`; npos if absent.
   auto past = [&](const char *close, size_t from) {
     const size_t at = s.find(close, from);
     return at == std::string::npos ? at : at + std::strlen(close);
   };
+  const size_t len = s.size();
   size_t i = 0;
   while (i < len) {
     size_t end = 0;
@@ -365,55 +458,73 @@ std::vector<Property> scan(const uint8_t *x, size_t len) {
       end = past("-->", i + 4);
     } else if (!s.compare(i, 9, "<![CDATA[")) {
       end = past("]]>", i + 9);  // text, never markup
+      if (end != std::string::npos && !open.empty() && !open.back().children)
+        open.back().text.push_back({i + 9, end - 3, true});
     } else if (!s.compare(i, 2, "<?")) {
       end = past("?>", i + 2);
     } else if (!s.compare(i, 2, "<!")) {
       end = past(">", i + 2);
     } else if (!s.compare(i, 2, "</")) {
       end = past(">", i + 2);
-      if (!scopes.empty()) scopes.pop_back();
+      if (end == std::string::npos) break;
+      size_t n = i + 2;
+      while (n < end - 1 && !whitespace(s[n])) ++n;
+      const std::string qualified = s.substr(i + 2, n - i - 2);
+      // Close the element, and any left open inside it; ignore a stray end tag.
+      for (size_t k = open.size(); k-- > 0;) {
+        if (open[k].qualified != qualified) continue;
+        const Element &e = open[k];
+        if (!e.children && k >= 1 && in_rdf(k - 1)) found.push_back({e.name, e.text});
+        open.erase(open.begin() + k, open.end());
+        break;
+      }
     } else if (s[i] != '<') {
       end = s.find('<', i);
+      if (!open.empty() && !open.back().children)
+        open.back().text.push_back({i, end == std::string::npos ? len : end, false});
     } else {
       // A start tag: its name, then name="value" attributes.
       size_t j = i + 1;
-      while (j < len && !space(s[j]) && s[j] != '/' && s[j] != '>') ++j;
-      const std::string name = s.substr(i + 1, j - i - 1);
-      std::vector<std::pair<std::string, std::string>> declarations;
-      std::vector<std::pair<std::string, std::pair<size_t, size_t>>> attributes;
+      while (j < len && !whitespace(s[j]) && s[j] != '/' && s[j] != '>') ++j;
+      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false};
+      std::vector<std::pair<std::string, Run>> attributes;
       bool empty = false;
       for (;;) {
-        while (j < len && space(s[j])) ++j;
+        while (j < len && whitespace(s[j])) ++j;
         if (j >= len) return found;
         if (s[j] == '>') { ++j; break; }
         if (!s.compare(j, 2, "/>")) { j += 2; empty = true; break; }
         const size_t a = j;
-        while (j < len && !space(s[j]) && s[j] != '=' && s[j] != '/' && s[j] != '>') ++j;
+        while (j < len && !whitespace(s[j]) && s[j] != '=' && s[j] != '/' && s[j] != '>') ++j;
         const std::string attribute = s.substr(a, j - a);
-        while (j < len && space(s[j])) ++j;
+        while (j < len && whitespace(s[j])) ++j;
         if (j >= len || s[j] != '=') return found;
         ++j;
-        while (j < len && space(s[j])) ++j;
+        while (j < len && whitespace(s[j])) ++j;
         if (j >= len || (s[j] != '"' && s[j] != '\'')) return found;
-        const size_t value = j + 1, close = s.find(s[j], value);
+        const size_t close = s.find(s[j], j + 1);
         if (close == std::string::npos) return found;
-        if (attribute == "xmlns") declarations.emplace_back("", s.substr(value, close - value));
-        else if (!attribute.compare(0, 6, "xmlns:")) declarations.emplace_back(attribute.substr(6), s.substr(value, close - value));
-        else attributes.emplace_back(attribute, std::make_pair(value, close));
+        const Run value = {j + 1, close, false};
+        if (attribute == "xmlns" || !attribute.compare(0, 6, "xmlns:")) {
+          std::string uri;  // references decoded: "&#47;" is "/"
+          for (const Character &c : characters(s, {value})) uri += c.c;
+          element.declarations.emplace_back(attribute == "xmlns" ? "" : attribute.substr(6), uri);
+        } else {
+          attributes.emplace_back(attribute, value);
+        }
         j = close + 1;
       }
-      scopes.push_back(declarations);
-      std::string prefix, local;
-      for (const auto &a : attributes) {
-        qualified(a.first, prefix, local);
-        // Unprefixed attributes have no namespace.
-        if (!prefix.empty()) found.push_back({lookup(prefix), prefix, local, a.second.first, a.second.second});
+      // Far deeper than XMP goes; this bounds the search for end tags.
+      if (open.size() >= 256) return found;
+      if (!open.empty()) {
+        open.back().children = true;
+        open.back().text.clear();
       }
-      qualified(name, prefix, local);
-      const size_t text_end = s.find('<', j);
-      if (!empty && text_end != std::string::npos && !s.compare(text_end, 2, "</"))
-        found.push_back({lookup(prefix), prefix, local, j, text_end});
-      if (empty) scopes.pop_back();
+      open.push_back(std::move(element));
+      open.back().name = resolve(open.back().qualified, false);
+      if (in_rdf(open.size() - 1))
+        for (const auto &a : attributes) found.push_back({resolve(a.first, true), {a.second}});
+      if (empty) open.pop_back();
       end = j;
     }
     if (end == std::string::npos) break;
@@ -422,77 +533,53 @@ std::vector<Property> scan(const uint8_t *x, size_t len) {
   return found;
 }
 
-// A property, by namespace; an undeclared conventional prefix (e.g. "tiff:")
-// counts too, since malformed packets often omit the declaration.
-bool is(const Property &p, const char *uri, const char *prefix, const char *local) {
-  return p.local == local && (p.uri == uri || (p.uri.empty() && p.prefix == prefix));
-}
-
-// The raw value with XML references decoded and surrounding whitespace removed.
-std::string decoded(const uint8_t *x, const Property &p) {
-  const std::string raw(reinterpret_cast<const char *>(x) + p.begin, p.end - p.begin);
-  std::string out;
-  for (size_t i = 0; i < raw.size(); ++i) {
-    const size_t semicolon = raw[i] == '&' ? raw.find(';', i) : std::string::npos;
-    if (semicolon == std::string::npos) { out += raw[i]; continue; }
-    const std::string name = raw.substr(i + 1, semicolon - i - 1);
-    static const std::map<std::string, char> named_entities = {
-        {"amp", '&'}, {"lt", '<'}, {"gt", '>'}, {"quot", '"'}, {"apos", '\''}};
-    unsigned long code = 0;
-    if (named_entities.count(name)) out += named_entities.at(name);
-    else if (name.size() > 1 && name[0] == '#' &&
-             (code = std::strtoul(name.c_str() + (name[1] == 'x' ? 2 : 1), nullptr, name[1] == 'x' ? 16 : 10)) &&
-             code < 0x80) out += static_cast<char>(code);
-    else { out += raw[i]; continue; }
-    i = semicolon;
-  }
-  const size_t first = out.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos) return "";
-  return out.substr(first, out.find_last_not_of(" \t\r\n") - first + 1);
-}
-
-int orientation_value(const uint8_t *x, const Property &p) {
-  const std::string v = decoded(x, p);
-  return v.size() == 1 && v[0] >= '1' && v[0] <= '8' ? v[0] - '0' : 0;
+// The orientation (1-8) a property holds, or 0; `at` gets the raw bytes of its
+// digit (e.g. "6", or "&#54;").
+int orientation(const std::string &s, const Property &p, std::pair<size_t, size_t> *at = nullptr) {
+  if (!is(p.name, TIFF, "tiff", "Orientation")) return 0;
+  const std::vector<Character> v = trimmed(s, p);
+  if (v.size() != 1 || v[0].c < '1' || v[0].c > '8') return 0;
+  if (at) *at = std::make_pair(v[0].begin, v[0].end);
+  return v[0].c - '0';
 }
 }  // namespace
 
 extern "C" int xmp_orientation(const uint8_t *x, size_t len) {
-  for (const Property &p : scan(x, len))
-    if (is(p, TIFF, "tiff", "Orientation") && orientation_value(x, p)) return orientation_value(x, p);
+  const std::string s(reinterpret_cast<const char *>(x), len);
+  for (const Property &p : scan(s))
+    if (const int o = orientation(s, p)) return o;
   return 0;
 }
 
 extern "C" int xmp_has_extended_reference(const uint8_t *x, size_t len) {
-  for (const Property &p : scan(x, len))
-    if (is(p, NOTE, "xmpNote", "HasExtendedXMP") && !decoded(x, p).empty()) return 1;
+  const std::string s(reinterpret_cast<const char *>(x), len);
+  for (const Property &p : scan(s))
+    if (is(p.name, NOTE, "xmpNote", "HasExtendedXMP") && !trimmed(s, p).empty()) return 1;
   return 0;
 }
 
 extern "C" int xmp_reset_orientation(uint8_t **x, size_t *len) {
-  // Each value to replace with "1": the raw value minus surrounding whitespace.
-  std::vector<std::pair<size_t, size_t>> values;
-  for (const Property &p : scan(*x, *len)) {
-    if (!is(p, TIFF, "tiff", "Orientation") || orientation_value(*x, p) <= 1) continue;
-    size_t begin = p.begin, end = p.end;
-    while (begin < end && std::strchr(" \t\r\n", (*x)[begin])) ++begin;
-    while (end > begin && std::strchr(" \t\r\n", (*x)[end - 1])) --end;
-    values.emplace_back(begin, end);
+  const std::string s(reinterpret_cast<const char *>(*x), *len);
+  // The digit of each orientation other than 1, in document order.
+  std::vector<std::pair<size_t, size_t>> digits;
+  for (const Property &p : scan(s)) {
+    std::pair<size_t, size_t> at;
+    if (orientation(s, p, &at) > 1) digits.push_back(at);
   }
-  if (values.empty()) return 0;
+  if (digits.empty()) return 0;
   std::string out;
-  size_t at = 0;
-  for (const auto &v : values) {
-    out.append(reinterpret_cast<const char *>(*x) + at, v.first - at);
+  size_t from = 0;
+  for (const auto &d : digits) {
+    out.append(s, from, d.first - from);
     out += '1';
-    at = v.second;
+    from = d.second;
   }
-  out.append(reinterpret_cast<const char *>(*x) + at, *len - at);
+  out.append(s, from, std::string::npos);
   uint8_t *copy = static_cast<uint8_t *>(std::malloc(out.size()));
   if (!copy) return -1;
   std::memcpy(copy, out.data(), out.size());
   std::free(*x);
   *x = copy;
   *len = out.size();
-  return static_cast<int>(values.size());
+  return static_cast<int>(digits.size());
 }
