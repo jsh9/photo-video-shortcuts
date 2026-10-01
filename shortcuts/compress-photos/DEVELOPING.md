@@ -123,11 +123,12 @@ a JPEG XL gain map (`jhgm` box). `src/heif.c` and `src/gainmap.c`:
   parsed per ISO 21496-1 (version 0).
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
   is also Apple's auxiliary image `urn:com:apple:photo:2020:aux:hdrgainmap`,
-  half the photo's size, 8-bit grey. It is stored like the primary image, so it
-  is decoded as stored and turned with the primary's rotation and mirroring to
-  line up with the upright photo; its own rotation is ignored (ImageIO writes
-  `irot` 0 on it when the photo is rotated). Monochrome values are expanded if
-  the stream says limited range.
+  half the photo's size, 8-bit grey. Apple stores it like the primary image,
+  without turning it (ImageIO writes `irot` 0 on it), so unless it is rotated
+  or mirrored itself, the primary's rotation and mirroring apply to it, to line
+  up with the upright photo. A crop (`clap`, e.g. for an odd height) doesn't
+  matter: the gain map is scaled to the photo. Monochrome values are expanded
+  if the stream says limited range.
 - **The math**, at full strength (the alternate rendition): the gain map is
   enlarged to the photo's size (bilinear); for a gain map value `g`, the gain
   is `log2 G = min + (max - min) * g^(1/gamma)`; the SDR value, linearized with
@@ -139,9 +140,9 @@ a JPEG XL gain map (`jhgm` box). `src/heif.c` and `src/gainmap.c`:
   PQ (CICP), `intensity_target` 10000.
 - **Not used** (the photo is converted as SDR, with
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
-  sRGB with the sRGB curve, a gain map in another color space, a cropped photo
-  (`clap`), a gain map whose shape doesn't match, other metadata versions.
-  Photos with only Apple's older gain map (before iOS 18) stay SDR.
+  sRGB with the sRGB curve, a gain map in another color space, a gain map whose
+  shape doesn't match, other metadata versions. Photos with only Apple's older
+  gain map (before iOS 18) stay SDR.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.

@@ -54,9 +54,24 @@ static int find_gain_map(struct heif_context *ctx, heif_item_id primary, heif_it
   return rc;
 }
 
-// Applies `item`'s rotation and mirroring to `img`, as libheif applies them
-// to that item's own pixels. Returns -1 if it has other transformations.
-static int apply_transformations(struct heif_context *ctx, heif_item_id item, image_t *img) {
+// 1 if `item` is rotated or mirrored ('irot' other than 0, or 'imir').
+static int is_turned(struct heif_context *ctx, heif_item_id item) {
+  heif_property_id props[16];
+  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
+  for (int i = 0; i < n; i++) {
+    const uint32_t type = (uint32_t)heif_item_get_property_type(ctx, item, props[i]);
+    if (type == heif_fourcc('i', 'm', 'i', 'r')) return 1;
+    if (type == heif_fourcc('i', 'r', 'o', 't') &&
+        heif_item_get_property_transform_rotation_ccw(ctx, item, props[i]) != 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// Applies `item`'s rotation and mirroring (not its crop) to `img`, as
+// libheif applies them to that item's own pixels. Returns -1 if out of memory.
+static int apply_rotation(struct heif_context *ctx, heif_item_id item, image_t *img) {
   heif_property_id props[16];
   const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
   for (int i = 0; i < n; i++) {
@@ -67,10 +82,10 @@ static int apply_transformations(struct heif_context *ctx, heif_item_id item, im
       orientation = ccw == 90 ? 8 : ccw == 180 ? 3 : ccw == 270 ? 6 : 1;
     } else if (type == heif_fourcc('i', 'm', 'i', 'r')) {
       const enum heif_transform_mirror_direction d = heif_item_get_property_transform_mirror(ctx, item, props[i]);
-      if (d == heif_transform_mirror_direction_invalid) return -1;
+      if (d == heif_transform_mirror_direction_invalid) continue;
       orientation = d == heif_transform_mirror_direction_horizontal ? 2 : 4;
     } else {
-      return -1;  // a crop ('clap')
+      continue;  // a crop ('clap'): the gain map is scaled to the photo anyway
     }
     if (image_orient(img, orientation) != 0) return -1;
   }
@@ -94,11 +109,7 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   heif_image_handle_get_preferred_decoding_colorspace(handle, &space, &chroma);
   const int mono = space == heif_colorspace_monochrome;
   const int wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;
-  // The gain map is stored like the primary image (its own rotation, if any,
-  // isn't the photo's), so it is decoded as stored and turned with the
-  // primary's rotation and mirroring below.
   options = heif_decoding_options_alloc();
-  options->ignore_transformations = 1;
   struct heif_error e =
       mono ? heif_decode_image(handle, &image, heif_colorspace_monochrome, heif_chroma_monochrome, options)
            : heif_decode_image(handle, &image, heif_colorspace_RGB,
@@ -132,8 +143,10 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   }
   heif_nclx_color_profile_free(nclx);
   image = NULL;
-  if (apply_transformations(ctx, heif_image_handle_get_item_id(primary), gm) != 0) {
-    snprintf(note, note_len, "the photo is cropped");
+  // Apple stores the gain map like the primary image, without turning it
+  // (ImageIO writes 'irot' 0): the primary's rotation and mirroring apply.
+  if (!is_turned(ctx, id) && apply_rotation(ctx, heif_image_handle_get_item_id(primary), gm) != 0) {
+    snprintf(note, note_len, "not enough memory");
     goto done;
   }
   rc = 0;
