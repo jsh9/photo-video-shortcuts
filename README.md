@@ -98,12 +98,12 @@ which files each release changed; download only those, the same way as above.
 
 ## 3. Repository layout
 
-| Path                | What it is                                                                                       |
-| ------------------- | ------------------------------------------------------------------------------------------------ |
-| `shortcuts/<name>/` | one folder per shortcut: its README, developer notes, encoder source and build scripts           |
-| `docs/`             | documentation shared by all shortcuts                                                            |
-| `tests/`            | tests (coming soon); `tests/samples/` holds your own test photos and videos and is not committed |
-| `licenses/`         | licenses of the third-party libraries built into the release files                               |
+| Path                | What it is                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `shortcuts/<name>/` | one folder per shortcut: its README, developer notes, encoder source and build scripts                                      |
+| `docs/`             | documentation shared by all shortcuts                                                                                       |
+| `tests/`            | tests (see [tests/README.md](tests/README.md)); `tests/samples/` holds your own test photos and videos and is not committed |
+| `licenses/`         | licenses of the third-party libraries built into the release files                                                          |
 
 ## 4. License
 

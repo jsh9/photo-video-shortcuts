@@ -69,8 +69,9 @@ dkms.conf
 build/
 dist/
 
-# Python and formatter caches
+# Python, tox and formatter caches
 __pycache__/
+.tox/
 .ruff_cache/
 
 # Test photos and videos: personal, and may contain GPS locations

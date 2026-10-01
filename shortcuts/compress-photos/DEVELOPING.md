@@ -93,8 +93,10 @@ python3 scripts/build_shortcuts.py --guess
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC) and a 12 MP encode. Running it in a-Shell checks the
   phone.
-- **Tests** will live in [`tests/compress-photos/`](../../tests/README.md) (not
-  added yet).
+- **Tests** are in `tests/compress-photos/`: the generated shortcuts, the
+  encoder, end-to-end conversions checked with Apple's ImageIO, and the
+  shortcut's a-Shell commands run against the encoder. Run `python3 -m pytest`
+  from the repository root; see [tests/README.md](../../tests/README.md).
 
 ## 4. Generating the shortcuts
 
