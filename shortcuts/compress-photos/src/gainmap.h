@@ -28,6 +28,9 @@ int gainmap_parse(const uint8_t *data, size_t len, gainmap_meta_t *meta, char *e
 // profile or CICP code points: 1 (sRGB) or 12 (Display P3); 0 for any other
 // color space.
 int gainmap_srgb_primaries(const color_t *color);
+// A short name for the color, for messages: the ICC profile's description,
+// or the CICP code points.
+void gainmap_color_name(const color_t *color, char *buf, size_t len);
 
 // Applies the gain map at full strength, giving the HDR (alternate) image.
 // `base`: upright RGB or RGBA, 8 to 16 bits, sRGB transfer curve.

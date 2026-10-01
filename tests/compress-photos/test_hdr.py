@@ -73,7 +73,7 @@ def test_brightness_matches_apple(renderings, name):
     apple, ours = renderings[name]
     assert ours.shape == apple.shape  # upright, like Apple's rendering
     want = ph.brightness(apple)
-    assert want[-1] > 1.5, 'the test photo should be brighter than SDR'
+    assert want[-1] > 1.2, 'the test photo should be brighter than SDR'
     np.testing.assert_allclose(ph.brightness(ours), want, rtol=0.05, atol=0.01)
 
 

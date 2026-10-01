@@ -173,7 +173,9 @@ static void apply_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   if (found <= 0) return;
   const int primaries = gainmap_srgb_primaries(color);
   if (!primaries) {
-    snprintf(note, note_len, "unsupported color profile");
+    char name[64];
+    gainmap_color_name(color, name, sizeof name);
+    snprintf(note, note_len, "unsupported color profile: %s", name);
     return;
   }
   if (!meta.use_base_color_space) {

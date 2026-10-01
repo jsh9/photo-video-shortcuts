@@ -157,6 +157,37 @@ static int icc_primaries(const blob_t *icc) {
   return 0;
 }
 
+void gainmap_color_name(const color_t *color, char *buf, size_t len) {
+  snprintf(buf, len, "%s", color->icc.size ? "ICC profile" : "no profile");
+  if (!color->icc.size) {
+    if (color->cicp_present) snprintf(buf, len, "CICP %u/%u", color->cicp[0], color->cicp[1]);
+    return;
+  }
+  size_t n = 0;
+  const uint8_t *t = icc_tag(&color->icc, "desc", &n);
+  const uint8_t *text = NULL;
+  size_t chars = 0, step = 1;
+  if (t && n >= 12 && memcmp(t, "desc", 4) == 0) {  // ICC v2: ASCII
+    chars = rd32(t + 8);
+    if (chars > n - 12) chars = n - 12;
+    text = t + 12;
+  } else if (t && n >= 28 && memcmp(t, "mluc", 4) == 0) {  // v4: UTF-16, first record
+    const uint32_t size = rd32(t + 20), offset = rd32(t + 24);
+    if (offset <= n && size <= n - offset) {
+      text = t + offset + 1;  // the low byte of each big-endian code unit
+      chars = size / 2;
+      step = 2;
+    }
+  }
+  if (!text) return;
+  size_t k = 0;
+  for (size_t i = 0; i < chars && k + 1 < len && text[i * step]; i++) {
+    const uint8_t c = text[i * step];
+    buf[k++] = (char)(c >= 0x20 && c < 0x7f ? c : '?');
+  }
+  if (k) buf[k] = 0;
+}
+
 int gainmap_srgb_primaries(const color_t *color) {
   if (color->icc.size) return icc_primaries(&color->icc);
   if (color->cicp_present && color->cicp[1] == 13 && (color->cicp[0] == 1 || color->cicp[0] == 12)) {
