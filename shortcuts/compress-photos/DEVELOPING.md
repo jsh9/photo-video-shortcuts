@@ -11,6 +11,7 @@ ______________________________________________________________________
 
 - [1. How it works](#1-how-it-works)
   - [1.1. XMP](#11-xmp)
+  - [1.2. HDR](#12-hdr)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -108,20 +109,56 @@ rather than losing metadata; other photos continue. This includes a
 `HasExtendedXMP` reference with no fragments in the file, and a JPEG metadata
 segment that is cut short, since either could mean metadata is lost. Failed
 photos are absent from `jxl_done.txt`, so the shortcut cannot offer to delete
-their originals. The CLI and job/result formats stay the same. No HDR gain-map
-conversion is added here.
+their originals. The CLI and job/result formats stay the same.
+
+### 1.2. HDR
+
+A HEIC with an ISO 21496-1 gain map, as iPhones write since iOS 18, becomes an
+HDR JPEG XL: Photos and ImageIO show HDR stored in the pixels as PQ, but ignore
+a JPEG XL gain map (`jhgm` box). `src/heif.c` and `src/gainmap.c`:
+
+- **Finding it.** libheif doesn't read the `tmap` item (the gain map's
+  metadata), so `jxlbatch` finds it with libheif's generic item API: a `tmap`
+  whose `dimg` inputs are the primary image and the gain map. Its data is
+  parsed per ISO 21496-1 (version 0).
+- **The gain map** is decoded like any image, by its item ID. On an iPhone it
+  is also Apple's auxiliary image `urn:com:apple:photo:2020:aux:hdrgainmap`,
+  half the photo's size, 8-bit grey. When it has no rotation or mirroring of
+  its own, the primary's apply to it (Apple stores both the same way), so it
+  lines up with the upright photo. Monochrome values are expanded if the stream
+  says limited range.
+- **The math**, at full strength (the alternate rendition): the gain map is
+  enlarged to the photo's size (bilinear); for a gain map value `g`, the gain
+  is `log2 G = min + (max - min) * g^(1/gamma)`; the SDR value, linearized with
+  the sRGB curve, becomes `(sdr + base_offset) * G - alternate_offset`, in the
+  photo's own primaries (`use_base_colour_space`).
+- **The result** is 16-bit PQ with SDR white at 203 nits (ITU-R BT.2408), in
+  Display P3 (or sRGB) primaries, written row by row from lookup tables, with
+  no floating-point image. It is encoded with libjxl's usual lossy settings, as
+  PQ (CICP), `intensity_target` 10000.
+- **Not used** (the photo is converted as SDR, with
+  `! HDR gain map not used (reason)`): a color profile other than Display P3 or
+  sRGB with the sRGB curve, a gain map in another color space, a cropped photo
+  whose gain map has no transformations of its own, a gain map whose shape
+  doesn't match, other metadata versions. Photos with only Apple's older gain
+  map (before iOS 18) stay SDR.
+- **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
+  belong to the gain map's own XMP packet, not the photo's, so they aren't
+  copied.
+- **Memory:** the 16-bit image adds about 0.15 GB at 24 MP and 0.3 GB at 48 MP;
+  in wasmtime, converting takes about 0.7 GB and 0.95 GB.
 
 ## 2. Layout
 
-| Path                         | What it is                                                                                                                                                                                                                                              |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                  |
-| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                          |
-| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` (tiny HEIC for `--selftest`) |
-| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                               |
-| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                 |
-| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                 |
-| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                              |
+| Path                         | What it is                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                        |
+| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                |
+| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `gainmap.c` (HDR from ISO gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` (tiny HEIC for `--selftest`) |
+| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                     |
+| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                       |
+| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                       |
+| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                                                                    |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).

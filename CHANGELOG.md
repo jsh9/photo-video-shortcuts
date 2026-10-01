@@ -3,6 +3,22 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.2.0] - 2026-10-01
+
+- Added
+  - HDR photos: a HEIC with an ISO 21496-1 gain map (iPhones since iOS 18)
+    becomes an HDR JPEG XL that lights up in Photos like the original.
+    `jxlbatch` applies the gain map and stores the HDR result as 16-bit PQ in
+    Display P3, with SDR white at 203 nits, because Photos ignores JPEG XL gain
+    maps. a-Shell shows such a photo as, for example, "HDR 3.5×". On SDR
+    screens, iOS tone-maps the HDR pixels instead of showing the camera's SDR
+    version. Only `jxlbatch.wasm` needs updating.
+  - A photo whose gain map can't be used is converted as SDR, with a note ("HDR
+    gain map not used") in a-Shell. Photos without a gain map, and those with
+    only Apple's older gain map (before iOS 18), convert exactly as before.
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/5
+
 ## [Compress Photos 0.1.1] - 2026-10-01
 
 - Fixed
