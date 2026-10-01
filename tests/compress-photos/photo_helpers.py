@@ -122,12 +122,10 @@ PHOTOS = {
     # HDR, with an ISO 21496-1 gain map as iPhones write since iOS 18
     'heic_hdr': ('heic', ['--p3', '--hdr']),
     'heic_hdr_rot6': ('heic', ['--p3', '--orientation', '6', '--hdr']),
-    'heic_hdr_rgb': ('heic', ['--hdr-rgb']),  # sRGB, a gain per channel
+    'heic_hdr_srgb': ('heic', ['--hdr']),
 }
 HDR_PHOTOS = {
-    name
-    for name, (_, options) in PHOTOS.items()
-    if {'--hdr', '--hdr-rgb'} & set(options)
+    name for name, (_, options) in PHOTOS.items() if '--hdr' in options
 }
 
 

@@ -6,6 +6,8 @@ is compared with Apple's own HDR rendering of the original. Photos without a
 gain map stay SDR.
 """
 
+import re
+
 import numpy as np
 import photo_helpers as ph
 import pytest
@@ -53,12 +55,17 @@ def test_output_shows_headroom(batch, name):
 
 @pytest.mark.parametrize('name', HDR)
 def test_stored_as_16_bit_pq(batch, name):
-    original, jxl, _ = batch.results[name]
-    info = jxlinfo(jxl)
-    primaries = 'P3' if '--p3' in ph.PHOTOS[name][1] else 'sRGB'
-    assert '16-bit RGB' in info
-    assert f'{primaries} primaries, PQ transfer function' in info
-    assert 'intensity_target: 10000.' in info
+    _, jxl, _ = batch.results[name]
+    # jxlinfo 0.11 prints "P3 primaries, PQ transfer function", later
+    # versions "Primaries: P3" and "Transfer function: PQ".
+    info = jxlinfo(jxl).lower()
+    primaries = 'p3' if '--p3' in ph.PHOTOS[name][1] else 'srgb'
+    assert '16-bit rgb' in info
+    assert (
+        f'{primaries} primaries' in info or f'primaries: {primaries}' in info
+    )
+    assert 'pq transfer function' in info or 'transfer function: pq' in info
+    assert re.search(r'intensity[_ ]target: 10000\.', info)
 
 
 @pytest.mark.parametrize('name', HDR)

@@ -94,7 +94,11 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   heif_image_handle_get_preferred_decoding_colorspace(handle, &space, &chroma);
   const int mono = space == heif_colorspace_monochrome;
   const int wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;
+  // The gain map is stored like the primary image (its own rotation, if any,
+  // isn't the photo's), so it is decoded as stored and turned with the
+  // primary's rotation and mirroring below.
   options = heif_decoding_options_alloc();
+  options->ignore_transformations = 1;
   struct heif_error e =
       mono ? heif_decode_image(handle, &image, heif_colorspace_monochrome, heif_chroma_monochrome, options)
            : heif_decode_image(handle, &image, heif_colorspace_RGB,
@@ -128,10 +132,7 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   }
   heif_nclx_color_profile_free(nclx);
   image = NULL;
-  // An Apple gain map is stored like the primary image: when it has no
-  // rotation or mirroring of its own, the primary's apply to it too.
-  if (heif_item_get_transformation_properties(ctx, id, NULL, 0) == 0 &&
-      apply_transformations(ctx, heif_image_handle_get_item_id(primary), gm) != 0) {
+  if (apply_transformations(ctx, heif_image_handle_get_item_id(primary), gm) != 0) {
     snprintf(note, note_len, "the photo is cropped");
     goto done;
   }

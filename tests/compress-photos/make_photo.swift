@@ -4,13 +4,13 @@
 //
 // usage: make_photo IN.png OUT.heic|OUT.jpg [--orientation N] [--p3]
 //                   [--depth16] [--make MAKE] [--model MODEL]
-//                   [--hdr | --hdr-rgb]
+//                   [--hdr]
 //
 // --p3 tags the pixels as Display P3; --depth16 hands ImageIO 16-bit pixels
 // (which it may store as 10-bit HEIC). --hdr (HEIC, macOS 15 or later) adds an
-// ISO 21496-1 gain map, as iPhones do since iOS 18; --hdr-rgb adds one with a
-// gain per color channel. In the HDR rendition, linear values v become
-// v * (1 + 3 v^2): white is 4 times as bright, dark tones barely change.
+// ISO 21496-1 gain map, as iPhones do since iOS 18. In the HDR rendition,
+// linear values v become v * (1 + 3 v^2): white is 4 times as bright, dark
+// tones barely change.
 import CoreGraphics
 import CoreImage
 import Foundation
@@ -32,7 +32,6 @@ var depth16 = false
 var make = "TestMake"
 var model = "TestModel 1"
 var hdr = false
-var hdrRGB = false
 while !args.isEmpty {
   let a = args.removeFirst()
   switch a {
@@ -42,7 +41,6 @@ while !args.isEmpty {
   case "--make": make = args.removeFirst()
   case "--model": model = args.removeFirst()
   case "--hdr": hdr = true
-  case "--hdr-rgb": (hdr, hdrRGB) = (true, true)
   default: fail("unknown option \(a)")
   }
 }
@@ -87,7 +85,7 @@ if hdr {
   do {
     try CIContext().writeHEIFRepresentation(
       of: sdr, to: temporary, format: .RGBA8, colorSpace: space,
-      options: [.hdrImage: hdrImage, .hdrGainMapAsRGB: hdrRGB])
+      options: [.hdrImage: hdrImage, .hdrGainMapAsRGB: false])
   } catch { fail("cannot write the HDR rendition: \(error)") }
   // Read into memory: ImageIO decodes lazily, after the file is removed.
   guard let data = try? Data(contentsOf: temporary),
