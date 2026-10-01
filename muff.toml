@@ -1,0 +1,9 @@
+# Formatting settings for muff-format (pre-commit), a fork of Ruff.
+# Docs: https://docs.astral.sh/ruff/configuration
+line-length = 79
+target-version = "py310"
+
+[format]
+docstring-code-format = true
+preview = true
+quote-style = "single"

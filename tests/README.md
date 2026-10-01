@@ -3,7 +3,19 @@
 Coming soon. Tests will live in one folder per shortcut, for example
 `tests/compress-photos/`.
 
-## Test photos and videos
+<!--TOC-->
+
+______________________________________________________________________
+
+**Table of Contents**
+
+- [1. Test photos and videos](#1-test-photos-and-videos)
+
+______________________________________________________________________
+
+<!--TOC-->
+
+## 1. Test photos and videos
 
 Put your own test files in `tests/samples/<shortcut>/`, for example
 `tests/samples/compress-photos/`. That folder is not committed: personal photos

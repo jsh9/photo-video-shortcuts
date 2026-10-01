@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Generates the two iPhone shortcuts as signed .shortcut files.
+"""
+Generates the two iPhone shortcuts as signed .shortcut files.
 
-  "Compress to JPEG XL"  share-sheet shortcut: stages photos in a-Shell and
-                         runs jxlbatch (see ../README.md)
-  "JXL-Import"           started by a-Shell when encoding is done: saves the
-                         JXL files to Photos and cleans up
+- "Compress to JPEG XL": share-sheet shortcut that stages photos in a-Shell and
+  runs jxlbatch (see ../README.md).
+- "JXL-Import": started by a-Shell when encoding is done; saves the JXL files
+  to Photos and cleans up.
 
 a-Shell's actions (and a few built-in ones whose parameter names vary between
 iOS versions) are copied from a real shortcut built on the iPhone and fetched
-through its iCloud link: scripts/sample/JXL Sample.plist (see --fetch). If
-the sample lacks one of those actions, the script stops with an error instead
-of writing a shortcut that won't work.
+through its iCloud link: scripts/sample/JXL Sample.plist (see --fetch). If the
+sample lacks one of those actions, the script stops with an error instead of
+writing a shortcut that won't work.
 
-usage:
-  build_shortcuts.py --fetch https://www.icloud.com/shortcuts/<id>
-  build_shortcuts.py [--no-sign]
+Usage::
+
+    build_shortcuts.py --guess [--no-sign]
+    build_shortcuts.py --fetch https://www.icloud.com/shortcuts/<id>
+    build_shortcuts.py [--no-sign]
 """
 
 import argparse
@@ -73,13 +76,16 @@ def fetch_sample(link):
     api = f'https://www.icloud.com/shortcuts/api/records/{record_id}'
     with urllib.request.urlopen(api) as resp:
         record = json.load(resp)
+
     url = record['fields']['shortcut']['value']['downloadURL']
     with urllib.request.urlopen(url) as resp:
         data = resp.read()
+
     workflow = plistlib.loads(data)
     SAMPLE.parent.mkdir(parents=True, exist_ok=True)
     with open(SAMPLE, 'wb') as f:
         plistlib.dump(workflow, f, fmt=plistlib.FMT_XML)
+
     print(f'saved {SAMPLE}')
 
 
@@ -90,13 +96,15 @@ class Sample:
         else:
             with open(source, 'rb') as f:
                 self.workflow = plistlib.load(f)
+
         self.actions = self.workflow['WFWorkflowActions']
 
     def template(self, suffix):
-        """First sample action whose identifier ends with `suffix`."""
+        """First sample action whose identifier ends with ``suffix``."""
         for a in self.actions:
             if a['WFWorkflowActionIdentifier'].endswith(suffix):
                 return copy.deepcopy(a)
+
         sys.exit(f'the sample shortcut has no action ending in "{suffix}"')
 
 
@@ -105,12 +113,14 @@ ASHELL_BUNDLE_ID = 'AsheKube.app.a-Shell'
 
 
 def guessed_workflow():
-    """Hand-written templates for --guess, used when no real sample exists.
+    """
+    Hand-written templates for --guess, used when no real sample exists.
 
     a-Shell's actions are stored as "AsheKube.app.a-Shell.<Intent>" with only
-    their own parameters (names from a-Shell's Base.lproj/Intents.intentdefinition),
-    as in shortcuts shared in a-Shell's GitHub issues (#74, #279, #311, #423,
-    #439, #546). Adding an IntentAppDefinition block makes them "Unknown Action".
+    their own parameters (names from a-Shell's
+    Base.lproj/Intents.intentdefinition), as in shortcuts shared in a-Shell's
+    GitHub issues (#74, #279, #311, #423, #439, #546). Adding an
+    IntentAppDefinition block makes them "Unknown Action".
     """
 
     def action(identifier, params):
@@ -167,13 +177,11 @@ class Ref:
 
 
 def output_of(action, name):
-    return Ref(
-        {
-            'Type': 'ActionOutput',
-            'OutputUUID': action['WFWorkflowActionParameters']['UUID'],
-            'OutputName': name,
-        }
-    )
+    return Ref({
+        'Type': 'ActionOutput',
+        'OutputUUID': action['WFWorkflowActionParameters']['UUID'],
+        'OutputName': name,
+    })
 
 
 def variable(name):
@@ -200,9 +208,11 @@ def text(*parts):
             string += OBJ
         else:
             string += part
+
     value = {'string': string}
     if attachments:
         value['attachmentsByRange'] = attachments
+
     return {'Value': value, 'WFSerializationType': 'WFTextTokenString'}
 
 
@@ -210,6 +220,7 @@ def plain_or_text(*parts):
     """A plain string when there are no variables, else a text field."""
     if all(isinstance(p, str) for p in parts):
         return ''.join(parts)
+
     return text(*parts)
 
 
@@ -231,6 +242,7 @@ class Builder:
                 'WFWorkflowActionIdentifier': identifier_or_template,
                 'WFWorkflowActionParameters': dict(params),
             }
+
         action['WFWorkflowActionParameters']['UUID'] = new_uuid()
         self.actions.append(action)
         return action
@@ -276,12 +288,11 @@ class Builder:
         if separator == '\n':
             params['WFTextSeparator'] = 'New Lines'
         else:
-            params.update(
-                {
-                    'WFTextSeparator': 'Custom',
-                    'WFTextCustomSeparator': separator,
-                }
-            )
+            params.update({
+                'WFTextSeparator': 'Custom',
+                'WFTextCustomSeparator': separator,
+            })
+
         return output_of(
             self.add('is.workflow.actions.text.split', params), 'Split Text'
         )
@@ -321,16 +332,14 @@ class Builder:
 
     def repeat_each(self, ref, body):
         group = new_uuid()
-        self.actions.append(
-            {
-                'WFWorkflowActionIdentifier': 'is.workflow.actions.repeat.each',
-                'WFWorkflowActionParameters': {
-                    'GroupingIdentifier': group,
-                    'WFControlFlowMode': 0,
-                    'WFInput': attachment(ref),
-                },
-            }
-        )
+        self.actions.append({
+            'WFWorkflowActionIdentifier': 'is.workflow.actions.repeat.each',
+            'WFWorkflowActionParameters': {
+                'GroupingIdentifier': group,
+                'WFControlFlowMode': 0,
+                'WFInput': attachment(ref),
+            },
+        })
         body()
         end = {
             'WFWorkflowActionIdentifier': 'is.workflow.actions.repeat.each',
@@ -349,16 +358,14 @@ class Builder:
         group = new_uuid()
 
         def mark(mode, extra):
-            self.actions.append(
-                {
-                    'WFWorkflowActionIdentifier': 'is.workflow.actions.conditional',
-                    'WFWorkflowActionParameters': {
-                        'GroupingIdentifier': group,
-                        'WFControlFlowMode': mode,
-                        **extra,
-                    },
-                }
-            )
+            self.actions.append({
+                'WFWorkflowActionIdentifier': 'is.workflow.actions.conditional',
+                'WFWorkflowActionParameters': {
+                    'GroupingIdentifier': group,
+                    'WFControlFlowMode': mode,
+                    **extra,
+                },
+            })
 
         mark(
             0,
@@ -494,7 +501,8 @@ class Builder:
         return output_of(self.add(a, params), 'File')
 
     def ashell_execute(self, *command, keep_going, open_app):
-        """One a-Shell command text; several commands go on separate lines.
+        """
+        One a-Shell command text; several commands go on separate lines.
 
         open_app: 'open' (run in a-Shell, needed for WebAssembly) or 'close'
         (run in the background, for built-in commands like rm).
@@ -518,7 +526,8 @@ def vcard_escape(value):
 
 
 def choose_quality(b):
-    """Shows QUALITY_PRESETS as a list and returns the chosen quality.
+    """
+    Shows QUALITY_PRESETS as a list and returns the chosen quality.
 
     Menus in Shortcuts show only a title. So each preset is a contact card
     instead (a well-known Shortcuts technique): the name (N) is the title, and
@@ -537,6 +546,7 @@ def choose_quality(b):
             f'ORG;CHARSET=utf-8:{vcard_escape(description)}\n'
             'END:VCARD'
         )
+
     cards_file = b.set_name(b.text('\n'.join(cards)), 'quality.vcf')
     chosen = b.choose_from_list(
         b.contacts_from_input(cards_file), 'JPEG XL quality'
@@ -546,7 +556,8 @@ def choose_quality(b):
 
 
 def run_jxlbatch(b, quality, then):
-    """a-Shell command: run jxlbatch, then the command `then`.
+    """
+    a-Shell command: run jxlbatch, then the command ``then``.
 
     When this launches a-Shell, its WebAssembly engine may still be loading,
     and a-Shell then ends jxlbatch before it runs. So wait 2 s first, and if
@@ -565,12 +576,13 @@ def run_jxlbatch(b, quality, then):
 
 
 def save_results(b, originals=None):
-    """Saves the JPEG XL files listed in jxl_done.txt to Photos, each also to
-    the albums its original is in.
+    """
+    Saves the JPEG XL files listed in jxl_done.txt to Photos, each also to the
+    albums its original is in.
 
-    Each line is "file|index|name". With `originals` (the staged photos), the
-    albums are read from the original at the line's index, and that original
-    is added to the variable Converted. Without, they are read from
+    Each line is "file|index|name". With ``originals`` (the staged photos), the
+    albums are read from the original at the line's index, and that original is
+    added to the variable Converted. Without, they are read from
     jxl_albums_<index>.txt, one album name per line, if that file exists.
     Returns the number of photos saved.
     """
@@ -716,14 +728,12 @@ def workflow(sample, name, actions, share_sheet):
         )
         if k in s
     }
-    wf.update(
-        {
-            'WFWorkflowName': name,
-            'WFWorkflowActions': actions,
-            'WFWorkflowImportQuestions': [],
-            'WFWorkflowHasShortcutInputVariables': share_sheet,
-        }
-    )
+    wf.update({
+        'WFWorkflowName': name,
+        'WFWorkflowActions': actions,
+        'WFWorkflowImportQuestions': [],
+        'WFWorkflowHasShortcutInputVariables': share_sheet,
+    })
     if share_sheet:
         for k in (
             'WFWorkflowTypes',
@@ -732,6 +742,7 @@ def workflow(sample, name, actions, share_sheet):
         ):
             if k in s:
                 wf[k] = copy.deepcopy(s[k])
+
         if 'ActionExtension' not in wf.get('WFWorkflowTypes', []):
             sys.exit('the sample shortcut is not set to Show in Share Sheet')
     else:
@@ -739,6 +750,7 @@ def workflow(sample, name, actions, share_sheet):
         wf['WFWorkflowInputContentItemClasses'] = copy.deepcopy(
             s.get('WFWorkflowInputContentItemClasses', [])
         )
+
     return wf
 
 
@@ -750,14 +762,17 @@ def write(name, wf, sign):
     unsigned = OUT / f'{name}.unsigned.wflow'
     with open(unsigned, 'wb') as f:
         plistlib.dump(wf, f, fmt=plistlib.FMT_BINARY)
+
     with open(OUT / f'{name}.plist', 'wb') as f:  # readable copy for review
         plistlib.dump(wf, f, fmt=plistlib.FMT_XML)
+
     subprocess.run(
         ['plutil', '-lint', str(unsigned)], check=True, capture_output=True
     )
     if not sign:
         print(f'wrote {unsigned} (unsigned)')
         return
+
     signed = DIST / f'{name}.shortcut'
     subprocess.run(
         [
@@ -802,6 +817,7 @@ def main():
     args = ap.parse_args()
     if args.fetch:
         fetch_sample(args.fetch)
+
     if args.guess:
         sample = Sample(guessed_workflow())
     elif not args.sample.exists():
@@ -810,6 +826,7 @@ def main():
         )
     else:
         sample = Sample(args.sample)
+
     write(
         NAME_A,
         workflow(sample, NAME_A, build_compress(sample), share_sheet=True),
