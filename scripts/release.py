@@ -32,6 +32,8 @@ import time
 import zipfile
 from pathlib import Path
 
+import check_changelog  # scripts/check_changelog.py
+
 ROOT = Path(__file__).resolve().parent.parent
 SHORTCUTS = ROOT / 'shortcuts'
 CHANGELOG = ROOT / 'CHANGELOG.md'
@@ -69,7 +71,7 @@ class Tool:
     def __init__(self, path):
         self.path = path
         self.name = path.name
-        self.title = self.name.replace('-', ' ').title()  # "Compress Photos"
+        self.title = check_changelog.title(self.name)  # "Compress Photos"
         self.version = (path / 'VERSION').read_text(encoding='utf-8').strip()
         if not SEMVER.fullmatch(self.version):
             raise ReleaseError(
@@ -98,27 +100,20 @@ def find_tools():
 
 
 def changelog_entry(tool):
-    """The tool's changelog section for its version, which must be dated."""
+    """
+    The tool's changelog entry, after checking that CHANGELOG.md matches every
+    shortcut's VERSION (the same checks as the pre-commit hook).
+    """
+    errors = check_changelog.problems(ROOT)
+    if errors:
+        raise ReleaseError('; '.join(errors))
+
     text = CHANGELOG.read_text(encoding='utf-8')
-    heading = re.compile(
-        rf'^## \[{re.escape(tool.title)} {re.escape(tool.version)}\] - (.+)$',
-        re.MULTILINE,
+    return next(
+        body
+        for name, version, _, body in check_changelog.entries(text)
+        if name == tool.title and version == tool.version
     )
-    match = heading.search(text)
-    if not match:
-        raise ReleaseError(
-            f'CHANGELOG.md has no "## [{tool.title} {tool.version}] - '
-            'YYYY-MM-DD" entry'
-        )
-
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', match.group(1).strip()):
-        raise ReleaseError(
-            f'CHANGELOG.md: the {tool.title} {tool.version} entry has no date '
-            f'("{match.group(1).strip()}")'
-        )
-
-    end = re.compile(r'^## ', re.MULTILINE).search(text, match.end())
-    return text[match.end() : end.start() if end else len(text)].strip()
 
 
 def check_git(tool):

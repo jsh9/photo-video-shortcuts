@@ -47,3 +47,11 @@ repos:
     rev: 0.1.4
     hooks:
       - id: blank-line-after-blocks
+  - repo: local
+    hooks:
+      - id: check-changelog
+        name: CHANGELOG.md has an entry for each shortcut's VERSION
+        entry: python3 scripts/check_changelog.py
+        language: system
+        files: ^(CHANGELOG\.md|shortcuts/[^/]+/VERSION)$
+        pass_filenames: false
