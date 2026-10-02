@@ -1,150 +1,81 @@
 """
-Diagnostics for PR #5 (throwaway branch, never merged): prints numbers for
-two failing tests. Every test passes; read the output (-s).
+Diagnostics for PR #5 (throwaway branch, never merged): prints numbers, every
+test passes; read the output (-s).
 
-1. Size: HDR vs --sdr JXL sizes, and the gain map's noise.
-2. SDR look: how Apple shows each version of an HDR photo on an SDR screen.
+Why is the rotated HDR test photo (heic_hdr_rot6) 6% brighter than Apple's
+rendering at its brightest 0.1% of pixels, while the unrotated one matches?
 """
-
-import glob
-import traceback
 
 import numpy as np
 import photo_helpers as ph
-import pytest
-from PIL import Image
-from test_memory import big_heic
 
-HDR = ['heic_hdr', 'heic_hdr_rot6', 'heic_hdr_srgb']
-QUALITIES = ['50', '70', '83', '95']
+NAMES = ['heic_hdr', 'heic_hdr_rot6']
 
 
 def say(*parts):
     print('DIAG', *parts, flush=True)
 
 
-def jxl_size(wasm, heic, folder, quality, options=()):
-    ph.stage(folder, [heic])
-    result = wasm.run([*options, '-q', quality, 'jxl_job.txt'], folder)
-    assert result.returncode == 0, result.stdout
-    return (folder / 'jxl_out_1.jxl').stat().st_size, result.stdout
+def lum(pixels):
+    return pixels.max(axis=2)
 
 
-def gain_map_noise(heic, folder):
-    """The gain map's size and high-pass standard deviation (0..255)."""
-    folder.mkdir(parents=True, exist_ok=True)
-    result = ph.run(['heif-dec', '--with-aux', heic, folder / 'base.png'])
-    found = sorted(glob.glob(str(folder / '*aux*'))) or sorted(
-        glob.glob(str(folder / '*.png'))
-    )
-    out = []
-    for path in found:
-        img = np.asarray(Image.open(path).convert('L'), dtype=np.float64)
-        blur = (
-            img[:-2, :-2] + img[:-2, 1:-1] + img[:-2, 2:]
-            + img[1:-1, :-2] + img[1:-1, 1:-1] + img[1:-1, 2:]
-            + img[2:, :-2] + img[2:, 1:-1] + img[2:, 2:]
-        ) / 9  # fmt: skip
-        noise = (img[1:-1, 1:-1] - blur).std()
-        out.append(
-            f'{path.split("/")[-1]} {img.shape[1]}x{img.shape[0]} '
-            f'mean {img.mean():.1f} high-pass std {noise:.2f}'
-        )
-
-    return out or [f'no images: {result.stdout} {result.stderr}']
+def where(label, img, pct=99.9):
+    """Rows and columns of the brightest (pct) pixels."""
+    v = lum(img)
+    ys, xs = np.nonzero(v >= np.percentile(v, pct))
+    say(label, f'top {100 - pct:.1f}%: {len(ys)} px, rows {ys.min()}-{ys.max()} '
+        f'(median {int(np.median(ys))}), cols {xs.min()}-{xs.max()} '
+        f'(median {int(np.median(xs))}), max {v.max():.3f} at '
+        f'{np.unravel_index(v.argmax(), v.shape)}')  # fmt: skip
 
 
-@pytest.mark.parametrize('name', HDR)
-def test_size(photos, wasm, name, tmp_path):
-    heic = photos[name]
-    for line in gain_map_noise(heic, tmp_path / 'aux'):
-        say(name, 'image:', line)
-
-    for q in QUALITIES:
-        hdr, _ = jxl_size(wasm, heic, tmp_path / f'hdr{q}', q)
-        sdr, _ = jxl_size(wasm, heic, tmp_path / f'sdr{q}', q, ['--sdr'])
-        say(name, f'q{q}', f'HDR {hdr} SDR {sdr} ratio {hdr / sdr:.3f}')
-
-
-def test_size_24_mp(helpers, wasm, tmp_path):
-    heic = big_heic(
-        tmp_path, helpers['make_photo'], 5712, 4284, ['--p3', '--hdr']
-    )
-    for line in gain_map_noise(heic, tmp_path / 'aux'):
-        say('24mp', 'image:', line)
-
-    hdr, _ = jxl_size(wasm, heic, tmp_path / 'hdr', '83')
-    sdr, _ = jxl_size(wasm, heic, tmp_path / 'sdr', '83', ['--sdr'])
-    say('24mp', 'q83', f'HDR {hdr} SDR {sdr} ratio {hdr / sdr:.3f}')
-
-
-def percentiles(label, pixels):
-    say('SDR look', label, np.round(ph.brightness(pixels), 3).tolist())
-
-
-@pytest.mark.parametrize('name', HDR)
-def test_sdr_look(photos, batch, helpers, wasm, apple_sdr, apple_hdr, name,
-                  tmp_path):  # fmt: skip
-    helper = helpers['hdr_pixels']
-    original = photos[name]
-    say('SDR look', '----', name)
-    try:
-        percentiles('A original HEIC (SDR decoding)', apple_sdr(original))
-        percentiles('original HEIC, Apple HDR (Core Image)', apple_hdr(original))
-    except Exception:
-        say('SDR look', 'A failed', traceback.format_exc())
-
-    derived = ph.apple_hdr_profile(helper, original, tmp_path / 'hdr.icc')
-    if derived:
-        tags = ph.icc_tags(derived)
-        desc = tags.get('desc', b'')[:120]
-        say('SDR look', 'derived profile', len(derived), 'bytes; tags',
-            sorted(tags), '; hdgm', len(tags.get('hdgm', b'')), 'bytes;',
-            'desc', desc)  # fmt: skip
-    else:
-        say('SDR look', 'no derived profile')
-
-    for ext in ('png', 'heic'):
-        out = tmp_path / f'apple_hdr.{ext}'
-        result = ph.run([helper, '--hdr-file', original, out])
-        say('SDR look', f'B file ({ext}):', result.stdout.strip(),
-            result.stderr.strip())  # fmt: skip
-        if result.returncode == 0 and out.exists():
-            try:
-                percentiles(f'B Apple HDR decoding as {ext}', apple_sdr(out))
-                percentiles(f'B {ext}, Apple HDR (Core Image)', apple_hdr(out))
-            except Exception:
-                say('SDR look', f'B {ext} failed', traceback.format_exc())
-
-    _, plain, _ = batch.results[name]
-    try:
-        percentiles('D our JXL without curve', apple_sdr(plain))
-        percentiles('our JXL, Apple HDR (Core Image)', apple_hdr(plain))
-    except Exception:
-        say('SDR look', 'D failed', traceback.format_exc())
-
-    if not derived or 'hdgm' not in ph.icc_tags(derived):
+def compare(label, a, b):
+    """b relative to a: brightness ratio across the image and at the edges."""
+    if a.shape != b.shape:
+        say(label, 'shapes differ', a.shape, b.shape)
         return
 
-    ph.run(['djxl', plain, tmp_path / 'p.ppm', '--color_space=RGB_D65_DCI_Rel_PeQ',
-            f'--icc_out={tmp_path / "p3_pq.icc"}'], check=True)  # fmt: skip
-    icc = ph.add_icc_tag(
-        (tmp_path / 'p3_pq.icc').read_bytes(), 'hdgm', ph.icc_tags(derived)['hdgm']
-    )
-    heic = tmp_path / 'with_curve.heic'
-    ph.with_item_profile(original, 'tmap', icc, heic)
-    ph.stage(tmp_path / 'job', [heic])
-    result = wasm.run(['jxl_job.txt'], tmp_path / 'job')
-    jxl = tmp_path / 'job' / 'jxl_out_1.jxl'
-    say('SDR look', 'C output', ' '.join(result.stdout.split())[-160:])
-    try:
-        percentiles('C our JXL with the curve', apple_sdr(jxl))
-    except Exception:
-        say('SDR look', 'C failed', traceback.format_exc())
+    la, lb = lum(a), lum(b)
+    ratio = (lb + 1e-3) / (la + 1e-3)
+    diff = lb - la
+    yx = np.unravel_index(np.abs(diff).argmax(), diff.shape)
+    say(label, f'ratio median {np.median(ratio):.4f}, p1 {np.percentile(ratio, 1):.4f}, '
+        f'p99 {np.percentile(ratio, 99):.4f}, max |diff| {np.abs(diff).max():.3f} '
+        f'at {yx} (a {la[yx]:.3f}, b {lb[yx]:.3f})')  # fmt: skip
+    h, w = la.shape
+    for name, sl in [('top 3 rows', np.s_[:3, :]), ('bottom 3 rows', np.s_[h - 3 :, :]),
+                     ('left 3 cols', np.s_[:, :3]), ('right 3 cols', np.s_[:, w - 3 :]),
+                     ('interior', np.s_[8 : h - 8, 8 : w - 8])]:  # fmt: skip
+        say(label, f'  {name}: mean ratio {ratio[sl].mean():.4f}, '
+            f'mean diff {diff[sl].mean():+.4f}')  # fmt: skip
 
-    # the curve on Apple's own HDR pixels, in a lossless PQ JXL: isolates
-    # the curve from jxlbatch's pixels
-    hdr_png = tmp_path / 'apple_hdr.png'
-    if hdr_png.exists():
-        say('SDR look', 'B png stored as', ph.run(['exiftool', '-s',
-            '-ProfileDescription', '-BitDepth', hdr_png]).stdout.strip())  # fmt: skip
+    say(label, 'percentiles a', np.round(ph.brightness(a), 3).tolist(),
+        'b', np.round(ph.brightness(b), 3).tolist())  # fmt: skip
+
+
+def test_rotation(photos, batch, apple_hdr, tmp_path):
+    apple, ours = {}, {}
+    for name in NAMES:
+        original, jxl, _ = batch.results[name]
+        say(name, 'heif-info:', ' | '.join(
+            line.strip() for line in ph.run(['heif-info', original]).stdout.splitlines()
+            if any(k in line for k in ('image', 'Image', 'aux', 'size', 'x'))
+        )[:900])  # fmt: skip
+        say(name, 'tmap:', ph.iso_gain_map(original))
+        say(name, 'exiftool:', ' | '.join(ph.run(['exiftool', '-a', '-G4', '-s',
+            '-ImageWidth', '-ImageHeight', '-Orientation', '-Rotation', original]
+        ).stdout.split('\n'))[:600])  # fmt: skip
+        apple[name] = apple_hdr(original)
+        ours[name] = ph.jxl_hdr_pixels(jxl, tmp_path / f'{name}.ppm')
+        say(name, 'shapes: apple', apple[name].shape, 'ours', ours[name].shape)
+        where(f'{name} apple', apple[name])
+        where(f'{name} ours ', ours[name])
+        compare(f'{name} ours vs apple', apple[name], ours[name])
+
+    # the rotated photo, turned back to the unrotated one's orientation
+    for k in (1, 3):
+        a = np.rot90(apple['heic_hdr_rot6'], k)
+        o = np.rot90(ours['heic_hdr_rot6'], k)
+        compare(f'rot90 k={k}: apple rot6 vs apple plain', apple['heic_hdr'], a)
+        compare(f'rot90 k={k}: ours rot6 vs ours plain', ours['heic_hdr'], o)
