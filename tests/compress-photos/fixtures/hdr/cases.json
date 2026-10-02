@@ -71,6 +71,10 @@
     "note": "the gain map doesn't make the photo brighter",
     "primaries": "p3"
   },
+  "not_used_derived_photo": {
+    "note": "unsupported image layout",
+    "primaries": "p3"
+  },
   "not_used_malformed": {
     "note": "malformed gain map metadata",
     "primaries": "p3"

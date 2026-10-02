@@ -16,6 +16,9 @@ libheif's own decoding).
   headroom, the peak brightness, the color primaries).
 - shortcuts/compress-photos/src/selftest_hdr_heic.h: the HDR photo for
   ``jxlbatch --selftest``.
+- fixtures/heif/<name>.heic and expected.npz: SDR photos in HEIF layouts
+  beyond an iPhone's (transforms in an unusual order, derived 'iden' images
+  of a turned source), with their expected 8-bit RGB pixels (upright).
 
 Needs ffmpeg with libx265, and libheif's heif-dec, djxl and cjxl (Homebrew:
 ffmpeg, libheif, jpeg-xl). Run from anywhere: python3 make_hdr_fixtures.py The
@@ -39,6 +42,7 @@ import hdr_reference as ref  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / 'fixtures' / 'hdr'
+LAYOUTS_OUT = HERE / 'fixtures' / 'heif'
 SELFTEST_H = (
     HERE.parents[1]
     / 'shortcuts'
@@ -448,6 +452,13 @@ class Heif:
         })
         return len(self.items)
 
+    def add_prop(self, prop):
+        """A property's index (from 1), adding it if new."""
+        if prop not in self.props:
+            self.props.append(prop)
+
+        return self.props.index(prop) + 1
+
     def image(self, planes, width, height, pix_fmt, full, color, extra=(),
               hidden=False, bits=8, tile=None):  # fmt: skip
         """An hvc1 image, or a grid of hvc1 tiles (``tile`` = (w, h))."""
@@ -528,7 +539,9 @@ class Heif:
             entries, in_file, in_idat = b'', mdat_start + 8, 0
             for it in self.items:
                 n = len(it['data'])
-                if it['idat']:
+                if not n:  # no data (e.g. 'iden'): no extent
+                    entries += struct.pack('>HHHH', it['id'], 0, 0, 0)
+                elif it['idat']:
                     entries += struct.pack(
                         '>HHHHII', it['id'], 1, 0, 1, in_idat, n
                     )
@@ -626,14 +639,16 @@ class Case:
     ``crop``: (left, top, width, height) of a 'clap' crop of the stored
     primary, applied before its rotation. ``gain_map_cropped``: the gain map
     carries that crop too (but not the rotation), as ImageIO writes a full-size
-    gain map.
+    gain map. ``iden_source_turns``: the primary is a derived 'iden' image of
+    the coded photo, which is turned by that many quarter turns itself.
     """
 
     def __init__(self, name, o=1, gain_map_turned=False, crop=None, size=(W, H),
                  gain_size=None, color='p3', bits=8, tile=None, full_range=True,
                  rgb_gain_map=False, meta=ISO_META, tmap=True, apple=True,
                  upright_gain_map=False, maker=None, xmp=False, note=None,
-                 tmap_kw=None, tmap_data=None, gain_map_cropped=False):  # fmt: skip
+                 tmap_kw=None, tmap_data=None, gain_map_cropped=False,
+                 iden_source_turns=0):  # fmt: skip
         self.__dict__.update(locals())
         del self.__dict__['self']
 
@@ -685,6 +700,10 @@ CASES += [
          note="the gain map doesn't match the photo"),
     Case('not_used_malformed', tmap_data=b'\0\0\0\0\0',
          note='malformed gain map metadata'),
+    # the photo as a derived image of a turned source: its gain map's
+    # alignment isn't defined
+    Case('not_used_derived_photo', iden_source_turns=2,
+         note='unsupported image layout'),
 ]  # fmt: skip
 
 COLOR = {
@@ -744,7 +763,15 @@ def write_photo(case, path, profiles, transforms=True):
     # without them: the same coded photo, as stored (for expected())
     tf = [(t, True) for t in transforms] if write_transforms else []
     primary = h.image(planes, sw, sh, pix_fmt, full, color, tf, bits=case.bits,
-                      tile=case.tile)  # fmt: skip
+                      tile=case.tile, hidden=bool(case.iden_source_turns))  # fmt: skip
+    if case.iden_source_turns:
+        # the photo as a derived image of a turned source
+        turns = case.iden_source_turns
+        h.items[primary - 1]['props'].append((h.add_prop(irot(turns)), True))
+        iw, ih = (sw, sh) if turns % 2 == 0 else (sh, sw)
+        source, primary = primary, h.add('iden', b'', [(ispe(iw, ih), False)])
+        h.refs.append(('dimg', primary, [source]))
+
     h.primary = primary
     # the gain map
     gh_s, gw_s = gain.shape[:2]
@@ -953,6 +980,85 @@ def main():
         json.dumps(cases, indent=2, sort_keys=True) + '\n'
     )
     write_selftest(profiles)
+    write_layouts()
+
+
+# ---------------------------------------------------------------------------
+# SDR photos in unusual HEIF layouts (fixtures/heif/)
+
+
+def coded(h, rgb, extra=(), hidden=False):
+    """A lossless sRGB hvc1 image of ``rgb`` (stored), with ``extra`` props."""
+    planes = rgb_to_ycbcr(rgb, 8, True)
+    planes = [planes[0], subsample(planes[1]), subsample(planes[2])]
+    color = [(nclx(1, 13, 6, True), True)]
+    return h.image(planes, rgb.shape[1], rgb.shape[0], 'yuv420p', True, color,
+                   [(p, True) for p in extra], hidden=hidden)  # fmt: skip
+
+
+def libheif_rgb(heic):
+    """A photo as libheif decodes it, transforms applied: 8-bit RGB."""
+    with tempfile.TemporaryDirectory() as d:
+        png = Path(d) / 'out.png'
+        run(['heif-dec', heic, png])
+        return np.asarray(Image.open(png).convert('RGB'))
+
+
+def stored_rgb(rgb):
+    """``rgb`` as libheif decodes it from a plain coded image: 8-bit RGB."""
+    with tempfile.TemporaryDirectory() as d:
+        h = Heif()
+        h.primary = coded(h, rgb)
+        h.write(Path(d) / 'stored.heic')
+        return libheif_rgb(Path(d) / 'stored.heic')
+
+
+def write_layouts():
+    """
+    The photos in fixtures/heif/ and their expected pixels: for a coded photo,
+    decoded as stored, then turned and cropped in RGB in property order (as
+    Apple shows it); for a derived photo, libheif's own decoding (jxlbatch
+    leaves those transforms to libheif, as before 0.2.0).
+    """
+    LAYOUTS_OUT.mkdir(parents=True, exist_ok=True)
+    rgb = scene(64, 48)
+    raw = stored_rgb(rgb)
+    arrays = {}
+
+    def save(name, h, want=None):
+        path = LAYOUTS_OUT / f'{name}.heic'
+        h.write(path)
+        arrays[name] = libheif_rgb(path) if want is None else want
+        print(f'{name:32s} {path.stat().st_size:6d} bytes')
+        return arrays[name]
+
+    # turned, then cropped at an odd offset (crop listed after the rotation)
+    h = Heif()
+    h.primary = coded(h, rgb, [irot(1), clap(48, 64, 3, 5, 40, 52)])
+    save('rotate_then_crop', h, np.rot90(raw, 1)[5:57, 3:43])
+
+    # mirrored, then cropped
+    h = Heif()
+    h.primary = coded(h, rgb, [imir(1), clap(64, 48, 5, 3, 52, 40)])
+    save('mirror_then_crop', h, raw[:, ::-1][3:43, 5:57])
+
+    # a derived 'iden' image of a source turned 180 degrees
+    h = Heif()
+    source = coded(h, rgb, [irot(2)], hidden=True)
+    h.primary = h.add('iden', b'', [(ispe(64, 48), False)])
+    h.refs.append(('dimg', h.primary, [source]))
+    want = save('iden_rotated_source', h)
+    assert np.array_equal(want, np.rot90(raw, 2)), 'libheif should turn it'
+
+    # an 'iden' with its own crop, of a source turned 90 degrees
+    h = Heif()
+    source = coded(h, rgb, [irot(1)], hidden=True)
+    h.primary = h.add('iden', b'', [(ispe(48, 64), False),
+                                    (clap(48, 64, 3, 5, 40, 52), True)])  # fmt: skip
+    h.refs.append(('dimg', h.primary, [source]))
+    save('iden_cropped_rotated_source', h)
+
+    np.savez_compressed(LAYOUTS_OUT / 'expected.npz', **arrays)
 
 
 def write_selftest(profiles):
