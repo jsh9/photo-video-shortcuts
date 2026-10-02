@@ -188,3 +188,29 @@ def test_kept_originals_not_offered_for_deletion(shortcuts):
             appended += 1
 
     assert appended == 1
+
+
+def test_delete_prompt_only_with_originals_to_delete(shortcuts):
+    # When every original is "keep", Converted is empty: Delete Photos runs
+    # only inside "If Converted has any value".
+    actions = shortcuts['Compress Photos']
+    deletes, open_groups = 0, []
+    for action in actions:
+        p = ph.params(action)
+        if ph.ident(action) == 'is.workflow.actions.conditional':
+            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
+            if mode == 0:
+                open_groups.append((
+                    group,
+                    "'Converted'" in repr(p['WFInput']),
+                ))
+            elif mode == 1:
+                open_groups[-1] = (group, False)  # the Otherwise branch
+            else:
+                open_groups.pop()
+
+        if ph.ident(action) == 'is.workflow.actions.deletephotos':
+            assert any(converted for _, converted in open_groups)
+            deletes += 1
+
+    assert deletes == 1

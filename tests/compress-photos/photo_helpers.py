@@ -121,10 +121,16 @@ PHOTOS = {
     'jpeg_apple': ('jpg', ['--make', 'Apple', '--model', 'iPhone 17 Pro']),
     'png_alpha': ('png', []),
     # HDR, with an ISO 21496-1 gain map as iPhones write since iOS 18
+    # (labeled as Apple's by make_photos), upright, turned, mirrored, square
     'heic_hdr': ('heic', ['--p3', '--hdr']),
     'heic_hdr_rot6': ('heic', ['--p3', '--orientation', '6', '--hdr']),
+    'heic_hdr_rot3': ('heic', ['--p3', '--orientation', '3', '--hdr']),
+    'heic_hdr_mirror2': ('heic', ['--p3', '--orientation', '2', '--hdr']),
+    'heic_hdr_square_rot6': ('heic', ['--p3', '--orientation', '6', '--hdr']),
     'heic_hdr_srgb': ('heic', ['--hdr']),
 }
+# the scene's size for photos not made from the 640x427 one
+SIZES = {'heic_hdr_square_rot6': (480, 480)}
 HDR_PHOTOS = {
     name for name, (_, options) in PHOTOS.items() if '--hdr' in options
 }
@@ -133,11 +139,15 @@ HDR_PHOTOS = {
 def make_photos(folder, make_photo):
     """Writes PHOTOS into folder; returns {name: path}."""
     folder.mkdir(parents=True, exist_ok=True)
-    source = folder / 'scene.png'
-    scene(640, 427, seed=1).save(source)
+    scene(640, 427, seed=1).save(folder / 'scene.png')
     photos = {}
     for name, (ext, options) in PHOTOS.items():
         path = folder / f'{name}.{ext}'
+        source = folder / 'scene.png'
+        if name in SIZES:
+            source = folder / f'scene_{name}.png'
+            scene(*SIZES[name], seed=1).save(source)
+
         if ext == 'png':
             rgba = scene(320, 240, seed=2).convert('RGBA')
             rgba.putalpha(Image.linear_gradient('L').resize(rgba.size))
@@ -150,6 +160,10 @@ def make_photos(folder, make_photo):
         else:
             result = run([make_photo, source, path, *options])
             assert result.returncode == 0, result.stderr
+            if '--hdr' in options:
+                # labeled like an iPhone's gain map, which ImageIO doesn't do
+                with_apple_gain_map_label(path, path)
+
             # XMP, as a phone adds it (description and orientation).
             orientation = (
                 options[options.index('--orientation') + 1]
@@ -534,6 +548,17 @@ def jxl_hdr_pixels(jxl, ppm):
     return pq_to_linear(pixels / maximum) * 10000 / SDR_WHITE_NITS
 
 
+def jxl_intensity_target(jxl):
+    """
+    A JPEG XL's intensity target (its peak brightness, in nits), or None if
+    jxlinfo shows none: the default for SDR, 255 nits.
+    """
+    info = run(['jxlinfo', '-v', jxl])
+    need(info.returncode == 0, 'jxlinfo (Homebrew jpeg-xl) is needed')
+    match = re.search(r'intensity[_ ]target: ([\d.]+)', info.stdout, re.I)
+    return float(match.group(1)) if match else None
+
+
 def jxl_profile(jxl, folder):
     """The ICC profile stored in a JPEG XL (None if it has a color label)."""
     icc = Path(folder) / 'stored.icc'
@@ -677,16 +702,52 @@ def hdr_profile(heic):
     return None
 
 
+def item_profile(heic, item):
+    """The ICC profile of a HEIC's 'tmap' item or 'gain map', or None."""
+    data = Path(heic).read_bytes()
+    _, _, children = _meta(data)
+    tmap, gain_map = _gain_map_items(data, children)
+    return _item_profile(data, children, tmap if item == 'tmap' else gain_map)
+
+
 def with_item_profile(heic, item, icc, out):
     """
     Writes a copy of a HEIC with ICC profile ``icc`` added to its 'tmap' item
     (item='tmap') or its gain map (item='gain map'), as a 'colr' property.
     """
     data = Path(heic).read_bytes()
-    meta_start, meta_end, children = _meta(data)
-    tmap, gain_map = _gain_map_items(data, children)
+    tmap, gain_map = _gain_map_items(data, _meta(data)[2])
     target = tmap if item == 'tmap' else gain_map
+    _with_property(data, target, _box('colr', b'prof' + icc), out)
+
+
+APPLE_GAIN_MAP = 'urn:com:apple:photo:2020:aux:hdrgainmap'
+
+
+def with_apple_gain_map_label(heic, out):
+    """
+    Writes a copy of a HEIC whose gain map is labeled as Apple's, as in iPhone
+    photos: an auxiliary image of the photo ('auxl' reference) of Apple's type
+    ('auxC' property). ImageIO doesn't label the gain maps it writes, and
+    jxlbatch uses only labeled ones.
+    """
+    data = Path(heic).read_bytes()
+    _, _, children = _meta(data)
+    _, gain_map = _gain_map_items(data, children)
+    start, end = next((s, e) for k, s, e in children if k == 'pitm')
+    photo = _uint(data, start + 4, 2 if data[start] == 0 else 4)
+    auxc = _box('auxC', bytes(4) + APPLE_GAIN_MAP.encode() + b'\0')
+    _with_property(data, gain_map, auxc, out, ('auxl', gain_map, photo))
+
+
+def _with_property(data, target, prop, out, ref=None):
+    """
+    Writes a copy of a HEIF (``data``) with property box ``prop`` added to item
+    ``target``, and item reference ``ref`` ((type, from, to)) if given.
+    """
+    meta_start, meta_end, children = _meta(data)
     boxes = {k: (s, e) for k, s, e in children}
+    assert 'iref' in boxes or not ref, 'no iref box to add to'
     count = sum(
         len(list(_boxes(data, s, e)))
         for k, s, e in _boxes(data, *boxes['iprp'])
@@ -696,20 +757,30 @@ def with_item_profile(heic, item, icc, out):
     for kind, s, e in _boxes(data, *boxes['iprp']):
         payload = data[s:e]
         if kind == 'ipco':
-            payload += _box('colr', b'prof' + icc)
+            payload += prop
         elif kind == 'ipma':
             payload = _ipma_with(payload, target, count + 1)
             target = None  # added once
 
         iprp += _box(kind, payload)
 
-    iprp = _box('iprp', iprp)
-    old_iprp = next(e - s for k, s, e in children if k == 'iprp')
-    delta = len(iprp) - 8 - old_iprp
+    new = {'iprp': iprp}
+    if ref:
+        start, end = boxes['iref']
+        size = 2 if data[start] == 0 else 4  # item IDs, by version
+        kind, source, to = ref
+        new['iref'] = data[start:end] + _box(
+            kind,
+            source.to_bytes(size, 'big')
+            + (1).to_bytes(2, 'big')
+            + to.to_bytes(size, 'big'),
+        )
+
+    delta = sum(len(v) - (boxes[k][1] - boxes[k][0]) for k, v in new.items())
     meta = data[meta_start + 8 : meta_start + 12]  # 'meta' version and flags
     for kind, s, e in children:
-        if kind == 'iprp':
-            meta += iprp
+        if kind in new:
+            meta += _box(kind, new[kind])
         elif kind == 'iloc':
             meta += _box(kind, _iloc_moved(data[s:e], meta_end, delta))
         else:

@@ -6,8 +6,6 @@ is compared with Apple's own HDR rendering of the original. Photos without a
 gain map stay SDR.
 """
 
-import re
-
 import hdr_reference
 import numpy as np
 import photo_helpers as ph
@@ -76,9 +74,7 @@ def test_stores_peak_brightness(batch, name):
     peak = ph.SDR_WHITE_NITS * hdr_reference.iso_peak(
         ph.iso_gain_map(original)
     )
-    match = re.search(r'intensity[_ ]target: ([\d.]+)', jxlinfo(jxl), re.I)
-    assert match
-    assert float(match.group(1)) == pytest.approx(peak, rel=1e-3)
+    assert ph.jxl_intensity_target(jxl) == pytest.approx(peak, rel=1e-3)
 
 
 @pytest.mark.parametrize('name', HDR)

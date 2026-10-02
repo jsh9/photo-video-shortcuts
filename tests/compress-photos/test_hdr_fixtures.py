@@ -1,18 +1,19 @@
 """
 The committed HDR test photos (fixtures/hdr/, written by make_hdr_fixtures.py):
 the layouts the Core Image test photos can't cover. Every orientation, with and
-without the gain map's own transforms; crops; grids; 10-bit photos; RGB,
-multichannel, limited-range, full- and quarter-size gain maps; sRGB and
-unspecified color; gain maps that aren't Apple's; Apple's older gain maps
-(before iOS 18); and gain maps that can't be used.
+without the gain map's own transforms; crops (also past the photo's edges);
+grids; 10-bit photos; RGB, multichannel, limited-range, full- and quarter-size
+gain maps; sRGB and unspecified color; a gain map brighter than PQ can store;
+Apple's older gain maps (before iOS 18); and gain maps that can't be used.
 
 Converted losslessly (-q 100), an HDR photo must match the reference math
 (hdr_reference.py) to 1/65535. A photo whose gain map can't be used must say
-why, stay SDR, and be marked so that its original is kept.
+why, stay SDR, and be marked so that its original is kept; except a photo whose
+gain map isn't labeled as Apple's (not taken by an iPhone camera), whose
+original may be deleted.
 """
 
 import json
-import re
 import subprocess
 
 import numpy as np
@@ -60,13 +61,6 @@ def decoded(jxl, ppm):
     return ph.read_ppm(ppm)[0].astype(np.int64)
 
 
-def intensity_target(jxl):
-    info = ph.run(['jxlinfo', jxl], check=True).stdout
-    match = re.search(r'intensity[_ ]target: ([\d.]+)', info, re.I)
-    assert match, info
-    return float(match.group(1))
-
-
 @pytest.mark.parametrize('name', HDR)
 def test_matches_reference(converted, expected, name, tmp_path):
     jxl, output, _ = converted[name]
@@ -87,8 +81,9 @@ def test_shows_headroom(converted, name):
 def test_stores_peak_brightness(converted, name):
     # intensity_target: the brightest the photo gets, in nits
     jxl, _, _ = converted[name]
-    peak = ph.SDR_WHITE_NITS * CASES[name]['peak']
-    assert intensity_target(jxl) == pytest.approx(peak, rel=1e-3)
+    # at most PQ's 10,000 nits (libjxl rejects much more)
+    peak = min(ph.SDR_WHITE_NITS * CASES[name]['peak'], 10000)
+    assert ph.jxl_intensity_target(jxl) == pytest.approx(peak, rel=1e-3)
 
 
 @pytest.mark.parametrize('name', HDR)
@@ -103,8 +98,10 @@ def test_gain_map_not_used(converted, name):
     assert CASES[name]['note'] in output
     assert 'saved as SDR' in output
     assert 'PQ' not in ph.run(['jxlinfo', jxl], check=True).stdout
-    # its HDR isn't in the JXL, so the shortcut mustn't offer to delete it
-    assert kept
+    # its HDR isn't in the JXL, so the shortcut mustn't offer to delete it;
+    # except for a photo not taken by an iPhone, whose gain map jxlbatch
+    # doesn't use (the owner's choice)
+    assert kept == (not CASES[name].get('delete')), output
 
 
 @pytest.mark.parametrize('name', EVERY_BUILD)

@@ -1,9 +1,4 @@
 {
-  "apple_cropped_gain_map_o6": {
-    "headroom": 3.4911454078807904,
-    "peak": 3.491194551155358,
-    "primaries": "p3"
-  },
   "apple_older": {
     "headroom": 3.029290636577587,
     "peak": 3.029290636577587,
@@ -24,6 +19,11 @@
     "primaries": "p3"
   },
   "crop_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "crop_past_the_edge": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
     "primaries": "p3"
@@ -53,6 +53,11 @@
     "peak": 3.491194551155358,
     "primaries": "p3"
   },
+  "high_headroom": {
+    "headroom": 512.0,
+    "peak": 512.0048732757568,
+    "primaries": "p3"
+  },
   "limited_range_gain_map": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
@@ -61,6 +66,16 @@
   "multichannel": {
     "headroom": 4.0,
     "peak": 4.046875,
+    "primaries": "p3"
+  },
+  "not_iphone_o3": {
+    "delete": true,
+    "note": "not an iPhone camera photo",
+    "primaries": "p3"
+  },
+  "not_iphone_o6": {
+    "delete": true,
+    "note": "not an iPhone camera photo",
     "primaries": "p3"
   },
   "not_used_color": {
@@ -151,16 +166,6 @@
     "primaries": "p3"
   },
   "odd_size_o6": {
-    "headroom": 3.4911454078807904,
-    "peak": 3.491194551155358,
-    "primaries": "p3"
-  },
-  "other_gain_map_o6": {
-    "headroom": 3.4911454078807904,
-    "peak": 3.491194551155358,
-    "primaries": "p3"
-  },
-  "other_upright_gain_map_o3": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
     "primaries": "p3"

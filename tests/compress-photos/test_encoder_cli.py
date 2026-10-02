@@ -3,6 +3,8 @@ jxlbatch's command line and batch behavior, for every build (SIMD and scalar
 WebAssembly, native).
 """
 
+import zlib
+
 import photo_helpers as ph
 import pytest
 from PIL import Image
@@ -122,3 +124,37 @@ def test_sdr_option(encoder, tmp_path):
     result = encoder.run(['--sdr', 'jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout
     assert 'Done: 1 of 1 converted' in result.stdout
+
+
+def with_cicp(png, primaries, transfer):
+    """Adds a cICP chunk (CICP color: primaries, transfer, RGB, full range)."""
+    data = png.read_bytes()
+    chunk = b'cICP' + bytes([primaries, transfer, 0, 1])
+    crc = zlib.crc32(chunk).to_bytes(4, 'big')
+    png.write_bytes(
+        data[:33] + (4).to_bytes(4, 'big') + chunk + crc + data[33:]
+    )
+
+
+@pytest.mark.parametrize(
+    ('mode', 'primaries', 'pq'),
+    [
+        ('RGB', 9, True),  # Rec. 2100 PQ: stored as PQ
+        ('RGB', 5, False),  # primaries jxlbatch doesn't map: stored as sRGB
+        ('L', 9, False),  # gray: stored as sRGB
+    ],
+)
+def test_pq_png_brightness(encoder, tmp_path, mode, primaries, pq):
+    # A PQ image's intensity target is PQ's peak, 10,000 nits; one stored as
+    # sRGB keeps the default, like any SDR image.
+    Image.new(mode, (16, 16), 128).save(tmp_path / 'pq.png')
+    with_cicp(tmp_path / 'pq.png', primaries, 16)
+    ph.stage(tmp_path, [tmp_path / 'pq.png'])
+    result = encoder.run(['jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    jxl = tmp_path / 'jxl_out_1.jxl'
+    info = ph.run(['jxlinfo', '-v', jxl], check=True).stdout.lower()
+    assert (
+        'pq transfer function' in info or 'transfer function: pq' in info
+    ) == pq
+    assert ph.jxl_intensity_target(jxl) == (10000 if pq else None)

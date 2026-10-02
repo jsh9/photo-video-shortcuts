@@ -17,8 +17,10 @@ libheif's own decoding).
 - shortcuts/compress-photos/src/selftest_hdr_heic.h: the HDR photo for
   ``jxlbatch --selftest``.
 - fixtures/heif/<name>.heic and expected.npz: SDR photos in HEIF layouts
-  beyond an iPhone's (transforms in an unusual order, derived 'iden' images
-  of a turned source), with their expected 8-bit RGB pixels (upright).
+  beyond an iPhone's (transforms in an unusual order, crops reaching past the
+  photo, derived 'iden' images of a turned source, transparency with transforms
+  of its own), with their expected 8-bit RGB(A) pixels (upright).
+  crop_outside_the_photo.heic has none: its crop leaves nothing.
 
 Needs ffmpeg with libx265, and libheif's heif-dec, djxl and cjxl (Homebrew:
 ffmpeg, libheif, jpeg-xl). Run from anywhere: python3 make_hdr_fixtures.py The
@@ -641,14 +643,17 @@ class Case:
     carries that crop too (but not the rotation), as ImageIO writes a full-size
     gain map. ``iden_source_turns``: the primary is a derived 'iden' image of
     the coded photo, which is turned by that many quarter turns itself.
+    ``apple``: the gain map is labeled as Apple's (an auxiliary image of type
+    APPLE_GAIN_MAP), as in iPhone photos; jxlbatch uses only those. ``delete``:
+    a gain map that isn't used, but the original may still be deleted.
     """
 
     def __init__(self, name, o=1, gain_map_turned=False, crop=None, size=(W, H),
                  gain_size=None, color='p3', bits=8, tile=None, full_range=True,
                  rgb_gain_map=False, meta=ISO_META, tmap=True, apple=True,
-                 upright_gain_map=False, maker=None, xmp=False, note=None,
-                 tmap_kw=None, tmap_data=None, gain_map_cropped=False,
-                 iden_source_turns=0):  # fmt: skip
+                 maker=None, xmp=False, note=None, tmap_kw=None,
+                 tmap_data=None, gain_map_cropped=False, iden_source_turns=0,
+                 delete=False):  # fmt: skip
         self.__dict__.update(locals())
         del self.__dict__['self']
 
@@ -664,11 +669,11 @@ CASES += [
     # a full-size gain map with the photo's crop but not its rotation, as
     # ImageIO writes (an odd height stored one row taller)
     Case('cropped_gain_map', crop=(0, 0, 64, 47), gain_size=(64, 48),
-         gain_map_cropped=True, apple=False),
+         gain_map_cropped=True),
     Case('cropped_gain_map_o6', o=6, size=(48, 64), crop=(0, 0, 64, 47),
-         gain_size=(48, 64), gain_map_cropped=True, apple=False),
-    Case('apple_cropped_gain_map_o6', o=6, size=(48, 64), crop=(0, 0, 64, 47),
          gain_size=(48, 64), gain_map_cropped=True),
+    # a crop reaching past the photo's edges: cut to the photo, as libheif does
+    Case('crop_past_the_edge', size=(64, 48), crop=(10, 10, 60, 44)),
     Case('full_size_gain_map', gain_size=(64, 48)),
     Case('quarter_gain_map', size=(128, 96), gain_size=(32, 24)),
     Case('limited_range_gain_map', full_range=False),
@@ -677,10 +682,10 @@ CASES += [
     Case('srgb', color='srgb'),
     Case('unspecified_color', color='unspecified'),
     Case('ten_bit', bits=10),
-    # not Apple's: the gain map is already upright, the photo turned 180°
-    Case('other_upright_gain_map_o3', o=3, apple=False, upright_gain_map=True),
-    # not Apple's, but stored like Apple's (only its shape tells)
-    Case('other_gain_map_o6', o=6, apple=False),
+    # a gain map 9 stops brighter: above PQ's 10,000 nits
+    Case('high_headroom', meta={
+        **ISO_META, 'alt_headroom': 9.0,
+        'channels': [{**ISO_META['channels'][0], 'max': 9.0}]}),
     # Apple's older gain map (before iOS 18): maker notes, no 'tmap'
     Case('apple_older', tmap=False, maker=APPLE_MAKER, xmp=True),
     Case('apple_older_o6', o=6, tmap=False, maker=APPLE_MAKER, xmp=True),
@@ -704,6 +709,13 @@ CASES += [
     # alignment isn't defined
     Case('not_used_derived_photo', iden_source_turns=2,
          note='unsupported image layout'),
+    # not labeled as Apple's, e.g. written by ImageIO in an app: how it lines
+    # up with a turned photo isn't certain, so it isn't used, but the original
+    # may be deleted
+    Case('not_iphone_o3', o=3, apple=False,
+         note='not an iPhone camera photo', delete=True),
+    Case('not_iphone_o6', o=6, apple=False,
+         note='not an iPhone camera photo', delete=True),
 ]  # fmt: skip
 
 COLOR = {
@@ -715,12 +727,19 @@ COLOR = {
 }
 
 
+def crop_box(case):
+    """
+    The crop (left, top, width, height) of the stored photo, cut to the photo
+    as libheif does: the whole photo if there is none.
+    """
+    sw, sh = case.size if case.o in (1, 2, 3, 4) else case.size[::-1]
+    left, top, cw, ch = case.crop or (0, 0, sw, sh)
+    return left, top, min(cw, sw - left), min(ch, sh - top)
+
+
 def upright_size(case):
     """The photo's upright size, after its crop."""
-    if not case.crop:
-        return case.size
-
-    cw, ch = case.crop[2:]
+    cw, ch = crop_box(case)[2:]
     return (cw, ch) if case.o in (1, 2, 3, 4) else (ch, cw)
 
 
@@ -736,9 +755,7 @@ def write_photo(case, path, profiles, transforms=True):
         g = gain_upright.astype(np.float64)
         gain_upright = np.stack([g, 255 - g, g * 0.5], axis=2).astype(np.uint8)
 
-    gain = (
-        gain_upright if case.upright_gain_map else stored(gain_upright, case.o)
-    )
+    gain = stored(gain_upright, case.o)
     h = Heif()
     full = True
     (primaries, transfer), space = COLOR[case.color]
@@ -913,11 +930,8 @@ def upright_base(case, profiles):
             else decoded_base(stored)
         )
 
-    if case.crop:
-        left, top, cw, ch = case.crop
-        base = base[top : top + ch, left : left + cw]
-
-    return UPRIGHT[case.o](base)
+    left, top, cw, ch = crop_box(case)
+    return UPRIGHT[case.o](base[top : top + ch, left : left + cw])
 
 
 def expected(case, heic, gain, gplanes, profiles):
@@ -925,19 +939,15 @@ def expected(case, heic, gain, gplanes, profiles):
     base = upright_base(case, profiles)
     g = decoded_gain_map(case, gain, gplanes)
     gh, gw = g.shape[:2]
-    if case.upright_gain_map:
-        # used as stored: it already fits the upright photo
-        enlarged = ref.enlarge(g, base.shape[1], base.shape[0])
-    else:
-        sw, sh = case.size if case.o in (1, 2, 3, 4) else case.size[::-1]
-        left, top, cw, ch = case.crop or (0, 0, sw, sh)
-        window = (
-            left * gw / sw,
-            top * gh / sh,
-            (left + cw) * gw / sw,
-            (top + ch) * gh / sh,
-        )
-        enlarged = UPRIGHT[case.o](ref.enlarge(g, cw, ch, window))
+    sw, sh = case.size if case.o in (1, 2, 3, 4) else case.size[::-1]
+    left, top, cw, ch = crop_box(case)
+    window = (
+        left * gw / sw,
+        top * gh / sh,
+        (left + cw) * gw / sw,
+        (top + ch) * gh / sh,
+    )
+    enlarged = UPRIGHT[case.o](ref.enlarge(g, cw, ch, window))
 
     if case.tmap:
         meta = ref.parse_tmap(tmap_payload(case.meta))
@@ -965,6 +975,8 @@ def main():
         info = {'primaries': primaries}
         if case.note:
             info['note'] = case.note
+            if case.delete:
+                info['delete'] = True
         else:
             pixels, headroom, peak = expected(
                 case, heic, gain, gplanes, profiles
@@ -1050,6 +1062,16 @@ def write_layouts():
         arrays[name] = libheif_rgb(path) if want is None else want
         print(f'{name:32s} {path.stat().st_size:6d} bytes')
         return arrays[name]
+
+    # a crop reaching past the photo's edges: cut to the photo, as libheif does
+    h = Heif()
+    h.primary = coded(h, rgb, [clap(64, 48, 10, 10, 60, 44)])
+    save('crop_past_the_edge', h, raw[10:48, 10:64])
+
+    # a crop that leaves nothing (no expected pixels: libheif refuses it)
+    h = Heif()
+    h.primary = coded(h, rgb, [clap(64, 48, 70, 0, 10, 10)])
+    h.write(LAYOUTS_OUT / 'crop_outside_the_photo.heic')
 
     # turned, then cropped at an odd offset (crop listed after the rotation)
     h = Heif()

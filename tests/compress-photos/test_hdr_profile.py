@@ -19,55 +19,72 @@ import pytest
 
 CURVE = b'hdgm' + bytes(4) + bytes(range(256))  # placeholder tag data
 
-# name: (test photo, item holding the profile, the profile's color space as
-# djxl names it, its 'hdgm' tag data or None)
+P3_PQ, REC2020_PQ = 'RGB_D65_DCI_Rel_PeQ', 'RGB_D65_202_Rel_PeQ'
+# name: (test photo, [(item holding a profile, the profile's color space as
+# djxl names it, its 'hdgm' tag data or None)]); the last profile is the one
+# kept, or the reason for the note
 VARIANTS = {
-    'tmap': ('heic_hdr', 'tmap', 'RGB_D65_DCI_Rel_PeQ', CURVE),
-    'gain_map': ('heic_hdr', 'gain map', 'RGB_D65_DCI_Rel_PeQ', CURVE),
+    'tmap': ('heic_hdr', [('tmap', P3_PQ, CURVE)]),
+    'gain_map': ('heic_hdr', [('gain map', P3_PQ, CURVE)]),
+    # the tmap's profile is in another color space; the gain map's is used
+    'second_profile': (
+        'heic_hdr',
+        [('tmap', REC2020_PQ, CURVE), ('gain map', P3_PQ, CURVE)],
+    ),
     # ignored: no tone curve
-    'no_curve': ('heic_hdr', 'tmap', 'RGB_D65_DCI_Rel_PeQ', None),
+    'no_curve': ('heic_hdr', [('tmap', P3_PQ, None)]),
     # ignored: another color space than the pixels'
-    'rec2020': ('heic_hdr', 'tmap', 'RGB_D65_202_Rel_PeQ', CURVE),
-    'sdr': ('heic_hdr', 'tmap', 'RGB_D65_SRG_Rel_SRG', CURVE),
-    'srgb_photo': ('heic_hdr_srgb', 'tmap', 'RGB_D65_DCI_Rel_PeQ', CURVE),
+    'rec2020': ('heic_hdr', [('tmap', REC2020_PQ, CURVE)]),
+    'sdr': ('heic_hdr', [('tmap', 'RGB_D65_SRG_Rel_SRG', CURVE)]),
+    'srgb_photo': ('heic_hdr_srgb', [('tmap', P3_PQ, CURVE)]),
 }
-KEPT = ['tmap', 'gain_map']
+KEPT = ['tmap', 'gain_map', 'second_profile']
 IGNORED = sorted(set(VARIANTS) - set(KEPT))
 
 
 @pytest.fixture(scope='module')
 def variants(photos, batch, tmp_path_factory):
     """
-    The test photos with a profile added: {name: (heic, profile)}, see
+    The test photos with profiles added: {name: (heic, {item: profile})}, see
     VARIANTS.
     """
     folder = tmp_path_factory.mktemp('profiles')
     _, pq_jxl, _ = batch.results['heic_hdr']
     result = {}
-    for name, (photo, item, space, curve) in VARIANTS.items():
+    for name, (photo, added) in VARIANTS.items():
         assert ph.hdr_profile(photos[photo]) is None, (
             f'make_photo already wrote an HDR profile in {photo}'
         )
-        icc = folder / f'{name}.icc'
-        ph.run(
-            [
-                'djxl',
-                pq_jxl,
-                folder / 'profile.ppm',
-                f'--color_space={space}',
-                f'--icc_out={icc}',
-            ],
-            check=True,
-        )
-        profile = icc.read_bytes()
-        if curve:
-            profile = ph.add_icc_tag(profile, 'hdgm', curve)
+        heic, profiles = photos[photo], {}
+        for i, (item, space, curve) in enumerate(added):
+            icc = folder / f'{name}.icc'
+            ph.run(
+                [
+                    'djxl',
+                    pq_jxl,
+                    folder / 'profile.ppm',
+                    f'--color_space={space}',
+                    f'--icc_out={icc}',
+                ],
+                check=True,
+            )
+            profile = icc.read_bytes()
+            if curve:
+                profile = ph.add_icc_tag(profile, 'hdgm', curve)
 
-        heic = folder / f'{photo}_{name}.heic'
-        ph.with_item_profile(photos[photo], item, profile, heic)
-        result[name] = (heic, profile)
+            out = folder / f'{photo}_{name}_{i}.heic'
+            ph.with_item_profile(heic, item, profile, out)
+            heic, profiles[item] = out, profile
+
+        result[name] = (heic, profiles)
 
     return result
+
+
+def last_profile(variants, name):
+    """The profile added last: the one kept, or the reason for the note."""
+    item = VARIANTS[name][1][-1][0]
+    return variants[name][1][item]
 
 
 @pytest.fixture(scope='module')
@@ -103,15 +120,15 @@ def decode(jxl, ppm):
 
 
 @pytest.mark.parametrize('name', sorted(VARIANTS))
-def test_variant_has_the_profile(variants, name):
-    heic, profile = variants[name]
-    tags = ph.icc_tags(profile)
-    assert ph.hdr_profile(heic) == (profile if 'hdgm' in tags else None)
+def test_variant_has_the_profiles(variants, name):
+    heic, profiles = variants[name]
+    for item, profile in profiles.items():
+        assert ph.item_profile(heic, item) == profile
 
 
 @pytest.mark.parametrize('name', KEPT)
 def test_profile_is_kept(variants, converted, name, tmp_path):
-    _, profile = variants[name]
+    profile = last_profile(variants, name)
     jxl, output = converted[name]
     assert ph.jxl_profile(jxl, tmp_path) == profile
     assert 'lossy' in ph.run(['jxlinfo', jxl], check=True).stdout
@@ -129,7 +146,7 @@ def test_pixels_are_unchanged(batch, converted, name, tmp_path):
 
 @pytest.mark.parametrize('name', KEPT)
 def test_profile_costs_at_most_its_size(batch, variants, converted, name):
-    _, profile = variants[name]
+    profile = last_profile(variants, name)
     jxl, _ = converted[name]
     growth = jxl.stat().st_size - plain(batch, name).stat().st_size
     assert 0 < growth <= len(profile)
@@ -141,7 +158,7 @@ def test_unsuitable_profile_is_ignored(batch, converted, name):
     assert jxl.read_bytes() == plain(batch, name).read_bytes()
     # said, since the JXL may look slightly darker than the original
     output = ' '.join(output.split())
-    if VARIANTS[name][3] is None:
+    if VARIANTS[name][1][-1][2] is None:
         assert "Apple's HDR profile not found" in output
     else:
         assert "Apple's HDR profile not used (unrecognized format)" in output
@@ -155,7 +172,8 @@ def test_photo_without_profile_says_so(batch, name):
 
 
 def test_every_build(encoder, variants, photos, apple_hdr, tmp_path):
-    heic, profile = variants['tmap']
+    heic = variants['tmap'][0]
+    profile = last_profile(variants, 'tmap')
     ph.stage(tmp_path, [heic])
     result = encoder.run(['jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
