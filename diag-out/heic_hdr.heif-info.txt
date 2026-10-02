@@ -1,0 +1,271 @@
+Box: ftyp ----- (File Type)
+size: 28   (header size: 8)
+major brand: heic
+minor version: 0
+compatible brands: tmap,heic,mif1
+
+Box: meta ----- (Metadata)
+size: 1498   (header size: 12)
+| Box: hdlr ----- (Handler Reference)
+| size: 33   (header size: 12)
+| pre_defined: 0
+| handler_type: pict
+| name: 
+| 
+| Box: dinf ----- (Data Information)
+| size: 36   (header size: 8)
+| | Box: dref ----- (Data Reference)
+| | size: 28   (header size: 12)
+| | | Box: url  ----- (Data Entry URL)
+| | | size: 12   (header size: 12)
+| | | location: 
+| 
+| Box: pitm ----- (Primary Item)
+| size: 14   (header size: 12)
+| item_ID: 1
+| 
+| Box: iinf ----- (Item Information)
+| size: 139   (header size: 12)
+| | Box: infe ----- (Item Info Entry)
+| | size: 21   (header size: 12)
+| | item_ID: 1
+| | item_protection_index: 0
+| | item_type: hvc1
+| | item_name: 
+| | hidden item: false
+| | 
+| | Box: infe ----- (Item Info Entry)
+| | size: 21   (header size: 12)
+| | item_ID: 2
+| | item_protection_index: 0
+| | item_type: Exif
+| | item_name: 
+| | hidden item: true
+| | 
+| | Box: infe ----- (Item Info Entry)
+| | size: 41   (header size: 12)
+| | item_ID: 3
+| | item_protection_index: 0
+| | item_type: mime
+| | item_name: 
+| | content_type: application/rdf+xml
+| | content_encoding: 
+| | hidden item: true
+| | 
+| | Box: infe ----- (Item Info Entry)
+| | size: 21   (header size: 12)
+| | item_ID: 4
+| | item_protection_index: 0
+| | item_type: hvc1
+| | item_name: 
+| | hidden item: true
+| | 
+| | Box: infe ----- (Item Info Entry)
+| | size: 21   (header size: 12)
+| | item_ID: 5
+| | item_protection_index: 0
+| | item_type: tmap
+| | item_name: 
+| | hidden item: false
+| 
+| Box: iref ----- (Item Reference)
+| size: 60   (header size: 12)
+| reference with type 'cdsc' from ID: 2 to IDs: 1 5 
+| reference with type 'cdsc' from ID: 3 to IDs: 1 5 
+| reference with type 'dimg' from ID: 5 to IDs: 1 4 
+| 
+| Box: iprp ----- (Item Properties)
+| size: 1002   (header size: 8)
+| | Box: ipco ----- (Item Property Container)
+| | size: 953   (header size: 8)
+| | | index: 1
+| | | Box: colr -----
+| | | size: 548   (header size: 8)
+| | | colour_type: prof
+| | | profile size: 536
+| | | 
+| | | index: 2
+| | | Box: ispe ----- (Image Spatial Extents)
+| | | size: 20   (header size: 12)
+| | | image width: 640
+| | | image height: 428
+| | | 
+| | | index: 3
+| | | Box: clap ----- (Clean Aperture)
+| | | size: 40   (header size: 8)
+| | | clean_aperture: 640/1 x 427/1
+| | | offset: 0/1 ; -32768/65536
+| | | 
+| | | index: 4
+| | | Box: irot ----- (Image Rotation)
+| | | size: 9   (header size: 8)
+| | | rotation: 0 degrees (CCW)
+| | | 
+| | | index: 5
+| | | Box: pixi ----- (Pixel Information)
+| | | size: 16   (header size: 12)
+| | | bits_per_channel: 8,8,8
+| | | 
+| | | index: 6
+| | | Box: pixi ----- (Pixel Information)
+| | | size: 14   (header size: 12)
+| | | bits_per_channel: 8
+| | | 
+| | | index: 7
+| | | Box: colr -----
+| | | size: 19   (header size: 8)
+| | | colour_type: nclx
+| | | colour_primaries: 9
+| | | transfer_characteristics: 16
+| | | matrix_coefficients: 9
+| | | full_range_flag: 1
+| | | 
+| | | index: 8
+| | | Box: colr -----
+| | | size: 19   (header size: 8)
+| | | colour_type: nclx
+| | | colour_primaries: 2
+| | | transfer_characteristics: 2
+| | | matrix_coefficients: 2
+| | | full_range_flag: 1
+| | | 
+| | | index: 9
+| | | Box: ispe ----- (Image Spatial Extents)
+| | | size: 20   (header size: 12)
+| | | image width: 640
+| | | image height: 427
+| | | 
+| | | index: 10
+| | | Box: pixi ----- (Pixel Information)
+| | | size: 16   (header size: 12)
+| | | bits_per_channel: 10,10,10
+| | | 
+| | | index: 11
+| | | Box: hvcC ----- (HEVC Configuration Item)
+| | | size: 112   (header size: 8)
+| | | configuration_version: 1
+| | | general_profile_space: 0
+| | | general_tier_flag: 0
+| | | general_profile_idc: 3
+| | | general_profile_compatibility_flags: 0111.0000 0000.0000 0000.0000 0000.0000 
+| | | general_constraint_indicator_flags: 10110000 00000000 00000000 00000000 00000000 00000000 
+| | | general_level_idc: 90
+| | | min_spatial_segmentation_idc: 0
+| | | parallelism_type: 0
+| | | chroma_format: 4:2:0
+| | | bit_depth_luma: 8
+| | | bit_depth_chroma: 8
+| | | avg_frame_rate: 0
+| | | constant_frame_rate: 0
+| | | num_temporal_layers: 1
+| | | temporal_id_nested: 0
+| | | length_size: 4
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 32
+| | | | 40 01 0c 01 ff ff 03 70 00 00 03 00 b0 00 00 03 00 00 03 00 5a 70 24 
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 33
+| | | | 42 01 01 03 70 00 00 03 00 b0 00 00 03 00 00 03 00 5a a0 05 02 01 b1 f7 88 7b 91 65 53 70 20 20 60 08 
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 34
+| | | | 44 01 c0 60 ac b2 10 14 c9 
+| | | 
+| | | index: 12
+| | | Box: hvcC ----- (HEVC Configuration Item)
+| | | size: 112   (header size: 8)
+| | | configuration_version: 1
+| | | general_profile_space: 0
+| | | general_tier_flag: 0
+| | | general_profile_idc: 4
+| | | general_profile_compatibility_flags: 0000.1000 0000.0000 0000.0000 0000.0000 
+| | | general_constraint_indicator_flags: 10111111 11001000 00000000 00000000 00000000 00000000 
+| | | general_level_idc: 90
+| | | min_spatial_segmentation_idc: 0
+| | | parallelism_type: 0
+| | | chroma_format: monochrome
+| | | bit_depth_luma: 8
+| | | bit_depth_chroma: 8
+| | | avg_frame_rate: 0
+| | | constant_frame_rate: 0
+| | | num_temporal_layers: 1
+| | | temporal_id_nested: 0
+| | | length_size: 4
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 32
+| | | | 40 01 0c 01 ff ff 04 08 00 00 03 00 bf c8 00 00 03 00 00 5a 17 02 40 
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 33
+| | | | 42 01 01 04 08 00 00 03 00 bf c8 00 00 03 00 00 5a c0 14 08 06 c7 cb 88 17 b9 16 55 37 02 02 02 00 80 
+| | | <array>
+| | | | array_completeness: 0
+| | | | NAL_unit_type: 34
+| | | | 44 01 c0 60 84 b2 10 14 c9 
+| | 
+| | Box: ipma ----- (Item Property Association)
+| | size: 41   (header size: 12)
+| | associations for item ID: 1
+| | | property index: 1 (essential: true)
+| | | property index: 2 (essential: false)
+| | | property index: 5 (essential: false)
+| | | property index: 11 (essential: true)
+| | | property index: 3 (essential: true)
+| | | property index: 4 (essential: true)
+| | associations for item ID: 4
+| | | property index: 2 (essential: false)
+| | | property index: 6 (essential: false)
+| | | property index: 8 (essential: true)
+| | | property index: 12 (essential: true)
+| | | property index: 3 (essential: true)
+| | | property index: 4 (essential: true)
+| | associations for item ID: 5
+| | | property index: 7 (essential: true)
+| | | property index: 9 (essential: false)
+| | | property index: 10 (essential: false)
+| | | property index: 4 (essential: true)
+| 
+| Box: grpl ----- (Groups List)
+| size: 36   (header size: 8)
+| | Box: altr -----
+| | size: 28   (header size: 12)
+| | group id: 6
+| | entity IDs: 5 1
+| 
+| Box: idat ----- (Item Data)
+| size: 70   (header size: 8)
+| number of data bytes: 62
+| 
+| Box: iloc ----- (Item Location)
+| size: 96   (header size: 12)
+| item ID: 1
+|   construction method: 0
+|   data_reference_index: 0
+|   base_offset: 0
+|   extents: 2646,135625 
+| item ID: 2
+|   construction method: 0
+|   data_reference_index: 0
+|   base_offset: 0
+|   extents: 1542,408 
+| item ID: 3
+|   construction method: 0
+|   data_reference_index: 0
+|   base_offset: 0
+|   extents: 1950,696 
+| item ID: 4
+|   construction method: 0
+|   data_reference_index: 0
+|   base_offset: 0
+|   extents: 138271,48047 
+| item ID: 5
+|   construction method: 1
+|   data_reference_index: 0
+|   base_offset: 0
+|   extents: 0,62 
+MIME type: image/heic
+main brand: heic
+compatible brands: tmap, heic, mif1
