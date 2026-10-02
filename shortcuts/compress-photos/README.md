@@ -134,7 +134,11 @@ Not kept:
   SDR, and, unlike the other cases here, **its original is still offered for
   deletion**.
 - **Edits**: an edited photo is converted as it looks now; the edit can't be
-  reverted.
+  reverted. Photos keeps the unedited original and the edit separately, but
+  hands the shortcut only the edited rendering, from the share sheet and from
+  the photo picker alike, so the JXL has neither the original nor the edit. If
+  you want both, convert the photo before editing it, and edit the JXL (or keep
+  the HEIC).
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't
   normally have any.
 - **RAW/ProRAW (DNG) and other formats** aren't converted; only HEIF, JPEG and
@@ -172,9 +176,12 @@ offered for deletion**, and deleting it loses its HDR.
 Pro (iOS 26) and an iPhone 13 mini (iOS 16, Apple's older gain map): they
 convert as HDR. Photos writes no HDR profile into an edited photo, so a-Shell
 says `! Apple's HDR profile not found` for those from iOS 18 and later (see
-below). Other edits (adjustments, filters, rotations) haven't been checked: if
-one gives `not an iPhone camera photo`, tap Don't Allow at the delete prompt
-(this keeps the whole batch's originals) and delete the others by hand.
+below): on screens that can't show all of the HDR, the JXL looks a little
+darker than the edited HEIC, while a JXL converted from the unedited photo
+keeps the profile. Rotated crops convert the same way. Other edits
+(adjustments, filters) haven't been checked: if one gives
+`not an iPhone camera photo`, tap Don't Allow at the delete prompt (this keeps
+the whole batch's originals) and delete the others by hand.
 
 **Implausible brightness:** a gain map claiming to brighten the photo by more
 than 16 stops (65,536×), in either format (for Apple's older one, the headroom
