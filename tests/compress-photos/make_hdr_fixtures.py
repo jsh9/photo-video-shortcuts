@@ -997,11 +997,30 @@ def coded(h, rgb, extra=(), hidden=False):
 
 
 def libheif_rgb(heic):
-    """A photo as libheif decodes it, transforms applied: 8-bit RGB."""
+    """
+    A photo as libheif decodes it, transforms applied: 8-bit RGB, or RGBA with
+    transparency.
+    """
     with tempfile.TemporaryDirectory() as d:
         png = Path(d) / 'out.png'
         run(['heif-dec', heic, png])
-        return np.asarray(Image.open(png).convert('RGB'))
+        img = Image.open(png)
+        return np.asarray(img.convert('RGBA' if 'A' in img.mode else 'RGB'))
+
+
+ALPHA = 'urn:mpeg:mpegB:cicp:systems:auxiliary:alpha'
+
+
+def alpha_image(h, photo, extra=()):
+    """A transparency (alpha) image for ``photo``, with ``extra`` props."""
+    x = np.linspace(0, 1, 64)[None, :]
+    y = np.linspace(0, 1, 48)[:, None]
+    alpha = np.round(255 * (0.25 + 0.5 * x * (1 - 0.5 * y))).astype(np.uint8)
+    alpha[4:20, 6:30] = 255  # asymmetric: shows a turn
+    item = h.image([alpha], 64, 48, 'gray', True, [(nclx(2, 2, 2, True), True)],
+                   [(auxc(ALPHA), True)] + [(p, True) for p in extra],
+                   hidden=True)  # fmt: skip
+    h.refs.append(('auxl', item, [photo]))
 
 
 def stored_rgb(rgb):
@@ -1057,6 +1076,19 @@ def write_layouts():
                                     (clap(48, 64, 3, 5, 40, 52), True)])  # fmt: skip
     h.refs.append(('dimg', h.primary, [source]))
     save('iden_cropped_rotated_source', h)
+
+    # transparency turned 180 degrees, the photo not
+    h = Heif()
+    h.primary = coded(h, rgb)
+    alpha_image(h, h.primary, [irot(2)])
+    save('alpha_rotated_independently', h)
+
+    # photo and transparency both turned 180 degrees, as writers do
+    h = Heif()
+    h.primary = coded(h, rgb, [irot(2)])
+    alpha_image(h, h.primary, [irot(2)])
+    want = save('alpha_rotated_with_photo', h)
+    assert want.shape == (48, 64, 4), want.shape
 
     np.savez_compressed(LAYOUTS_OUT / 'expected.npz', **arrays)
 
