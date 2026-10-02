@@ -49,7 +49,11 @@ and PNG with stb_image) and encodes with libjxl 0.11.2.
 box, and XMP into an `xml ` box. Apple's image framework reads those boxes;
 compressed (`brob`) boxes, which `cjxl` writes by default, it can't. Pixels are
 stored upright, and the EXIF/XMP orientation is reset to match, so no viewer
-can rotate a photo twice. 10-bit HEIF photos are kept at 10 bits.
+can rotate a photo twice. a-Shell warns (`! orientation check`) when the result
+is portrait but the original's EXIF orientation and size say landscape, or the
+other way round; only when that EXIF size is the photo's own (in either order),
+since an edited photo's EXIF keeps the size from before the edit (Photos does
+so). 10-bit HEIF photos are kept at 10 bits.
 
 Encoding settings match `cjxl -q Q -e E`, with one difference: libjxl's
 streaming mode is always on, and the image is handed to it in chunks rather
@@ -135,19 +139,26 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   `-20 * t48 + 1.8` (`t48 <= 0.01`) or `-0.101 * t48 + 1.601` when `t33 < 1`,
   else `-70 * t48 + 3` or `-0.303 * t48 + 2.303`; the headroom is
   `2^max(stops, 0)`. Without those tags the photo stays SDR.
-- **Only Apple's gain maps are used**: those an iPhone labels with Apple's
+- **Which gain maps are used**: those an iPhone camera labels with Apple's
   auxiliary image type (`auxC` `urn:com:apple:photo:2020:aux:hdrgainmap`, on
   ISO 21496-1 gain maps too). For those, how the gain map lines up with a
-  turned or cropped photo is known (below); for others it isn't, and `jxlbatch`
+  turned or cropped photo is known (below). An ISO gain map without the label
+  is used too if neither it nor the photo is turned and the photo has no crop:
+  it then covers the photo as stored. Photos (iOS 26) saves an edited photo
+  that way (checked with crops): a new HEIC with the photo upright at its new
+  size (`irot` 0, no `clap`, EXIF orientation 1), a half-size gain map without
+  the label (no `auxC`, no `auxl` reference), sometimes with a `clap` of its
+  own, and a `tmap` item with an nclx `colr` (12/16/6, no ICC profile, so no
+  `hdgm` curve) and `use_base_colour_space` 0. An edited photo with Apple's
+  older gain map keeps the label. For other unlabeled gain maps `jxlbatch`
   doesn't guess. ImageIO, for example, writes ISO gain maps without the label
   and without transforms of their own, and a gain map's shape can't tell
   whether a 180° turn, a mirror or a square photo's rotation applies to it. So
-  such a photo is converted as SDR with
+  such a photo, if turned or cropped, is converted as SDR with
   `! HDR gain map not used (not an iPhone camera photo)`, and, by the owner's
   choice, its original may still be deleted (`delete` in `jxl_done.txt`), on
   every path (also with `--sdr` or malformed metadata). The batch ends with how
-  many there were. Not checked yet: whether Photos keeps the label when it
-  saves an edit, or other iPhone apps write it.
+  many there were. Not checked: whether other iPhone apps write the label.
   `exiftool -a -AuxiliaryImageType photo.heic` lists
   `urn:com:apple:photo:2020:aux:hdrgainmap` when a file has it. The `-a`
   matters: an iPhone 17 Pro photo, for example, has four auxiliary images (also
@@ -162,7 +173,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   rotation), so the primary's transforms apply to it, in order: rotations and
   mirrors turn it, and a crop (`clap`) narrows the part of it that covers the
   photo (the *window*). A gain map with a rotation or mirror of its own uses
-  its own transforms instead. Either way, the gain map is decoded as stored and
+  its own transforms instead, and so does one with a crop of its own on a photo
+  that is neither cropped nor turned (as Photos saves an edit, also with
+  Apple's older gain maps). Either way, the gain map is decoded as stored and
   exactly one set of transforms applies. Monochrome values are expanded if the
   stream says limited range.
 - **The photo** is decoded as stored too, then cropped and turned in RGB.
@@ -188,8 +201,12 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   value `g`, the gain is `log2 G = min + (max - min) * g^(1/gamma)`, and the
   SDR value, linearized with the sRGB curve, becomes
   `(sdr + base_offset) * G - alternate_offset`, in the photo's own primaries
-  (`use_base_colour_space`). For Apple's older format, `g` is linearized with
-  the inverse Rec. 709 curve and `hdr = sdr * (1 + (headroom - 1) * g)`.
+  (`use_base_colour_space`), or in the HDR image's (`use_base_colour_space` 0,
+  as Photos writes for an edited photo), which is the same when they have the
+  photo's primaries. Those come from the `tmap` item's color: its ICC profile's
+  `cicp` tag, or else its nclx `colr`; other or unknown primaries aren't used.
+  For Apple's older format, `g` is linearized with the inverse Rec. 709 curve
+  and `hdr = sdr * (1 + (headroom - 1) * g)`.
 - **The result** is 16-bit PQ with SDR white at 203 nits (ITU-R BT.2408), in
   Display P3 (or sRGB) primaries, computed from lookup tables a region at a
   time, as libjxl reads its chunks, so there is no 16-bit copy of the photo. It
@@ -217,7 +234,17 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   space (same primaries, D65, PQ) instead of the CICP label. The pixels don't
   change; the profile costs about 3 KB. Otherwise a-Shell says
   `! Apple's HDR profile not found` or `not used (unrecognized format)`. Photos
-  with Apple's older gain map never have one.
+  with Apple's older gain map never have one, nor do photos edited in Photos.
+  On iOS 26 the profile has no TRC or colorant tags (`desc`, `cprt`, `wtpt`,
+  `A2B0`, `B2A0`, `chad`, `cicp`, `hdgm`), and its `A2B0` is an `mAB ` without
+  B curves. Homebrew's libjxl (lcms2) reads it by its `cicp` tag (Display P3
+  PQ), but skcms, libjxl's color engine in the WebAssembly build, rejects the
+  `A2B0` tag, and with it the whole profile, before reading the `cicp` tag; so
+  `build-wasm.sh` patches skcms (see [Building](#3-building-mac)). For a PQ
+  profile, libjxl uses only the `cicp` tag and transforms with a profile of its
+  own. Apple's profile can't be committed, so
+  `photo_helpers.apple_shaped_hdr_profile` reshapes libjxl's the same way, for
+  `test_hdr_profile.py` and the `--selftest` photo.
 - **Keeping the profile in a lossy file** relies on libjxl's behavior: in
   `JxlEncoderSetICCProfile`, libjxl decides (`DecideIfWantICC`, libjxl 0.11.2
   and 0.12.0) to replace a profile it can describe itself by that description,
@@ -231,34 +258,36 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   P3 PQ.
 - **Not used** (the photo is converted as SDR, with
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
-  sRGB with the sRGB curve, a gain map in another color space, a gain map whose
-  shape doesn't match, malformed metadata (including more than 16 stops), other
-  metadata versions, an older gain map without its maker notes, a gain map not
-  labeled as Apple's (see above).
+  sRGB with the sRGB curve, a gain map applied in another color space (or one
+  of unknown primaries), a gain map whose shape doesn't match, malformed
+  metadata (including more than 16 stops), other metadata versions, an older
+  gain map without its maker notes, a gain map not labeled as Apple's on a
+  turned or cropped photo (see above).
 - **Kept originals.** Each `jxl_done.txt` line is
   `file|index|delete or keep|name`. `keep` means the original had HDR that the
-  JXL lacks (a gain map that wasn't used, except one not labeled as Apple's; an
-  HDR JPEG, which `jxlbatch` only detects; or `--sdr`), and the shortcut
-  doesn't offer it for deletion. When every original is `keep`, the shortcut
-  skips Delete Photos. Older shortcuts read only the first and last fields; a
-  new shortcut with an older `jxlbatch` sees the name as the third field and
-  keeps every original.
+  JXL lacks (a gain map that wasn't used, except an unlabeled one on a turned
+  or cropped photo; an HDR JPEG, which `jxlbatch` only detects; or `--sdr`),
+  and the shortcut doesn't offer it for deletion. When every original is
+  `keep`, the shortcut skips Delete Photos. Older shortcuts read only the first
+  and last fields; a new shortcut with an older `jxlbatch` sees the name as the
+  third field and keeps every original.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
-- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 45 tiny HEICs
-  covering these layouts, with expected results from an independent NumPy
-  implementation (`hdr_reference.py`); `fixtures/heif/` holds 8 SDR photos in
-  HEIF layouts beyond an iPhone's (see "The photo" and "Derived photos" above).
+- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 52 tiny HEICs
+  covering these layouts (`edited_in_photos` is laid out as Photos saves an
+  edit), with expected results from an independent NumPy implementation
+  (`hdr_reference.py`); `fixtures/heif/` holds 8 SDR photos in HEIF layouts
+  beyond an iPhone's (see "The photo" and "Derived photos" above).
   `make_hdr_fixtures.py` writes them, and `src/selftest_hdr_heic.h` (the
   `--selftest` HDR photo); regenerating needs ffmpeg with libx265, libheif's
   `heif-dec` and libjxl's `djxl` and `cjxl`. Apple's rendering is compared with
   Core Image test photos (`make_photo.swift`, ISO 21496-1 only). ImageIO
   doesn't label their gain maps, so `photo_helpers.with_apple_gain_map_label`
-  adds Apple's label, a layout no real writer produces; the real iPhone layout
-  is covered only by your own photos (`test_samples.py`). Apple can't decode
-  the synthetic older-format photos (`apple_older*.heic`), so for that format
-  only your own photos are compared with it (`test_samples.py`).
+  adds Apple's label, a layout no real writer produces; the real iPhone camera
+  layout is covered only by your own photos (`test_samples.py`). Apple can't
+  decode the synthetic older-format photos (`apple_older*.heic`), so for that
+  format only your own photos are compared with it (`test_samples.py`).
 
 ## 2. Layout
 
@@ -292,12 +321,18 @@ python3 scripts/build_shortcuts.py --guess
 - **What `build-wasm.sh` does:** it downloads wasi-sdk 34, libjxl v0.11.2,
   libheif v1.23.5 and libde265 v1.1.3 into the repository's `.deps/` folder,
   shared with the other tools. WASI has no threads, C++ exceptions or
-  `mkstemp`, so it applies small edits:
+  `mkstemp`, so it applies small edits, and one more for Apple's HDR profile:
   - libjxl: drops its threads dependency, the same edit as
     [gen2brain/jpegxl](https://github.com/gen2brain/jpegxl).
   - libheif: decodes on the calling thread, keeping HEVC deblocking and SAO;
     skips its exception wrapper and its temporary files (only used when writing
     HEIF).
+  - skcms (libjxl's pinned copy, its color engine here): `skcms_Parse` reads
+    the `cicp` tag before the `A2B0` and `B2A0` tags, and accepts a profile
+    that is PQ by that tag even if it can't read those, as in Apple's HDR
+    profile (see [HDR](#12-hdr)). Profiles without a PQ `cicp` tag parse as
+    before. The native build uses Homebrew's libjxl, with lcms2, which needs no
+    patch.
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC), HDR decoding and keeping Apple's HDR profile (a tiny
   built-in HDR HEIC) and a 12 MP encode. Running it in a-Shell checks the

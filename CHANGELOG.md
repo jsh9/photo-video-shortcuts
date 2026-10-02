@@ -16,12 +16,16 @@ encoder. Every release includes the current files of all shortcuts.
     profile (iOS 18 and later), with the tone curve Apple uses to dim the photo
     on screens that can't show all of it (including SDR screens), so it looks
     like the original there too; a-Shell says so when a photo has none.
-  - Only gain maps an iPhone camera labels as Apple's are used. Other HDR HEICs
-    (e.g. saved by other apps or on a Mac) are converted as SDR, with "HDR gain
-    map not used (not an iPhone camera photo)" in a-Shell (and a count at the
-    end of the batch), and their originals are still offered for deletion.
-    Whether iPhone photos edited in Photos keep the label hasn't been checked
-    yet.
+  - HDR photos edited in Photos (checked with crops) are converted as HDR too.
+    Photos saves them upright at their new size, without the label iPhone
+    cameras put on Apple's gain maps, and without an HDR color profile, so
+    a-Shell says "Apple's HDR profile not found" for them.
+  - Gain maps an iPhone camera labels as Apple's are used, and ISO 21496-1 gain
+    maps without the label if the photo is stored upright and uncropped. Other
+    HDR HEICs (e.g. saved turned or cropped by other apps or on a Mac) are
+    converted as SDR, with "HDR gain map not used (not an iPhone camera photo)"
+    in a-Shell (and a count at the end of the batch), and their originals are
+    still offered for deletion.
   - A gain map claiming more than 16 stops (65,536×), in either format (for
     Apple's older one, the headroom its maker notes give), is treated as
     malformed: the photo is converted as SDR and its original is kept.
@@ -42,6 +46,10 @@ encoder. Every release includes the current files of all shortcuts.
     them, so photos cropped at an odd offset come out slightly differently
     along their edges (libheif cropped first, which shifted the colors of 4:2:0
     photos there).
+- Fixed
+  - A false "orientation check" warning in a-Shell for photos edited in Photos,
+    whose EXIF keeps the size from before the edit: the check now runs only
+    when the EXIF size is the photo's own.
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/5
 
