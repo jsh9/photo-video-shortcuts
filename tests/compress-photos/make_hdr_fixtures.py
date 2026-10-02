@@ -4,8 +4,9 @@ Writes the HDR test photos in fixtures/hdr/ and their expected results.
 The photos are tiny HEICs laid out like an iPhone's (primary image, gain map,
 ISO 21496-1 'tmap' item or Apple's older gain map, Exif), in the layouts
 jxlbatch has to handle: every orientation, crops, grids, 10-bit, RGB and
-multichannel gain maps, limited range, other color spaces, and photos whose
-gain map can't be used. HEVC is lossless, so decoding gives exactly the values
+multichannel gain maps, limited range, other color spaces, photos edited in
+Photos (an unlabeled gain map with a crop of its own), and photos whose gain
+map can't be used. HEVC is lossless, so decoding gives exactly the values
 written here (up to the YCbCr round trip, which the expected results take from
 libheif's own decoding).
 
@@ -606,6 +607,13 @@ MULTI_META = {
         {'min': -0.5, 'max': 1.5, 'gamma': 2, 'base_offset': 0, 'alt_offset': 0},
     ],
 }  # fmt: skip
+# as Photos (iOS 26) writes it for an edited photo
+PHOTOS_META = {
+    'base_headroom': 0.0,
+    'alt_headroom': 1.803711,
+    'channels': [{'min': 0.0, 'max': 1.803711, 'gamma': 1.0,
+                  'base_offset': 0.005, 'alt_offset': 0.005}],
+}  # fmt: skip
 APPLE_MAKER = (0.8, 0.02)  # tags 33 and 48: 1.599 stops, headroom 3.03
 W, H = 64, 48  # the upright photo
 
@@ -618,11 +626,19 @@ class Case:
     ``crop``: (left, top, width, height) of a 'clap' crop of the stored
     primary, applied before its rotation. ``gain_map_cropped``: the gain map
     carries that crop too (but not the rotation), as ImageIO writes a full-size
-    gain map. ``iden_source_turns``: the primary is a derived 'iden' image of
-    the coded photo, which is turned by that many quarter turns itself.
-    ``apple``: the gain map is labeled as Apple's (an auxiliary image of type
-    APPLE_GAIN_MAP), as in iPhone photos; jxlbatch uses only those. ``delete``:
-    a gain map that isn't used, but the original may still be deleted.
+    gain map. ``gain_crop``: (left, top, width, height) of a 'clap' crop of the
+    stored gain map, its own (the photo has none), as Photos writes for an
+    edited photo; outside it, the gain map is at its brightest.
+    ``iden_source_turns``: the primary is a derived 'iden' image of the coded
+    photo, which is turned by that many quarter turns itself. ``apple``: the
+    gain map is labeled as Apple's (an auxiliary image of type APPLE_GAIN_MAP),
+    as in iPhone camera photos; jxlbatch uses unlabeled ones only on upright,
+    uncropped photos. ``tmap_color``: the 'tmap' item's color, the HDR image's
+    (where the gain applies if not ``use_base``): CICP (primaries, transfer) in
+    an nclx 'colr' property, as Photos writes, or a libjxl color space name for
+    an ICC profile. ``irot0``: the photo, the gain map and the 'tmap' item each
+    have an 'irot' of 0, as Photos writes. ``delete``: a gain map that isn't
+    used, but the original may still be deleted.
     """
 
     def __init__(self, name, o=1, gain_map_turned=False, crop=None, size=(W, H),
@@ -630,6 +646,7 @@ class Case:
                  rgb_gain_map=False, meta=ISO_META, tmap=True, apple=True,
                  maker=None, xmp=False, note=None, tmap_kw=None,
                  tmap_data=None, gain_map_cropped=False, iden_source_turns=0,
+                 gain_crop=None, tmap_color=None, irot0=False,
                  delete=False):  # fmt: skip
         self.__dict__.update(locals())
         del self.__dict__['self']
@@ -670,12 +687,28 @@ CASES += [
     # Apple's older gain map (before iOS 18): maker notes, no 'tmap'
     Case('apple_older', tmap=False, maker=APPLE_MAKER, xmp=True),
     Case('apple_older_o6', o=6, tmap=False, maker=APPLE_MAKER, xmp=True),
+    # edited in Photos (iOS 26): the photo stored upright and cropped to its
+    # new size, the gain map cropped itself (stored a pixel wider and taller
+    # than half the photo's size). An ISO gain map then isn't labeled, and
+    # the gain applies in the HDR image's color space, which is the photo's.
+    Case('edited_in_photos', size=(62, 46), gain_size=(32, 24),
+         gain_crop=(0, 0, 31, 23), meta=PHOTOS_META, apple=False,
+         tmap_kw={'use_base': False}, tmap_color=(12, 16), irot0=True),
+    Case('own_crop_labeled', size=(62, 46), gain_size=(32, 24),
+         gain_crop=(0, 0, 31, 23)),
+    Case('apple_older_own_crop', size=(62, 46), gain_size=(32, 24),
+         gain_crop=(0, 0, 31, 23), tmap=False, maker=APPLE_MAKER, xmp=True),
+    # the HDR image's color as an ICC profile (with a 'cicp' tag)
+    Case('alternate_color_by_profile', tmap_kw={'use_base': False},
+         tmap_color='RGB_D65_DCI_Rel_PeQ'),
     Case('apple_older_no_maker_notes', tmap=False, xmp=True,
          note="Apple's older gain map without its headroom"),
     # gain maps that can't be used (the photo stays SDR, with a note)
     Case('not_used_color', color='rec2020', note='unsupported color profile'),
     Case('not_used_other_color_space', tmap_kw={'use_base': False},
          note='gain map in another color space'),
+    Case('not_used_other_primaries', tmap_kw={'use_base': False},
+         tmap_color=(9, 16), note='gain map in another color space'),
     Case('not_used_version', tmap_kw={'version': 1},
          note='unsupported tone map version'),
     Case('not_used_min_version', tmap_kw={'min_version': 1, 'writer_version': 1},
@@ -699,15 +732,20 @@ CASES += [
     Case('not_used_derived_photo', iden_source_turns=2,
          note='unsupported image layout'),
     # not labeled as Apple's, e.g. written by ImageIO in an app: how it lines
-    # up with a turned photo isn't certain, so it isn't used, but the original
-    # may be deleted
+    # up with a turned or cropped photo isn't certain, so it isn't used, but
+    # the original may be deleted
     Case('not_iphone_o3', o=3, apple=False,
          note='not an iPhone camera photo', delete=True),
     Case('not_iphone_o6', o=6, apple=False,
          note='not an iPhone camera photo', delete=True),
-    # whatever else is wrong with it
-    Case('not_iphone_malformed', apple=False, tmap_data=b'\0\0\0\0\0',
+    Case('not_iphone_cropped', crop=(4, 3, 56, 42), apple=False,
          note='not an iPhone camera photo', delete=True),
+    # whatever else is wrong with it
+    Case('not_iphone_malformed', o=3, apple=False, tmap_data=b'\0\0\0\0\0',
+         note='not an iPhone camera photo', delete=True),
+    # upright and uncropped, so it would be used
+    Case('unlabeled_upright_malformed', apple=False,
+         tmap_data=b'\0\0\0\0\0', note='malformed gain map metadata'),
 ]  # fmt: skip
 
 COLOR = {
@@ -743,6 +781,15 @@ def write_photo(case, path, profiles, transforms=True):
     base = stored(upright, case.o)
     gw, gh = case.gain_size or (case.size[0] // 2, case.size[1] // 2)
     gain_upright = gain_pattern(gw, gh)
+    if case.gain_crop:
+        assert case.o == 1 and not case.crop, (
+            'only an upright, uncropped photo'
+        )
+        left, top, cw, ch = case.gain_crop
+        outside = np.full_like(gain_upright, 255)
+        outside[top : top + ch, left : left + cw] = 0
+        gain_upright = np.maximum(gain_upright, outside)
+
     if case.rgb_gain_map:
         g = gain_upright.astype(np.float64)
         gain_upright = np.stack([g, 255 - g, g * 0.5], axis=2).astype(np.uint8)
@@ -771,6 +818,9 @@ def write_photo(case, path, profiles, transforms=True):
 
     # without them: the same coded photo, as stored (for expected())
     tf = [(t, True) for t in transforms] if write_transforms else []
+    if case.irot0 and write_transforms:
+        tf.append((irot(0), True))
+
     primary = h.image(planes, sw, sh, pix_fmt, full, color, tf, bits=case.bits,
                       tile=case.tile, hidden=bool(case.iden_source_turns))  # fmt: skip
     if case.iden_source_turns:
@@ -805,6 +855,12 @@ def write_photo(case, path, profiles, transforms=True):
         assert (gw_s, gh_s) == (sw, sh), 'a cropped gain map must be full size'
         extra += [(clap(sw, sh, *case.crop), True)]
 
+    if case.gain_crop:
+        extra += [(clap(gw_s, gh_s, *case.gain_crop), True)]
+
+    if case.irot0:
+        extra += [(irot(0), True)]
+
     gain_id = h.image(gplanes, gw_s, gh_s, gfmt, case.full_range or gain.ndim == 3,
                       gcolor, extra, hidden=True)  # fmt: skip
     if case.apple:
@@ -814,9 +870,16 @@ def write_photo(case, path, profiles, transforms=True):
         payload = case.tmap_data or tmap_payload(
             case.meta, **(case.tmap_kw or {})
         )
-        tmap = h.add(
-            'tmap', payload, [(ispe(*upright_size(case)), False)], in_idat=True
-        )
+        tmap_props = [(ispe(*upright_size(case)), False)]
+        if isinstance(case.tmap_color, tuple):
+            tmap_props.insert(0, (nclx(*case.tmap_color, 6, True), True))
+        elif case.tmap_color:
+            tmap_props.insert(0, (prof(profiles[case.tmap_color]), True))
+
+        if case.irot0:
+            tmap_props.append((irot(0), True))
+
+        tmap = h.add('tmap', payload, tmap_props, in_idat=True)
         h.refs.append(('dimg', tmap, [primary, gain_id]))
 
     if case.xmp:
@@ -939,6 +1002,10 @@ def expected(case, heic, gain, gplanes, profiles):
         (left + cw) * gw / sw,
         (top + ch) * gh / sh,
     )
+    if case.gain_crop:  # its own, as the photo has none
+        gl, gt, gcw, gch = case.gain_crop
+        window = (gl, gt, gl + gcw, gt + gch)
+
     enlarged = UPRIGHT[case.o](ref.enlarge(g, cw, ch, window))
 
     if case.tmap:
@@ -956,9 +1023,9 @@ def expected(case, heic, gain, gplanes, profiles):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    profiles = {
-        space: libjxl_profile(space) for _, space in COLOR.values() if space
-    }
+    spaces = {space for _, space in COLOR.values() if space}
+    spaces |= {c.tmap_color for c in CASES if isinstance(c.tmap_color, str)}
+    profiles = {space: libjxl_profile(space) for space in sorted(spaces)}
     arrays, cases = {}, {}
     for case in CASES:
         heic = OUT / f'{case.name}.heic'

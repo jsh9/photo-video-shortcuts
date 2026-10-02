@@ -4,15 +4,17 @@ the layouts the Core Image test photos can't cover. Every orientation, with and
 without the gain map's own transforms; crops (also past the photo's edges);
 grids; 10-bit photos; RGB, multichannel, limited-range, full- and quarter-size
 gain maps; sRGB and unspecified color; a gain map brighter than PQ can store;
-Apple's older gain maps (before iOS 18); and gain maps that can't be used.
+Apple's older gain maps (before iOS 18); photos edited in Photos (an unlabeled
+gain map with its own crop, applied in the HDR image's color space); and gain
+maps that can't be used.
 
 Converted losslessly (-q 100), an HDR photo must match the reference math
 (hdr_reference.py) to 1/65535. (Apple can't decode the synthetic photos with
 its older gain maps, so Apple's rendering of those is compared only with your
 own photos, in test_samples.py.) A photo whose gain map can't be used must say
-why, stay SDR, and be marked so that its original is kept; except a photo whose
-gain map isn't labeled as Apple's (not taken by an iPhone camera), whose
-original may be deleted.
+why, stay SDR, and be marked so that its original is kept; except a turned or
+cropped photo whose gain map isn't labeled as Apple's (not taken by an iPhone
+camera), whose original may be deleted.
 """
 
 import json
@@ -25,8 +27,10 @@ FIXTURES = ph.HERE / 'fixtures' / 'hdr'
 CASES = json.loads((FIXTURES / 'cases.json').read_text())
 HDR = sorted(n for n, c in CASES.items() if 'note' not in c)
 NOT_USED = sorted(n for n, c in CASES.items() if 'note' in c)
-# a sample for each build: rotation, crop, older gain map, 10-bit, channels
-EVERY_BUILD = ['o5', 'crop_o6', 'apple_older_o6', 'ten_bit', 'multichannel']
+# a sample for each build: rotation, crop, older gain map, 10-bit, channels,
+# edited in Photos
+EVERY_BUILD = ['o5', 'crop_o6', 'apple_older_o6', 'ten_bit', 'multichannel',
+               'edited_in_photos']  # fmt: skip
 
 
 def convert(encoder, names, folder):

@@ -1,4 +1,9 @@
 {
+  "alternate_color_by_profile": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
   "apple_older": {
     "headroom": 3.029290636577587,
     "peak": 3.029290636577587,
@@ -9,6 +14,11 @@
     "primaries": "p3"
   },
   "apple_older_o6": {
+    "headroom": 3.029290636577587,
+    "peak": 3.029290636577587,
+    "primaries": "p3"
+  },
+  "apple_older_own_crop": {
     "headroom": 3.029290636577587,
     "peak": 3.029290636577587,
     "primaries": "p3"
@@ -43,6 +53,11 @@
     "peak": 3.491194551155358,
     "primaries": "p3"
   },
+  "edited_in_photos": {
+    "headroom": 3.4911707934993226,
+    "peak": 3.5036269325586917,
+    "primaries": "p3"
+  },
   "full_size_gain_map": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
@@ -71,6 +86,11 @@
   "multichannel": {
     "headroom": 4.0,
     "peak": 4.046875,
+    "primaries": "p3"
+  },
+  "not_iphone_cropped": {
+    "delete": true,
+    "note": "not an iPhone camera photo",
     "primaries": "p3"
   },
   "not_iphone_malformed": {
@@ -117,6 +137,10 @@
     "primaries": "p3"
   },
   "not_used_other_color_space": {
+    "note": "gain map in another color space",
+    "primaries": "p3"
+  },
+  "not_used_other_primaries": {
     "note": "gain map in another color space",
     "primaries": "p3"
   },
@@ -188,6 +212,11 @@
     "peak": 3.491194551155358,
     "primaries": "p3"
   },
+  "own_crop_labeled": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
   "quarter_gain_map": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
@@ -206,6 +235,10 @@
   "ten_bit": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "unlabeled_upright_malformed": {
+    "note": "malformed gain map metadata",
     "primaries": "p3"
   },
   "unspecified_color": {
