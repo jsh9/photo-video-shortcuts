@@ -740,8 +740,11 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     goto done;
   }
 
-  // Cross-check against the original's own orientation (warning only).
-  if (have_dims && orig_orient && orig_w && orig_h && orig_w != orig_h && img.w != img.h) {
+  // Cross-check against the original's own orientation (warning only), if
+  // its EXIF size is the photo's: an edited photo's EXIF keeps the size of
+  // the photo before the edit (Photos does so).
+  if (have_dims && orig_orient && orig_w && orig_h && orig_w != orig_h && img.w != img.h &&
+      ((orig_w == img.w && orig_h == img.h) || (orig_w == img.h && orig_h == img.w))) {
     const int want_portrait = (orig_orient >= 5) ? (orig_w > orig_h) : (orig_h > orig_w);
     const int is_portrait = img.h > img.w;
     if (want_portrait != is_portrait) {
