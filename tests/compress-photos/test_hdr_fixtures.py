@@ -13,6 +13,7 @@ why, stay SDR, and be marked so that its original is kept.
 
 import json
 import re
+import subprocess
 
 import numpy as np
 import photo_helpers as ph
@@ -117,7 +118,11 @@ def test_every_build(encoder, expected, name, tmp_path):
 def test_older_gain_map_matches_apple(converted, apple_hdr, name, tmp_path):
     # Apple's own rendering of its older gain map, if Core Image reads it
     # from this test photo (its maker notes are written by the generator).
-    apple = apple_hdr(FIXTURES / f'{name}.heic')
+    try:
+        apple = apple_hdr(FIXTURES / f'{name}.heic')
+    except subprocess.CalledProcessError as error:
+        pytest.skip(f"Apple can't decode this test photo: {error.stderr}")
+
     if ph.brightness(apple)[-1] < 1.2:
         pytest.skip("Core Image doesn't render this photo's older gain map")
 

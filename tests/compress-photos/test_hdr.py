@@ -169,17 +169,35 @@ def test_originals_may_be_deleted(batch, name):
 
 
 def test_looks_like_the_original_on_sdr_screens(
-        photos, helpers, wasm, apple_sdr, tmp_path
+        photos, batch, helpers, wasm, apple_sdr, tmp_path
 ):
     # With the tone curve ImageIO derives from the gain map (as iPhones store
-    # it), an SDR screen shows the JXL like the original.
+    # it), an SDR screen shows the JXL like the original. ImageIO's own
+    # profile may be in another color space (e.g. Rec. 2100), so its curve
+    # goes into a Display P3 PQ profile, the color of the photo's HDR pixels.
     original = photos['heic_hdr']
-    icc = ph.apple_hdr_profile(
+    derived = ph.apple_hdr_profile(
         helpers['hdr_pixels'], original, tmp_path / 'hdr.icc'
     )
-    if not icc or 'hdgm' not in ph.icc_tags(icc):
+    if not derived or 'hdgm' not in ph.icc_tags(derived):
         pytest.skip('ImageIO on this Mac derives no tone curve')
 
+    _, pq_jxl, _ = batch.results['heic_hdr']
+    ph.run(
+        [
+            'djxl',
+            pq_jxl,
+            tmp_path / 'profile.ppm',
+            '--color_space=RGB_D65_DCI_Rel_PeQ',
+            f'--icc_out={tmp_path / "p3_pq.icc"}',
+        ],
+        check=True,
+    )
+    icc = ph.add_icc_tag(
+        (tmp_path / 'p3_pq.icc').read_bytes(),
+        'hdgm',
+        ph.icc_tags(derived)['hdgm'],
+    )
     heic = tmp_path / 'with_curve.heic'
     ph.with_item_profile(original, 'tmap', icc, heic)
     ph.stage(tmp_path / 'job', [heic])

@@ -1,5 +1,6 @@
 // Decodes an image the way Apple's frameworks show it in HDR: Core Image
-// applies its gain map (.expandToHDR) and its orientation. Writes the pixels as
+// applies its gain map (.expandToHDR) and its orientation (or, if Core Image
+// can't, ImageIO's HDR decoding, kCGImageSourceDecodeToHDR). Writes the pixels as
 // linear Display P3 where 1.0 is SDR white (HDR highlights are above 1): the
 // width and height as two Int32, then 4 Float32 (RGBA) per pixel, all
 // little-endian.
@@ -40,9 +41,10 @@ if mode == "--profile" {
   exit(0)
 }
 
-func sdrImage(_ url: URL) -> CIImage? {
+// ImageIO's decoding (kCGImageSourceDecodeToSDR or ...ToHDR), oriented.
+func imageIOImage(_ url: URL, _ request: CFString) -> CIImage? {
   guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-  let options = [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToSDR] as CFDictionary
+  let options = [kCGImageSourceDecodeRequest: request] as CFDictionary
   guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options) else { return nil }
   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
   let raw = properties?[kCGImagePropertyOrientation] as? UInt32 ?? 1
@@ -50,11 +52,13 @@ func sdrImage(_ url: URL) -> CIImage? {
   return CIImage(cgImage: cgImage).oriented(orientation)
 }
 
+// For HDR, Core Image first; ImageIO if Core Image can't expand the gain map.
 let decoded =
   sdr
-  ? sdrImage(input)
+  ? imageIOImage(input, kCGImageSourceDecodeToSDR)
   : CIImage(contentsOf: input, options: [.expandToHDR: true, .applyOrientationProperty: true])
-guard let image = decoded else { fail("cannot read \(input.path)") }
+    ?? imageIOImage(input, kCGImageSourceDecodeToHDR)
+guard let image = decoded else { fail("Core Image and ImageIO cannot decode \(input.path)") }
 let extent = image.extent.integral
 let width = Int(extent.width), height = Int(extent.height)
 var pixels = [Float](repeating: 0, count: width * height * 4)
