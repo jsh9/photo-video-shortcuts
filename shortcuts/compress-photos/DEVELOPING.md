@@ -193,10 +193,12 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   the gain map can give), not PQ's 10,000 nits; at most 10,000 nits, where PQ
   values clip (libjxl rejects targets above 65,504). Metadata claiming more
   than 16 stops (`GAINMAP_MAX_STOPS`, 65,536×; the alternate headroom or a
-  channel's maximum) is rejected as malformed, so a broken or hostile file
-  can't print an absurd headroom; real photos are far below it (iPhones reach
-  about 3 stops). Other images leave it to libjxl, which picks it by the color
-  stored: 10,000 nits for PQ (e.g. a PNG with a PQ `cICP` chunk), 255 for SDR.
+  channel's maximum, or for Apple's older format the headroom from its maker
+  notes, whose formula has no bound as tag 48 goes negative) is rejected as
+  malformed, so a broken or hostile file can't print an absurd headroom; real
+  photos are far below it (iPhones reach about 3 stops). Other images leave it
+  to libjxl, which picks it by the color stored: 10,000 nits for PQ (e.g. a PNG
+  with a PQ `cICP` chunk), 255 for SDR.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an
@@ -239,7 +241,7 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
-- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 44 tiny HEICs
+- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 45 tiny HEICs
   covering these layouts, with expected results from an independent NumPy
   implementation (`hdr_reference.py`); `fixtures/heif/` holds 8 SDR photos in
   HEIF layouts beyond an iPhone's (see "The photo" and "Derived photos" above).

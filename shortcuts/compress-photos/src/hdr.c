@@ -23,6 +23,12 @@ int hdr_check(const color_t *color, const gainmap_meta_t *meta, hdr_info_t *hdr)
     snprintf(hdr->note, sizeof hdr->note, "the gain map doesn't make the photo brighter");
     return 0;
   }
+  // As for ISO metadata (gainmap_parse): Apple's older format's formula for
+  // its headroom has no bound, so broken maker notes can claim any.
+  if (!(meta->alternate_headroom <= GAINMAP_MAX_STOPS)) {
+    snprintf(hdr->note, sizeof hdr->note, "malformed gain map metadata");
+    return 0;
+  }
   return primaries;
 }
 

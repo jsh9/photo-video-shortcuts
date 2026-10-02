@@ -22,8 +22,9 @@ encoder. Every release includes the current files of all shortcuts.
     end of the batch), and their originals are still offered for deletion.
     Whether iPhone photos edited in Photos keep the label hasn't been checked
     yet.
-  - A gain map claiming more than 16 stops (65,536×) is treated as malformed:
-    the photo is converted as SDR and its original is kept.
+  - A gain map claiming more than 16 stops (65,536×), in either format (for
+    Apple's older one, the headroom its maker notes give), is treated as
+    malformed: the photo is converted as SDR and its original is kept.
   - Originals whose HDR isn't in the JPEG XL are not offered for deletion: a
     photo whose gain map can't be used (converted as SDR, with a note "HDR gain
     map not used" in a-Shell; except the photos above), an HDR photo sent as

@@ -173,7 +173,8 @@ Allow at the delete prompt (this keeps the whole batch's originals) and delete
 the others by hand.
 
 **Implausible brightness:** a gain map claiming to brighten the photo by more
-than 16 stops (65,536×) is treated as broken
+than 16 stops (65,536×), in either format (for Apple's older one, the headroom
+its maker notes give), is treated as broken
 (`! HDR gain map not used (malformed gain map metadata)`): the photo is saved
 as SDR and its original is kept (offered for deletion if, in addition, its gain
 map isn't labeled as Apple's). Real photos are far below this: iPhones reach
