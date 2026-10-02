@@ -12,6 +12,10 @@
 
 // SDR white in the PQ result, in nits (ITU-R BT.2408's reference white).
 #define GAINMAP_SDR_WHITE_NITS 203.0
+// The most a gain map may claim to brighten a photo, in stops (65,536x):
+// more is treated as malformed metadata. Real photos are far below (iPhones
+// reach about 3 stops; PQ itself ends about 5.6 stops above SDR white).
+#define GAINMAP_MAX_STOPS 16.0
 
 // ISO 21496-1 metadata, as stored in a HEIF 'tmap' item.
 typedef struct {

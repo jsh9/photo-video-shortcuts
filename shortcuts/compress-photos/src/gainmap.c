@@ -49,8 +49,9 @@ int gainmap_parse(const uint8_t *p, size_t len, gainmap_meta_t *m, char *err, si
   for (int c = 0; c < m->channels; c++, q += 40) {
     bad |= fraction(q, 1, &m->min[c]) | fraction(q + 8, 1, &m->max[c]) | fraction(q + 16, 0, &m->gamma[c]) |
            fraction(q + 24, 1, &m->base_offset[c]) | fraction(q + 32, 1, &m->alternate_offset[c]);
-    bad |= !(m->gamma[c] > 0) || m->max[c] < m->min[c];
+    bad |= !(m->gamma[c] > 0) || m->max[c] < m->min[c] || !(m->max[c] <= GAINMAP_MAX_STOPS);
   }
+  bad |= !(m->alternate_headroom <= GAINMAP_MAX_STOPS);
   if (bad) {
     snprintf(err, err_len, "malformed gain map metadata");
     return -1;

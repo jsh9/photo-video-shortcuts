@@ -631,6 +631,7 @@ typedef struct {
   size_t done;
   size_t apple_jpegs;  // originals that Photos sent as JPEG (see run_batch)
   size_t kept;         // originals marked "keep": their HDR isn't in the JXL
+  size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -800,6 +801,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   batch->done++;
   batch->kept += keep;
   batch->apple_jpegs += apple_jpeg;
+  batch->not_iphone += hdr.not_iphone;
   batch->bytes_in += orig_size;
   batch->bytes_out += (double)jxl_len;
   ok = 1;
@@ -986,6 +988,11 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   if (batch.kept) {
     const int one = batch.kept == 1;
     say_wrap("", "%zu original%s kept: %s HDR isn't in the JXL.", batch.kept, one ? "" : "s", one ? "its" : "their");
+  }
+  if (batch.not_iphone) {
+    const int one = batch.not_iphone == 1;
+    say_wrap("", "%zu HDR photo%s saved as SDR (not an iPhone camera photo); %s offered for deletion.",
+             batch.not_iphone, one ? "" : "s", one ? "its original is" : "their originals are");
   }
   if (batch.apple_jpegs) {
     const int one = batch.apple_jpegs == 1;

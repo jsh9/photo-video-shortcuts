@@ -348,20 +348,19 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   if (iso == 0) gain_map_id = find_older_gain_map(ctx, buf, len, primary_id);
   if (iso == 0 && !gain_map_id) return;
   hdr->has_gain_map = 1;
+  // Only Apple's gain maps, as iPhones label them (their auxiliary image
+  // type), are known to line up with the photo as below. Others aren't
+  // guessed at: the photo stays SDR, and its original may still be deleted
+  // (the owner's choice), whatever else is wrong with it.
+  if (!heif_item_has_aux_type(buf, len, gain_map_id, APPLE_GAIN_MAP)) {
+    snprintf(hdr->note, sizeof hdr->note, "not an iPhone camera photo");
+    hdr->not_iphone = 1;
+  }
   if (sdr) {  // asked for SDR: nothing to say
     hdr->note[0] = 0;
     return;
   }
-  if (iso < 0) return;
-  // Only Apple's gain maps, as iPhones label them (their auxiliary image
-  // type), are known to line up with the photo as below. Others aren't
-  // guessed at: the photo stays SDR, and its original may still be deleted
-  // (the owner's choice).
-  if (!heif_item_has_aux_type(buf, len, gain_map_id, APPLE_GAIN_MAP)) {
-    snprintf(hdr->note, sizeof hdr->note, "not an iPhone camera photo");
-    hdr->not_iphone = 1;
-    return;
-  }
+  if (iso < 0 || hdr->not_iphone) return;
   // Lining the gain map up with the photo needs the transforms of both, so
   // each must have only its own (e.g. not be derived from a turned image).
   if (!own_transforms || !only_own_transforms(ctx, gain_map_id, 0)) {

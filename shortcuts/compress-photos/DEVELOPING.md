@@ -144,7 +144,12 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   whether a 180° turn, a mirror or a square photo's rotation applies to it. So
   such a photo is converted as SDR with
   `! HDR gain map not used (not an iPhone camera photo)`, and, by the owner's
-  choice, its original may still be deleted (`delete` in `jxl_done.txt`).
+  choice, its original may still be deleted (`delete` in `jxl_done.txt`), on
+  every path (also with `--sdr` or malformed metadata). The batch ends with how
+  many there were. Not checked yet: whether Photos keeps the label when it
+  saves an edit, or other iPhone apps write it.
+  `exiftool -AuxiliaryImageType photo.heic` shows
+  `urn:com:apple:photo:2020:aux:hdrgainmap` when a file has it.
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
   is Apple's auxiliary image (above), half or a quarter of the photo's size,
   8-bit grey. Apple stores it like the primary image, without its transforms
@@ -186,9 +191,12 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   is encoded with libjxl's usual lossy settings, as PQ (CICP), with
   `intensity_target` set to the photo's peak (203 nits times the largest gain
   the gain map can give), not PQ's 10,000 nits; at most 10,000 nits, where PQ
-  values clip (libjxl rejects targets above 65,504). Other images leave it to
-  libjxl, which picks it by the color stored: 10,000 nits for PQ (e.g. a PNG
-  with a PQ `cICP` chunk), 255 for SDR.
+  values clip (libjxl rejects targets above 65,504). Metadata claiming more
+  than 16 stops (`GAINMAP_MAX_STOPS`, 65,536×; the alternate headroom or a
+  channel's maximum) is rejected as malformed, so a broken or hostile file
+  can't print an absurd headroom; real photos are far below it (iPhones reach
+  about 3 stops). Other images leave it to libjxl, which picks it by the color
+  stored: 10,000 nits for PQ (e.g. a PNG with a PQ `cICP` chunk), 255 for SDR.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an
@@ -217,9 +225,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 - **Not used** (the photo is converted as SDR, with
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
   sRGB with the sRGB curve, a gain map in another color space, a gain map whose
-  shape doesn't match, malformed metadata, other metadata versions, an older
-  gain map without its maker notes, a gain map not labeled as Apple's (see
-  above).
+  shape doesn't match, malformed metadata (including more than 16 stops), other
+  metadata versions, an older gain map without its maker notes, a gain map not
+  labeled as Apple's (see above).
 - **Kept originals.** Each `jxl_done.txt` line is
   `file|index|delete or keep|name`. `keep` means the original had HDR that the
   JXL lacks (a gain map that wasn't used, except one not labeled as Apple's; an
@@ -231,16 +239,19 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
-- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 41 tiny HEICs
+- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 44 tiny HEICs
   covering these layouts, with expected results from an independent NumPy
   implementation (`hdr_reference.py`); `fixtures/heif/` holds 8 SDR photos in
   HEIF layouts beyond an iPhone's (see "The photo" and "Derived photos" above).
   `make_hdr_fixtures.py` writes them, and `src/selftest_hdr_heic.h` (the
   `--selftest` HDR photo); regenerating needs ffmpeg with libx265, libheif's
   `heif-dec` and libjxl's `djxl` and `cjxl`. Apple's rendering is compared with
-  Core Image test photos (`make_photo.swift`, ISO 21496-1 only); Apple can't
-  decode the synthetic older-format photos (`apple_older*.heic`), so for that
-  format only your own photos are compared with it (`test_samples.py`).
+  Core Image test photos (`make_photo.swift`, ISO 21496-1 only). ImageIO
+  doesn't label their gain maps, so `photo_helpers.with_apple_gain_map_label`
+  adds Apple's label, a layout no real writer produces; the real iPhone layout
+  is covered only by your own photos (`test_samples.py`). Apple can't decode
+  the synthetic older-format photos (`apple_older*.heic`), so for that format
+  only your own photos are compared with it (`test_samples.py`).
 
 ## 2. Layout
 

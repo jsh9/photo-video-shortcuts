@@ -18,8 +18,12 @@ encoder. Every release includes the current files of all shortcuts.
     like the original there too; a-Shell says so when a photo has none.
   - Only gain maps an iPhone camera labels as Apple's are used. Other HDR HEICs
     (e.g. saved by other apps or on a Mac) are converted as SDR, with "HDR gain
-    map not used (not an iPhone camera photo)" in a-Shell, and their originals
-    are still offered for deletion.
+    map not used (not an iPhone camera photo)" in a-Shell (and a count at the
+    end of the batch), and their originals are still offered for deletion.
+    Whether iPhone photos edited in Photos keep the label hasn't been checked
+    yet.
+  - A gain map claiming more than 16 stops (65,536×) is treated as malformed:
+    the photo is converted as SDR and its original is kept.
   - Originals whose HDR isn't in the JPEG XL are not offered for deletion: a
     photo whose gain map can't be used (converted as SDR, with a note "HDR gain
     map not used" in a-Shell; except the photos above), an HDR photo sent as
