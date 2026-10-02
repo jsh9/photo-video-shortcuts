@@ -473,6 +473,18 @@ int heif_item_has_aux_type(const uint8_t *buf, size_t len, uint32_t id, const ch
   return each_item_property(buf, len, id, is_aux_type, (void *)aux_type) != 0;
 }
 
+// A 'colr' property of type 'nclx': its color primaries.
+static size_t nclx_primaries_of(uint32_t type, span_t prop, void *arg) {
+  (void)arg;
+  // the type, then primaries, transfer and matrix (16 bits each), full range
+  if (type != FOURCC('c', 'o', 'l', 'r') || prop.n < 11 || rd32be(prop.p) != FOURCC('n', 'c', 'l', 'x')) return 0;
+  return rd16be(prop.p + 4);
+}
+
+int heif_item_nclx_primaries(const uint8_t *buf, size_t len, uint32_t id) {
+  return (int)each_item_property(buf, len, id, nclx_primaries_of, NULL);
+}
+
 static int parse_heif(const uint8_t *buf, size_t len, meta_t *m) {
   const span_t meta = heif_meta(buf, len);
   if (!meta.p) return 0;

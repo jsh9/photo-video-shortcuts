@@ -38,6 +38,9 @@ void meta_free(meta_t *m);
 size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint8_t **icc);
 // 1 if HEIF item `id` is an auxiliary image of type `aux_type` (its 'auxC').
 int heif_item_has_aux_type(const uint8_t *buf, size_t len, uint32_t id, const char *aux_type);
+// The CICP color primaries in HEIF item `id`'s 'colr' property of type
+// 'nclx'; 0 if it has none.
+int heif_item_nclx_primaries(const uint8_t *buf, size_t len, uint32_t id);
 // 1 if a JPEG holds a gain map (an HDR photo): a second image (MPF) with
 // gain map metadata.
 int jpeg_has_gain_map(const uint8_t *buf, size_t len);

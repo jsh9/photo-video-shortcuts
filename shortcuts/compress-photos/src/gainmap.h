@@ -20,7 +20,10 @@
 // ISO 21496-1 metadata, as stored in a HEIF 'tmap' item.
 typedef struct {
   int channels;              // 1, or 3 for one gain per color channel
-  int use_base_color_space;  // the gain applies in the SDR image's color space
+  int use_base_color_space;  // the gain applies in the SDR image's color space, else in the HDR image's
+  // The CICP primaries of the HDR (alternate) image's color space, from the
+  // 'tmap' item's color, not its data (set by the decoder); 0 if unknown.
+  int alternate_primaries;
   double base_headroom, alternate_headroom;  // log2 of the peak, relative to SDR white
   // Per channel: gains (log2) at gain map values 0 and 1, the gain map's
   // gamma, and offsets added before and removed after applying the gain.
@@ -66,5 +69,7 @@ int gainmap_prepare(image_t *base, image_t *gain_map, const double window[4], in
 
 // 1 if an ICC profile has the tag `sig`.
 int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]);
+// The CICP color primaries in an ICC profile's 'cicp' tag; 0 if it has none.
+int gainmap_icc_cicp_primaries(const blob_t *icc);
 
 #endif

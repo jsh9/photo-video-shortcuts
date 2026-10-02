@@ -124,6 +124,13 @@ int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]) {
   return icc_tag(icc, sig, &size) != NULL;
 }
 
+int gainmap_icc_cicp_primaries(const blob_t *icc) {
+  size_t n = 0;
+  const uint8_t *t = icc_tag(icc, "cicp", &n);
+  // the type, 4 reserved bytes, then primaries, transfer, matrix, full range
+  return t && n >= 12 && memcmp(t, "cicp", 4) == 0 ? t[8] : 0;
+}
+
 static double s15(const uint8_t *p) { return (double)(int32_t)rd32(p) / 65536.0; }
 
 // Evaluates a 'para' or 'curv' tone curve at x in [0, 1]; returns -1 if unknown.

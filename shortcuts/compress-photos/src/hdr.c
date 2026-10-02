@@ -15,7 +15,9 @@ int hdr_check(const color_t *color, const gainmap_meta_t *meta, hdr_info_t *hdr)
     snprintf(hdr->note, sizeof hdr->note, "unsupported color profile: %s", name);
     return 0;
   }
-  if (!meta->use_base_color_space) {
+  // Applied in the HDR image's color space, the gain is the same as in the
+  // photo's if both have the same primaries (as in photos edited in Photos).
+  if (!meta->use_base_color_space && meta->alternate_primaries != primaries) {
     snprintf(hdr->note, sizeof hdr->note, "gain map in another color space");
     return 0;
   }

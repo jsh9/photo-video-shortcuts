@@ -131,6 +131,16 @@ static int is_turned(struct heif_context *ctx, heif_item_id item) {
   return 0;
 }
 
+// 1 if `item` is cropped ('clap').
+static int has_crop(struct heif_context *ctx, heif_item_id item) {
+  heif_property_id props[16];
+  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
+  for (int i = 0; i < n; i++) {
+    if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('c', 'l', 'a', 'p')) return 1;
+  }
+  return 0;
+}
+
 // The EXIF orientation that rotates or mirrors like property `prop` ('irot'
 // or 'imir'); 0 for other properties.
 static int transform_orientation(struct heif_context *ctx, heif_item_id item, heif_property_id prop) {
@@ -314,8 +324,12 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   // Apple stores its gain maps like the primary image, without its
   // transforms ('irot' 0, and a full-size gain map gets the primary's crop
   // but not its rotation): the primary's transforms, crop included, apply.
-  // A gain map turned itself has its own. Either way, one set applies.
-  struct heif_image_handle *owner = is_turned(ctx, id) ? handle : primary;
+  // A gain map turned itself has its own; so has one cropped itself on a
+  // photo neither cropped nor turned, as Photos saves an edited photo. Either
+  // way, one set applies.
+  const heif_item_id photo = heif_image_handle_get_item_id(primary);
+  const int own_crop = has_crop(ctx, id) && !has_crop(ctx, photo) && !is_turned(ctx, photo);
+  struct heif_image_handle *owner = is_turned(ctx, id) || own_crop ? handle : primary;
   parts->window[0] = parts->window[1] = 0;
   parts->window[2] = gm->w;
   parts->window[3] = gm->h;
@@ -348,11 +362,15 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   if (iso == 0) gain_map_id = find_older_gain_map(ctx, buf, len, primary_id);
   if (iso == 0 && !gain_map_id) return;
   hdr->has_gain_map = 1;
-  // Only Apple's gain maps, as iPhones label them (their auxiliary image
-  // type), are known to line up with the photo as below. Others aren't
-  // guessed at: the photo stays SDR, and its original may still be deleted
-  // (the owner's choice), whatever else is wrong with it.
-  if (!heif_item_has_aux_type(buf, len, gain_map_id, APPLE_GAIN_MAP)) {
+  // Apple's gain maps, as iPhone cameras label them (their auxiliary image
+  // type), are known to line up with the photo as below. So is an unlabeled
+  // ISO 21496-1 gain map if neither it nor the photo is turned and the photo
+  // isn't cropped: Photos saves an edited photo so, upright at its new size.
+  // Others aren't guessed at: the photo stays SDR, and its original may still
+  // be deleted (the owner's choice), whatever else is wrong with it.
+  const int upright = iso != 0 && !is_turned(ctx, primary_id) && !has_crop(ctx, primary_id) &&
+                      !is_turned(ctx, gain_map_id);
+  if (!heif_item_has_aux_type(buf, len, gain_map_id, APPLE_GAIN_MAP) && !upright) {
     snprintf(hdr->note, sizeof hdr->note, "not an iPhone camera photo");
     hdr->not_iphone = 1;
   }
@@ -370,6 +388,15 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   if (iso == 0 && !older_gain_map_meta(primary, &parts.meta)) {
     snprintf(hdr->note, sizeof hdr->note, "Apple's older gain map without its headroom");
     return;
+  }
+  // The HDR image's color, where the gain may apply instead of the photo's:
+  // the 'tmap' item's ICC profile ('cicp' tag), or else its nclx.
+  if (tmap_id) {
+    const uint8_t *icc = NULL;
+    const size_t n = heif_item_profile(buf, len, tmap_id, &icc);
+    const blob_t profile = {(uint8_t *)icc, n};
+    parts.meta.alternate_primaries =
+        n ? gainmap_icc_cicp_primaries(&profile) : heif_item_nclx_primaries(buf, len, tmap_id);
   }
   const int primaries = hdr_check(color, &parts.meta, hdr);
   if (!primaries || decode_gain_map(ctx, primary, gain_map_id, &parts, hdr->note, sizeof hdr->note) != 0) {
