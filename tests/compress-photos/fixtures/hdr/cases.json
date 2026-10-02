@@ -112,6 +112,10 @@
     "note": "unsupported gain map version",
     "primaries": "p3"
   },
+  "not_used_older_absurd_headroom": {
+    "note": "malformed gain map metadata",
+    "primaries": "p3"
+  },
   "not_used_other_color_space": {
     "note": "gain map in another color space",
     "primaries": "p3"

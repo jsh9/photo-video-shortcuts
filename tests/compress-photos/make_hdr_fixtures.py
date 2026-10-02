@@ -691,6 +691,9 @@ CASES += [
         **ISO_META, 'alt_headroom': 130.0,
         'channels': [{**ISO_META['channels'][0], 'max': 130.0}]},
          note='malformed gain map metadata'),
+    # Apple's older gain map, its maker notes claiming about 2,000 stops
+    Case('not_used_older_absurd_headroom', tmap=False, maker=(0.8, -100.0),
+         xmp=True, note='malformed gain map metadata'),
     # the photo as a derived image of a turned source: its gain map's
     # alignment isn't defined
     Case('not_used_derived_photo', iden_source_turns=2,
