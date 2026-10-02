@@ -26,6 +26,9 @@ def big_heic(folder, make_photo, width, height, options=()):
     big.save(folder / 'big.png')
     heic = folder / 'big.heic'
     ph.run([make_photo, folder / 'big.png', heic, *options], check=True)
+    if '--hdr' in options:
+        ph.with_apple_gain_map_label(heic, heic)  # like an iPhone's
+
     return heic
 
 
