@@ -6,7 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -52,3 +52,13 @@ jobs:
       # In CI, a missing build or tool fails the tests instead of skipping them.
       - name: Run tests
         run: python -m tox -e tests -- tests/compress-photos/test_diagnose.py -s
+      # Throwaway diagnostics branch only: commit the files the diagnostic
+      # wrote back to this branch, to analyze them elsewhere.
+      - name: Save diagnostic files to the branch
+        if: always()
+        run: |
+          git config user.name "diagnostics"
+          git config user.email "diagnostics@users.noreply.github.com"
+          git add -f diag-out
+          git commit -q -m "Diagnostic files from CI run ${{ github.run_id }}"
+          git push origin HEAD:2026-10-02-hdr-diagnostics
