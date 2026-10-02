@@ -157,8 +157,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   libheif's `ignore_transformations` also skips those of the images it is
   derived from. Otherwise libheif applies all of them, as before 0.2.0, and a
   gain map isn't used ("unsupported image layout"): lining it up needs the
-  transforms of both images. The same holds for a derived gain map. iPhone
-  photos are grids whose tiles have no transforms.
+  transforms of both images. The same holds for a derived gain map, and for a
+  transparency (alpha) image with transforms of its own: libheif turns it by
+  those, which `ignore_transformations` skips too. iPhone photos are grids
+  whose tiles have no transforms, and have no alpha image.
 - **The math**, at full strength (the alternate rendition): the window is
   enlarged to the photo's size (center-aligned bilinear). For an ISO gain map
   value `g`, the gain is `log2 G = min + (max - min) * g^(1/gamma)`, and the

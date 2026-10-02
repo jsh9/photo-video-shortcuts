@@ -221,6 +221,32 @@ static int only_own_transforms(struct heif_context *ctx, heif_item_id item, int 
   return ok;
 }
 
+// 1 if the photo's transparency (alpha) images, if any, have no transforms of
+// their own (nor the images they are derived from). libheif turns an alpha
+// image by its own transforms, which ignore_transformations skips too.
+static int alpha_is_plain(struct heif_context *ctx, const uint8_t *buf, size_t len, heif_item_id photo) {
+  // the alpha types libheif recognizes
+  static const char *kAlpha[] = {"urn:mpeg:mpegB:cicp:systems:auxiliary:alpha", "urn:mpeg:hevc:2015:auxid:1",
+                                 "urn:mpeg:avc:2015:auxid:1"};
+  const int n = heif_context_get_number_of_items(ctx);
+  heif_item_id *ids = n > 0 ? (heif_item_id *)malloc((size_t)n * sizeof *ids) : NULL;
+  if (!ids) return 0;  // libheif applies all transforms
+  const int count = heif_context_get_list_of_item_IDs(ctx, ids, n);
+  int plain = 1;
+  for (int i = 0; i < count && plain; i++) {
+    if (ids[i] == photo || !refers_to(ctx, ids[i], heif_fourcc('a', 'u', 'x', 'l'), photo)) continue;
+    int alpha = 0;
+    for (size_t k = 0; k < sizeof kAlpha / sizeof kAlpha[0]; k++) {
+      alpha |= heif_item_has_aux_type(buf, len, ids[i], kAlpha[k]);
+    }
+    heif_property_id props[1];
+    plain = !alpha || (heif_item_get_transformation_properties(ctx, ids[i], props, 1) == 0 &&
+                       only_own_transforms(ctx, ids[i], 0));
+  }
+  free(ids);
+  return plain;
+}
+
 // Applies the photo's transforms (crop, rotation, mirroring), in order, to
 // its decoded RGB pixels. libheif would apply them before converting to RGB,
 // which shifts the colors of a 4:2:0 photo cropped at an odd offset (Apple's
@@ -432,8 +458,10 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   }
 
   // As stored, and transform_photo turns it upright; unless an image it is
-  // derived from has transforms too, which libheif then applies (all of them).
-  const int own_transforms = only_own_transforms(ctx, heif_image_handle_get_item_id(handle), 0);
+  // derived from, or its transparency image, has transforms too, which
+  // libheif then applies (all of them).
+  const heif_item_id photo = heif_image_handle_get_item_id(handle);
+  const int own_transforms = only_own_transforms(ctx, photo, 0) && alpha_is_plain(ctx, buf, len, photo);
   options = heif_decoding_options_alloc();
   options->ignore_transformations = own_transforms;
   e = heif_decode_image(handle, &image, heif_colorspace_RGB, chroma, options);
