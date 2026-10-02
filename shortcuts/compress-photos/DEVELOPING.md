@@ -148,8 +148,13 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   every path (also with `--sdr` or malformed metadata). The batch ends with how
   many there were. Not checked yet: whether Photos keeps the label when it
   saves an edit, or other iPhone apps write it.
-  `exiftool -AuxiliaryImageType photo.heic` shows
-  `urn:com:apple:photo:2020:aux:hdrgainmap` when a file has it.
+  `exiftool -a -AuxiliaryImageType photo.heic` lists
+  `urn:com:apple:photo:2020:aux:hdrgainmap` when a file has it. The `-a`
+  matters: an iPhone 17 Pro photo, for example, has four auxiliary images (also
+  `tag:apple.com,2023:photo:aux:styledeltamap`,
+  `urn:com:apple:photo:2020:aux:semanticskymatte` and
+  `tag:apple.com,2023:photo:aux:linearthumbnail`), and without `-a` exiftool
+  shows only one of them. The other three aren't kept in the JXL.
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
   is Apple's auxiliary image (above), half or a quarter of the photo's size,
   8-bit grey. Apple stores it like the primary image, without its transforms
