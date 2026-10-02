@@ -1,4 +1,9 @@
 {
+  "apple_cropped_gain_map_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
   "apple_older": {
     "headroom": 3.029290636577587,
     "peak": 3.029290636577587,
@@ -24,6 +29,16 @@
     "primaries": "p3"
   },
   "crop_square": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "cropped_gain_map": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "cropped_gain_map_o6": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,
     "primaries": "p3"

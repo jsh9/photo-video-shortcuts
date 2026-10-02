@@ -624,14 +624,16 @@ class Case:
     the primary). ``gain_map_turned``: the gain map carries the same transforms
     (else it is stored like the primary, without them, as Apple does).
     ``crop``: (left, top, width, height) of a 'clap' crop of the stored
-    primary, applied before its rotation.
+    primary, applied before its rotation. ``gain_map_cropped``: the gain map
+    carries that crop too (but not the rotation), as ImageIO writes a full-size
+    gain map.
     """
 
     def __init__(self, name, o=1, gain_map_turned=False, crop=None, size=(W, H),
                  gain_size=None, color='p3', bits=8, tile=None, full_range=True,
                  rgb_gain_map=False, meta=ISO_META, tmap=True, apple=True,
                  upright_gain_map=False, maker=None, xmp=False, note=None,
-                 tmap_kw=None, tmap_data=None):  # fmt: skip
+                 tmap_kw=None, tmap_data=None, gain_map_cropped=False):  # fmt: skip
         self.__dict__.update(locals())
         del self.__dict__['self']
 
@@ -644,6 +646,14 @@ CASES += [
     Case('crop', size=(64, 48), crop=(4, 3, 56, 42)),
     Case('crop_square', size=(64, 48), crop=(8, 0, 48, 48)),
     Case('crop_o6', o=6, size=(64, 48), crop=(3, 4, 42, 56)),
+    # a full-size gain map with the photo's crop but not its rotation, as
+    # ImageIO writes (an odd height stored one row taller)
+    Case('cropped_gain_map', crop=(0, 0, 64, 47), gain_size=(64, 48),
+         gain_map_cropped=True, apple=False),
+    Case('cropped_gain_map_o6', o=6, size=(48, 64), crop=(0, 0, 64, 47),
+         gain_size=(48, 64), gain_map_cropped=True, apple=False),
+    Case('apple_cropped_gain_map_o6', o=6, size=(48, 64), crop=(0, 0, 64, 47),
+         gain_size=(48, 64), gain_map_cropped=True),
     Case('full_size_gain_map', gain_size=(64, 48)),
     Case('quarter_gain_map', size=(128, 96), gain_size=(32, 24)),
     Case('limited_range_gain_map', full_range=False),
@@ -752,6 +762,10 @@ def write_photo(case, path, profiles):
     extra = [(auxc(APPLE_GAIN_MAP), True)] if case.apple else []
     if case.gain_map_turned:
         extra += tf[len(transforms) - len(TRANSFORMS[case.o]) :]
+
+    if case.gain_map_cropped:  # the crop only (full-size gain maps)
+        assert (gw_s, gh_s) == (sw, sh), 'a cropped gain map must be full size'
+        extra += [(clap(sw, sh, *case.crop), True)]
 
     gain_id = h.image(gplanes, gw_s, gh_s, gfmt, case.full_range or gain.ndim == 3,
                       gcolor, extra, hidden=True)  # fmt: skip
