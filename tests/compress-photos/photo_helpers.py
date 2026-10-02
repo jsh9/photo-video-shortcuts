@@ -855,15 +855,6 @@ def apple_sdr_pixels(helper, path, out):
     return _rendered(helper, ['--sdr', path, out], out)
 
 
-def apple_hdr_profile(helper, heic, out):
-    """
-    The ICC profile ImageIO gives its HDR decoding of a gain map photo (with
-    the tone curve it derives, on recent macOS); None if it has none.
-    """
-    result = run([helper, '--profile', heic, out])
-    return Path(out).read_bytes() if result.returncode == 0 else None
-
-
 def _rendered(helper, args, out):
     run([helper, *args], check=True)
     width, height = np.fromfile(out, dtype='<i4', count=2)
