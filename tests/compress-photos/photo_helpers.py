@@ -11,6 +11,7 @@ import struct
 import subprocess
 from pathlib import Path
 
+import hdr_reference
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageOps, PngImagePlugin
@@ -234,18 +235,29 @@ def stage(folder, photos):
     return staged
 
 
-def read_done(folder):
-    """jxl_done.txt as {index: (output file, saved name)}."""
+def done_lines(folder):
+    """jxl_done.txt's lines, split at "|"; [] if there is none."""
     done = folder / 'jxl_done.txt'
     if not done.exists():
-        return {}
+        return []
 
-    result = {}
-    for line in done.read_text().split('\n'):
-        file_name, index, name = line.split('|')
-        result[int(index)] = (folder / file_name, name)
+    return [line.split('|') for line in done.read_text().split('\n')]
 
-    return result
+
+def read_done(folder):
+    """jxl_done.txt as {index: (output file, saved name)}."""
+    return {
+        int(parts[1]): (folder / parts[0], parts[-1])
+        for parts in done_lines(folder)
+    }
+
+
+def kept_originals(folder):
+    """
+    The indexes jxl_done.txt marks "keep": photos whose original must not be
+    offered for deletion (its HDR isn't in the JXL).
+    """
+    return {int(p[1]) for p in done_lines(folder) if p[2] == 'keep'}
 
 
 # ---------------------------------------------------------------------------
@@ -433,75 +445,55 @@ def _uint(data, pos, size):
     return int.from_bytes(data[pos : pos + size], 'big')
 
 
+def iso_gain_map(path):
+    """
+    A HEIF's ISO 21496-1 gain map metadata, from its 'tmap' item (see
+    hdr_reference.parse_tmap); None if it has none.
+    """
+    data = Path(path).read_bytes()
+    try:
+        _, _, children = _meta(data)
+    except AssertionError:
+        return None
+
+    tmap, _ = _gain_map_items(data, children)
+    return (
+        None
+        if tmap is None
+        else hdr_reference.parse_tmap(_item_data(data, children, tmap))
+    )
+
+
 def iso_gain_map_headroom(path):
     """
     The HDR headroom (peak brightness / SDR white) of a HEIF's ISO 21496-1 gain
-    map, from its 'tmap' item; None if it has none.
+    map; None if it has none.
     """
-    data = Path(path).read_bytes()
-    meta = next((b for b in _boxes(data) if b[0] == 'meta'), None)
-    if not meta:
+    meta = iso_gain_map(path)
+    return meta and meta['headroom']
+
+
+def apple_older_gain_map_headroom(path):
+    """
+    The headroom of Apple's older gain map (photos taken before iOS 18: no
+    'tmap', the headroom in maker notes 33 and 48); None if it has none.
+    """
+    if iso_gain_map(path):
         return None
 
-    children = {k: (s, e) for k, s, e in _boxes(data, meta[1] + 4, meta[2])}
-    if 'iinf' not in children or 'iloc' not in children:
+    info = json.loads(
+        run([
+            'exiftool', '-j', '-n', '-AuxiliaryImageType', '-HDRHeadroom',
+            '-HDRGain', path,
+        ]).stdout or '[{}]'
+    )[0]  # fmt: skip
+    if 'hdrgainmap' not in str(info.get('AuxiliaryImageType', '')):
         return None
 
-    start, end = children['iinf']
-    start += 4 + (2 if data[start] == 0 else 4)
-    tmap = None
-    for kind, s, _ in _boxes(data, start, end):
-        if kind == 'infe' and data[s] >= 2:
-            id_size = 2 if data[s] == 2 else 4
-            item_type = data[s + 4 + id_size + 2 : s + 4 + id_size + 6]
-            if item_type == b'tmap':
-                tmap = _uint(data, s + 4, id_size)
-
-    if tmap is None:
+    if 'HDRHeadroom' not in info or 'HDRGain' not in info:
         return None
 
-    # iloc: where the item's data is (in the file or in 'idat')
-    pos, _ = children['iloc']
-    version = data[pos]
-    offset_size, length_size = data[pos + 4] >> 4, data[pos + 4] & 15
-    base_size = data[pos + 5] >> 4
-    index_size = data[pos + 5] & 15 if version else 0
-    id_size = 4 if version == 2 else 2
-    pos += 6
-    count = _uint(data, pos, id_size)
-    pos += id_size
-    for _ in range(count):
-        item = _uint(data, pos, id_size)
-        pos += id_size
-        method = 0
-        if version:
-            method = _uint(data, pos, 2) & 15
-            pos += 2
-
-        pos += 2  # data_reference_index
-        base = _uint(data, pos, base_size)
-        pos += base_size
-        extents = _uint(data, pos, 2)
-        pos += 2
-        chunks = []
-        for _ in range(extents):
-            pos += index_size
-            offset = _uint(data, pos, offset_size)
-            length = _uint(data, pos + offset_size, length_size)
-            pos += offset_size + length_size
-            chunks.append((base + offset, length))
-
-        if item == tmap:
-            origin = children['idat'][0] if method == 1 else 0
-            payload = b''.join(
-                data[origin + o : origin + o + n] for o, n in chunks
-            )
-            # version, minimum and writer versions, flags, base headroom,
-            # then the alternate headroom (log2) as a fraction
-            numerator, denominator = struct.unpack('>II', payload[14:22])
-            return 2 ** (numerator / denominator)
-
-    return None
+    return hdr_reference.apple_headroom(info['HDRHeadroom'], info['HDRGain'])
 
 
 def pq_to_linear(signal):
@@ -587,14 +579,14 @@ def _gain_map_items(data, children):
             if data[s + 4 + id_size + 2 : s + 4 + id_size + 6] == b'tmap':
                 tmap = _uint(data, s + 4, id_size)
 
-    start, end = boxes['iref']
-    id_size = 2 if data[start] == 0 else 4
-    for kind, s, _ in _boxes(data, start + 4, end):
+    start, end = boxes.get('iref', (0, 0))
+    id_size = 2 if end and data[start] == 0 else 4
+    for kind, s, _ in _boxes(data, start + 4, end) if end else ():
         if kind == 'dimg' and _uint(data, s, id_size) == tmap:
             first = s + id_size + 2  # after the count: the photo, the gain map
             return tmap, _uint(data, first + id_size, id_size)
 
-    raise AssertionError('no tmap item with a gain map')
+    return None, None
 
 
 def _ipma_entries(payload):
@@ -761,20 +753,20 @@ def _ipma_with(payload, item, index):
     return out
 
 
-def _iloc_moved(payload, after, delta):
+def _iloc_entries(payload):
     """
-    'iloc' payload with file offsets at or after ``after`` moved by delta.
+    'iloc' payload: for each item, {item, method, base (position, size, value),
+    extents [(offset position, offset, length)]}.
     """
-    out = bytearray(payload)
     version = payload[0]
     offset_size, length_size = payload[4] >> 4, payload[4] & 15
     base_size = payload[5] >> 4
     index_size = payload[5] & 15 if version else 0
     id_size = 4 if version == 2 else 2
-    pos = 6
-    count = _uint(payload, pos, id_size)
-    pos += id_size
-    for _ in range(count):
+    pos = 6 + id_size
+    entries = []
+    for _ in range(_uint(payload, 6, id_size)):
+        item = _uint(payload, pos, id_size)
         pos += id_size
         method = 0
         if version:
@@ -782,25 +774,67 @@ def _iloc_moved(payload, after, delta):
             pos += 2
 
         pos += 2  # data_reference_index
-        base_pos, base = pos, _uint(payload, pos, base_size)
+        base = (pos, base_size, _uint(payload, pos, base_size))
         pos += base_size
-        extents = _uint(payload, pos, 2)
+        count = _uint(payload, pos, 2)
         pos += 2
-        for k in range(extents):
+        extents = []
+        for _ in range(count):
             pos += index_size
-            offset = _uint(payload, pos, offset_size)
-            if method == 0 and base + offset >= after:
-                if base_size and k == 0:
-                    base += delta
-                    out[base_pos : base_pos + base_size] = base.to_bytes(
-                        base_size, 'big'
-                    )
-                elif not base_size:
-                    out[pos : pos + offset_size] = (offset + delta).to_bytes(
-                        offset_size, 'big'
-                    )
-
+            extents.append((
+                pos,
+                offset_size,
+                _uint(payload, pos, offset_size),
+                _uint(payload, pos + offset_size, length_size),
+            ))
             pos += offset_size + length_size
+
+        entries.append({
+            'item': item,
+            'method': method,
+            'base': base,
+            'extents': extents,
+        })
+
+    return entries
+
+
+def _item_data(data, children, item):
+    """An item's data, from the file or from 'idat'."""
+    boxes = {k: (s, e) for k, s, e in children}
+    start, end = boxes['iloc']
+    for entry in _iloc_entries(data[start:end]):
+        if entry['item'] == item:
+            origin = boxes['idat'][0] if entry['method'] == 1 else 0
+            base = entry['base'][2]
+            return b''.join(
+                data[origin + base + o : origin + base + o + n]
+                for _, _, o, n in entry['extents']
+            )
+
+    raise AssertionError(f'item {item} has no data')
+
+
+def _iloc_moved(payload, after, delta):
+    """
+    'iloc' payload with file offsets at or after ``after`` moved by delta.
+    """
+    out = bytearray(payload)
+    for entry in _iloc_entries(payload):
+        if entry['method'] != 0:
+            continue
+
+        base_pos, base_size, base = entry['base']
+        if base_size and base >= after:
+            # the base offset puts every extent after `after`
+            out[base_pos : base_pos + base_size] = (base + delta).to_bytes(
+                base_size, 'big'
+            )
+            continue
+
+        for pos, size, offset, _ in entry['extents']:
+            if base + offset >= after:
+                out[pos : pos + size] = (offset + delta).to_bytes(size, 'big')
 
     return bytes(out)
 
@@ -810,7 +844,28 @@ def apple_hdr_pixels(helper, path, out):
     Apple's HDR rendering (Core Image, gain map and orientation applied):
     linear Display P3, 1.0 = SDR white.
     """
-    run([helper, path, out], check=True)
+    return _rendered(helper, [path, out], out)
+
+
+def apple_sdr_pixels(helper, path, out):
+    """
+    How an SDR screen shows an image (ImageIO's SDR decoding, orientation
+    applied): linear Display P3, 1.0 = SDR white.
+    """
+    return _rendered(helper, ['--sdr', path, out], out)
+
+
+def apple_hdr_profile(helper, heic, out):
+    """
+    The ICC profile ImageIO gives its HDR decoding of a gain map photo (with
+    the tone curve it derives, on recent macOS); None if it has none.
+    """
+    result = run([helper, '--profile', heic, out])
+    return Path(out).read_bytes() if result.returncode == 0 else None
+
+
+def _rendered(helper, args, out):
+    run([helper, *args], check=True)
     width, height = np.fromfile(out, dtype='<i4', count=2)
     pixels = np.fromfile(out, dtype='<f4', offset=8)
     return pixels.reshape(height, width, 4)[..., :3].astype(np.float64)

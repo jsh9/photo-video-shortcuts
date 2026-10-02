@@ -1,0 +1,174 @@
+{
+  "apple_older": {
+    "headroom": 3.029290636577587,
+    "peak": 3.029290636577587,
+    "primaries": "p3"
+  },
+  "apple_older_no_maker_notes": {
+    "note": "Apple's older gain map without its headroom",
+    "primaries": "p3"
+  },
+  "apple_older_o6": {
+    "headroom": 3.029290636577587,
+    "peak": 3.029290636577587,
+    "primaries": "p3"
+  },
+  "crop": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "crop_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "crop_square": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "full_size_gain_map": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "grid_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "limited_range_gain_map": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "multichannel": {
+    "headroom": 4.0,
+    "peak": 4.046875,
+    "primaries": "p3"
+  },
+  "not_used_color": {
+    "note": "unsupported color profile",
+    "primaries": "p3"
+  },
+  "not_used_darker": {
+    "note": "the gain map doesn't make the photo brighter",
+    "primaries": "p3"
+  },
+  "not_used_malformed": {
+    "note": "malformed gain map metadata",
+    "primaries": "p3"
+  },
+  "not_used_min_version": {
+    "note": "unsupported gain map version",
+    "primaries": "p3"
+  },
+  "not_used_other_color_space": {
+    "note": "gain map in another color space",
+    "primaries": "p3"
+  },
+  "not_used_shape": {
+    "note": "the gain map doesn't match the photo",
+    "primaries": "p3"
+  },
+  "not_used_version": {
+    "note": "unsupported tone map version",
+    "primaries": "p3"
+  },
+  "o1": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o2": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o2_turned": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o3": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o4": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o5": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o5_turned": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o6_turned": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o7": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "o8": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "odd_size_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "other_gain_map_o6": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "other_upright_gain_map_o3": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "quarter_gain_map": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "rgb_gain_map": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "srgb": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "srgb"
+  },
+  "ten_bit": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "p3"
+  },
+  "unspecified_color": {
+    "headroom": 3.4911454078807904,
+    "peak": 3.491194551155358,
+    "primaries": "srgb"
+  }
+}

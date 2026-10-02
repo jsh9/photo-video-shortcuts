@@ -4,7 +4,10 @@ real iPhone photos have things test photos can't, such as HEIC tiles, Apple
 maker notes and HDR gain maps). Skipped when there are none. A photo with an
 ISO 21496-1 gain map (iPhone, iOS 18 or later), such as hdr/chinatown.heic,
 must become HDR and match Apple's HDR rendering, keeping Apple's HDR profile
-(tone curve) if it has one; other photos must match Apple's SDR rendering.
+(tone curve) if it has one, and then look like the original on SDR screens too.
+So must a photo with Apple's older gain map (iOS 14 to 17), such as
+hdr/iphone13.heic. An HDR result must be at most 25% larger than an SDR one
+(--sdr). Other photos must match Apple's SDR rendering.
 """
 
 import numpy as np
@@ -33,7 +36,7 @@ def sample_batch(tmp_path_factory, wasm, need_tools):
 @pytest.mark.parametrize(
     'sample', SAMPLES, ids=lambda p: str(p.relative_to(ph.REPO))
 )
-def test_sample(sample_batch, imageio, apple_hdr, sample, tmp_path):
+def test_sample(sample_batch, imageio, apple_hdr, apple_sdr, sample, tmp_path):
     results, output = sample_batch
     jxl, saved = results[sample]
     assert jxl is not None, f'not converted:\n{output}'
@@ -49,7 +52,9 @@ def test_sample(sample_batch, imageio, apple_hdr, sample, tmp_path):
     assert ph.xmp_properties(sample) == ph.xmp_properties(jxl)
     assert 'brob' not in ph.boxes(jxl)
 
-    headroom = ph.iso_gain_map_headroom(sample)
+    headroom = ph.iso_gain_map_headroom(
+        sample
+    ) or ph.apple_older_gain_map_headroom(sample)
     props = imageio(sample, jxl)
     a, b = props[str(sample)], props[str(jxl)]
     fields = [f for f in ph.IMAGEIO_FIELDS if not (headroom and f == 'color')]
@@ -73,9 +78,43 @@ def test_sample(sample_batch, imageio, apple_hdr, sample, tmp_path):
             ph.brightness(ours), ph.brightness(apple), rtol=0.05, atol=0.01
         )
         assert ph.pq_psnr(apple, ours) >= ph.MIN_PQ_PSNR
+        if profile:
+            # and with Apple's tone curve, an SDR screen shows it like the
+            # original
+            want, shown = apple_sdr(sample), apple_sdr(jxl)
+            assert shown.shape == want.shape
+            np.testing.assert_allclose(
+                ph.brightness(shown), ph.brightness(want), rtol=0.1, atol=0.02
+            )
+
         return
 
     reference = ph.apple_render(sample, tmp_path / 'apple.png')
     decoded = ph.decode_jxl(jxl, tmp_path / 'jxl.png')
     assert decoded.size == reference.size
     assert ph.psnr(reference, decoded) >= ph.MIN_PSNR
+
+
+HDR_SAMPLES = [
+    p
+    for p in SAMPLES
+    if p.suffix.lower() in {'.heic', '.heif'}
+    and (ph.iso_gain_map_headroom(p) or ph.apple_older_gain_map_headroom(p))
+]
+
+
+@pytest.mark.parametrize(
+    'sample', HDR_SAMPLES, ids=lambda p: str(p.relative_to(ph.REPO))
+)
+def test_hdr_sample_is_about_as_large_as_sdr(
+        sample_batch, wasm, sample, tmp_path
+):
+    results, _ = sample_batch
+    hdr_jxl, _ = results[sample]
+    ph.stage(tmp_path, [sample])
+    result = wasm.run(
+        ['--sdr', '-q', '83', '-e', '7', 'jxl_job.txt'], tmp_path
+    )
+    assert result.returncode == 0, result.stdout
+    sdr_jxl = tmp_path / 'jxl_out_1.jxl'
+    assert hdr_jxl.stat().st_size <= 1.25 * sdr_jxl.stat().st_size

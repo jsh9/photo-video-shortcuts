@@ -2,7 +2,9 @@
 Memory: iOS stops a-Shell's WebAssembly engine if it uses too much. libjxl's
 default turns its low-memory streaming mode off at effort 7 below quality ~70,
 which took about 2.7 GB for a 24 MP photo; jxlbatch keeps streaming on. HDR
-photos hold a 16-bit image: about 0.7 GB at 24 MP and 0.9 GB at 48 MP.
+photos are computed a region at a time as the encoder reads them, so they take
+about as much memory as SDR ones, rather than an extra 16-bit image (0.3 GB at
+48 MP).
 """
 
 import re
@@ -27,12 +29,20 @@ def big_heic(folder, make_photo, width, height, options=()):
     return heic
 
 
-def convert(wasm, heic, folder, quality):
+def convert(wasm, heic, folder, quality, options=()):
     """jxlbatch's output and peak memory (bytes) converting heic."""
     ph.stage(folder, [heic])
     command = [p.replace('{dir}', str(folder)) for p in wasm.command]
     result = ph.run(
-        ['/usr/bin/time', '-l', *command, '-q', quality, 'jxl_job.txt'],
+        [
+            '/usr/bin/time',
+            '-l',
+            *command,
+            *options,
+            '-q',
+            quality,
+            'jxl_job.txt',
+        ],
         cwd=folder,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -56,3 +66,8 @@ def test_hdr_photo(wasm, helpers, tmp_path, need_tools, size):
     output, peak = convert(wasm, heic, tmp_path / 'job', '83')
     assert ', HDR ' in output, output
     assert peak < LIMIT, f'peak memory {peak / 1e9:.2f} GB'
+    # about as much as the same photo converted as SDR
+    _, sdr_peak = convert(wasm, heic, tmp_path / 'sdr', '83', ['--sdr'])
+    assert peak < 1.15 * sdr_peak, (
+        f'HDR {peak / 1e9:.2f} GB, SDR {sdr_peak / 1e9:.2f} GB'
+    )

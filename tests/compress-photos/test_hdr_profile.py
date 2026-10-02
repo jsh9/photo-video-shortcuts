@@ -5,7 +5,8 @@ curve Apple derives from the gain map, in an 'hdgm' tag), on the 'tmap' item or
 the gain map. Apple dims the HDR photo with that curve on screens that can't
 show all of it, and on SDR screens. The JPEG XL keeps the profile byte for
 byte, so Apple shows it like the original; its pixels stay the same. Profiles
-that don't describe the pixels are ignored.
+that don't describe the pixels are ignored. Either way, a photo without a
+usable profile gets a note, since its JXL may look slightly darker.
 
 The test profiles are libjxl's own (written by djxl), with a placeholder 'hdgm'
 tag: these tests check that the profile is carried over, not how Apple uses the
@@ -138,7 +139,19 @@ def test_profile_costs_at_most_its_size(batch, variants, converted, name):
 def test_unsuitable_profile_is_ignored(batch, converted, name):
     jxl, output = converted[name]
     assert jxl.read_bytes() == plain(batch, name).read_bytes()
-    assert '!' not in output
+    # said, since the JXL may look slightly darker than the original
+    output = ' '.join(output.split())
+    if VARIANTS[name][3] is None:
+        assert "Apple's HDR profile not found" in output
+    else:
+        assert "Apple's HDR profile not used (unrecognized format)" in output
+
+
+@pytest.mark.parametrize('name', ['heic_hdr', 'heic_hdr_srgb'])
+def test_photo_without_profile_says_so(batch, name):
+    original, _, _ = batch.results[name]
+    output = ' '.join(ph.photo_output(batch.output, original.stem).split())
+    assert "Apple's HDR profile not found" in output
 
 
 def test_every_build(encoder, variants, photos, apple_hdr, tmp_path):

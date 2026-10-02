@@ -108,21 +108,40 @@ def apple_hdr(helpers, tmp_path_factory):
 
 
 @pytest.fixture(scope='session')
+def apple_sdr(helpers, tmp_path_factory):
+    """
+    How an SDR screen shows an image (ImageIO's SDR decoding): linear Display
+    P3, 1.0 = SDR white.
+    """
+    folder = tmp_path_factory.mktemp('apple-sdr')
+    count = itertools.count()
+
+    def render(path):
+        out = folder / f'{next(count)}.f32'
+        return ph.apple_sdr_pixels(helpers['hdr_pixels'], path, out)
+
+    return render
+
+
+@pytest.fixture(scope='session')
 def batch(tmp_path_factory, wasm, photos):
     """
     All test photos converted in one batch at quality 83, as the shortcut runs
     it. ``results``: {name: (original, jxl, saved name)}; ``output``: what
-    jxlbatch printed.
+    jxlbatch printed; ``kept``: the names whose original jxl_done.txt marks to
+    keep (not to offer for deletion).
     """
     folder = tmp_path_factory.mktemp('batch')
     staged = ph.stage(folder, list(photos.values()))
     result = wasm.run(['-q', '83', '-e', '7', 'jxl_job.txt'], folder)
     assert result.returncode == 0, result.stdout + result.stderr
     done = ph.read_done(folder)
-    results = {}
+    results, kept = {}, set()
     for name, path in photos.items():
         index = next(i for i, p in staged.items() if p == path)
         jxl, saved = done.get(index, (None, None))
         results[name] = (path, jxl, saved)
+        if index in ph.kept_originals(folder):
+            kept.add(name)
 
-    return SimpleNamespace(results=results, output=result.stdout)
+    return SimpleNamespace(results=results, output=result.stdout, kept=kept)

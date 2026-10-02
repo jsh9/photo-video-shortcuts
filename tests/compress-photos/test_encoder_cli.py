@@ -24,6 +24,9 @@ def test_selftest_passes(encoder, tmp_path):
     result = encoder.run(['--selftest'], tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'Self-test passed' in result.stdout
+    # including the HDR code: a gain map photo with Apple's HDR profile
+    assert 'HDR decoding:' in result.stdout
+    assert "Apple's HDR profile kept" in result.stdout
 
 
 @pytest.mark.parametrize('quality', ['abc', '0', '101', '-5'])
@@ -84,9 +87,10 @@ def test_batch_continues_after_failed_photos(encoder, tmp_path):
     assert 'cannot read jxl_in_3.orig' in result.stdout
     assert 'Done: 2 of 4 converted' in result.stdout
     assert (tmp_path / 'jxl_started').exists()
-    # The format JXL-Import reads: "file|index|name", one per line.
+    # The format the shortcuts read: "file|index|delete or keep|name", one
+    # per line ("keep": the JXL lacks the original's HDR).
     assert (tmp_path / 'jxl_done.txt').read_text() == (
-        'jxl_out_1.jxl|1|a.jxl\njxl_out_4.jxl|4|d.jxl'
+        'jxl_out_1.jxl|1|delete|a.jxl\njxl_out_4.jxl|4|delete|d.jxl'
     )
 
 
@@ -109,5 +113,12 @@ def test_saved_names_are_safe(encoder, tmp_path):
     result = encoder.run(['jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout
     assert (tmp_path / 'jxl_done.txt').read_text() == (
-        'jxl_out_1.jxl|1|My_Photo_ 1_2.jxl'
+        'jxl_out_1.jxl|1|delete|My_Photo_ 1_2.jxl'
     )
+
+
+def test_sdr_option(encoder, tmp_path):
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    result = encoder.run(['--sdr', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'Done: 1 of 1 converted' in result.stdout

@@ -8,6 +8,7 @@ gain map stay SDR.
 
 import re
 
+import hdr_reference
 import numpy as np
 import photo_helpers as ph
 import pytest
@@ -65,7 +66,19 @@ def test_stored_as_16_bit_pq(batch, name):
         f'{primaries} primaries' in info or f'primaries: {primaries}' in info
     )
     assert 'pq transfer function' in info or 'transfer function: pq' in info
-    assert re.search(r'intensity[_ ]target: 10000\.', info)
+
+
+@pytest.mark.parametrize('name', HDR)
+def test_stores_peak_brightness(batch, name):
+    # intensity_target: the brightest the photo gets (203 nits x the gain
+    # map's peak), rather than PQ's 10,000 nits
+    original, jxl, _ = batch.results[name]
+    peak = ph.SDR_WHITE_NITS * hdr_reference.iso_peak(
+        ph.iso_gain_map(original)
+    )
+    match = re.search(r'intensity[_ ]target: ([\d.]+)', jxlinfo(jxl), re.I)
+    assert match
+    assert float(match.group(1)) == pytest.approx(peak, rel=1e-3)
 
 
 @pytest.mark.parametrize('name', HDR)
@@ -114,3 +127,68 @@ def test_photos_without_gain_map_stay_sdr(batch, name):
     original, jxl, _ = batch.results[name]
     assert 'HDR' not in ph.photo_output(batch.output, original.stem)
     assert 'PQ' not in jxlinfo(jxl)
+
+
+@pytest.fixture(scope='module')
+def sdr_batch(wasm, photos, tmp_path_factory):
+    """
+    The HDR test photos converted with --sdr: {name: (jxl, output, kept)}.
+    """
+    folder = tmp_path_factory.mktemp('sdr')
+    staged = ph.stage(folder, [photos[n] for n in HDR])
+    result = wasm.run(['--sdr', '-q', '83', '-e', '7', 'jxl_job.txt'], folder)
+    assert result.returncode == 0, result.stdout + result.stderr
+    done, kept = ph.read_done(folder), ph.kept_originals(folder)
+    return {
+        p.stem: (done[i][0], ph.photo_output(result.stdout, p.stem), i in kept)
+        for i, p in staged.items()
+    }
+
+
+@pytest.mark.parametrize('name', HDR)
+def test_sdr_option(sdr_batch, name):
+    jxl, output, kept = sdr_batch[name]
+    assert 'HDR' not in output
+    assert 'PQ' not in jxlinfo(jxl)
+    # the JXL lacks the original's HDR, so the original is kept
+    assert kept
+
+
+@pytest.mark.parametrize('name', HDR)
+def test_hdr_is_about_as_large_as_sdr(batch, sdr_batch, name):
+    _, hdr_jxl, _ = batch.results[name]
+    sdr_jxl, _, _ = sdr_batch[name]
+    assert hdr_jxl.stat().st_size <= 1.25 * sdr_jxl.stat().st_size
+
+
+@pytest.mark.parametrize('name', sorted(ph.PHOTOS))
+def test_originals_may_be_deleted(batch, name):
+    # Every test photo keeps what it had (HDR included), so the shortcut may
+    # offer to delete its original.
+    assert name not in batch.kept
+
+
+def test_looks_like_the_original_on_sdr_screens(
+        photos, helpers, wasm, apple_sdr, tmp_path
+):
+    # With the tone curve ImageIO derives from the gain map (as iPhones store
+    # it), an SDR screen shows the JXL like the original.
+    original = photos['heic_hdr']
+    icc = ph.apple_hdr_profile(
+        helpers['hdr_pixels'], original, tmp_path / 'hdr.icc'
+    )
+    if not icc or 'hdgm' not in ph.icc_tags(icc):
+        pytest.skip('ImageIO on this Mac derives no tone curve')
+
+    heic = tmp_path / 'with_curve.heic'
+    ph.with_item_profile(original, 'tmap', icc, heic)
+    ph.stage(tmp_path / 'job', [heic])
+    result = wasm.run(['jxl_job.txt'], tmp_path / 'job')
+    assert result.returncode == 0, result.stdout
+    jxl = tmp_path / 'job' / 'jxl_out_1.jxl'
+    assert ph.jxl_profile(jxl, tmp_path) == icc
+    want, ours = apple_sdr(original), apple_sdr(jxl)
+    assert ours.shape == want.shape
+    np.testing.assert_allclose(
+        ph.brightness(ours), ph.brightness(want), rtol=0.1, atol=0.02
+    )
