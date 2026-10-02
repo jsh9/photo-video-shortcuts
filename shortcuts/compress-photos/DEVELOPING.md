@@ -150,7 +150,15 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   libheif would crop and turn it before converting to RGB, which shifts the
   colors of a 4:2:0 photo cropped at an odd offset (up to 96 of 255 along the
   border of a rotated 427-row photo); Apple's rendering doesn't depend on that.
-  Photos without a crop come out the same either way.
+  Photos without a crop come out the same either way. The transforms apply in
+  the file's order, whatever it is (a crop may follow the rotation).
+- **Derived photos** (e.g. an `iden` image of another image): decoding as
+  stored only works when the photo's own transforms are its only ones, since
+  libheif's `ignore_transformations` also skips those of the images it is
+  derived from. Otherwise libheif applies all of them, as before 0.2.0, and a
+  gain map isn't used ("unsupported image layout"): lining it up needs the
+  transforms of both images. The same holds for a derived gain map. iPhone
+  photos are grids whose tiles have no transforms.
 - **The math**, at full strength (the alternate rendition): the window is
   enlarged to the photo's size (center-aligned bilinear). For an ISO gain map
   value `g`, the gain is `log2 G = min + (max - min) * g^(1/gamma)`, and the

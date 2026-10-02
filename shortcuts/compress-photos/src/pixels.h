@@ -59,6 +59,8 @@ size_t pixel_size(const image_t *img);  // bytes per pixel
 // Turns a decoder-owned, padded or rendered image into a packed, malloc'ed
 // one. Returns 0, or -1 if out of memory.
 int image_make_packed(image_t *img);
+// Crops a stored image to w x h at (left, top); the region must lie inside it.
+void image_crop(image_t *img, uint32_t left, uint32_t top, uint32_t w, uint32_t h);
 // Removes the alpha channel when every pixel is fully opaque. Returns 1 if removed.
 int image_drop_opaque_alpha(image_t *img);
 // Applies EXIF orientation `o` (2..8) so the pixels become upright.

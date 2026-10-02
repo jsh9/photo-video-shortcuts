@@ -199,6 +199,28 @@ static int apply_transforms(struct heif_context *ctx, struct heif_image_handle *
   return 0;
 }
 
+// 1 if no image that `item` is derived from (at any depth) has transforms of
+// its own, so that `item`'s are the only ones. Then it can be decoded as
+// stored and its transforms applied by jxlbatch: libheif's
+// ignore_transformations also skips those of the images it is derived from.
+static int only_own_transforms(struct heif_context *ctx, heif_item_id item, int depth) {
+  if (depth > 8) return 0;
+  int ok = 1;
+  for (int r = 0; ok; r++) {
+    uint32_t type = 0;
+    heif_item_id *to = NULL;
+    const size_t k = heif_context_get_item_references(ctx, item, r, &type, &to);
+    for (size_t i = 0; i < k && ok && type == heif_fourcc('d', 'i', 'm', 'g'); i++) {
+      heif_property_id props[1];
+      ok = heif_item_get_transformation_properties(ctx, to[i], props, 1) == 0 &&
+           only_own_transforms(ctx, to[i], depth + 1);
+    }
+    heif_release_item_references(ctx, &to);
+    if (k == 0) break;
+  }
+  return ok;
+}
+
 // Applies the photo's transforms (crop, rotation, mirroring), in order, to
 // its decoded RGB pixels. libheif would apply them before converting to RGB,
 // which shifts the colors of a 4:2:0 photo cropped at an odd offset (Apple's
@@ -216,9 +238,8 @@ static int transform_photo(struct heif_context *ctx, struct heif_image_handle *h
           (uint32_t)(top + bottom) >= img->h) {
         continue;
       }
-      img->data += (size_t)top * img->stride + (size_t)left * pixel_size(img);
-      img->w -= (uint32_t)(left + right);
-      img->h -= (uint32_t)(top + bottom);
+      image_crop(img, (uint32_t)left, (uint32_t)top, img->w - (uint32_t)(left + right),
+                 img->h - (uint32_t)(top + bottom));
       continue;
     }
     const int o = transform_orientation(ctx, item, props[i]);
@@ -315,7 +336,7 @@ done:
 // Replaces the decoded SDR image with its HDR rendition when the file has a
 // gain map (see hdr.h): an ISO 21496-1 one, or else Apple's older one.
 // Otherwise leaves it, with a note if the gain map can't be used.
-static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, int sdr,
+static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, int sdr, int own_transforms,
                            struct heif_image_handle *primary, image_t *img, color_t *color, hdr_info_t *hdr) {
   hdr_parts_t parts;
   memset(&parts, 0, sizeof parts);
@@ -330,6 +351,12 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
     return;
   }
   if (iso < 0) return;
+  // Lining the gain map up with the photo needs the transforms of both, so
+  // each must have only its own (e.g. not be derived from a turned image).
+  if (!own_transforms || !only_own_transforms(ctx, gain_map_id, 0)) {
+    snprintf(hdr->note, sizeof hdr->note, "unsupported image layout");
+    return;
+  }
   if (iso == 0 && !older_gain_map_meta(primary, &parts.meta)) {
     snprintf(hdr->note, sizeof hdr->note, "Apple's older gain map without its headroom");
     return;
@@ -404,9 +431,11 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
     }
   }
 
-  // As stored; transform_photo turns it upright.
+  // As stored, and transform_photo turns it upright; unless an image it is
+  // derived from has transforms too, which libheif then applies (all of them).
+  const int own_transforms = only_own_transforms(ctx, heif_image_handle_get_item_id(handle), 0);
   options = heif_decoding_options_alloc();
-  options->ignore_transformations = 1;
+  options->ignore_transformations = own_transforms;
   e = heif_decode_image(handle, &image, heif_colorspace_RGB, chroma, options);
   if (e.code != heif_error_Ok) {
     snprintf(err, err_len, "HEIF decoding failed (%s)", e.message);
@@ -428,11 +457,11 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   img->owner = image;  // the decoded image outlives the context
   img->owner_free = release_heif_image;
   image = NULL;
-  if (transform_photo(ctx, handle, img) != 0) {
+  if (own_transforms && transform_photo(ctx, handle, img) != 0) {
     snprintf(err, err_len, "out of memory");
     goto done;
   }
-  apply_gain_map(ctx, buf, len, sdr, handle, img, color, hdr);
+  apply_gain_map(ctx, buf, len, sdr, own_transforms, handle, img, color, hdr);
   rc = 0;
 
 done:

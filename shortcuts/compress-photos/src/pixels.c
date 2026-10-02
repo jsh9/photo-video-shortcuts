@@ -82,6 +82,21 @@ int image_make_packed(image_t *img) {
   return 0;
 }
 
+void image_crop(image_t *img, uint32_t left, uint32_t top, uint32_t w, uint32_t h) {
+  const size_t ps = pixel_size(img);
+  uint8_t *src = img->data + (size_t)top * img->stride + (size_t)left * ps;
+  if (img->owner) {
+    img->data = src;  // a view: the owner frees the pixels
+  } else {
+    // image_free frees `data`, so the rows move to the start of the buffer
+    const size_t row = (size_t)w * ps;
+    for (uint32_t y = 0; y < h; y++) memmove(img->data + (size_t)y * row, src + (size_t)y * img->stride, row);
+    img->stride = row;
+  }
+  img->w = w;
+  img->h = h;
+}
+
 int image_drop_opaque_alpha(image_t *img) {
   const int c = img->channels;
   if ((c != 2 && c != 4) || img->render) return 0;
