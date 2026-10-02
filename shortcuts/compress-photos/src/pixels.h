@@ -17,6 +17,10 @@ typedef struct {
   int bits;              // significant bits per sample: 8, 10, 12 or 16
   void *owner;           // decoder object owning `data`, or NULL if malloc'ed
   void (*owner_free)(void *owner);
+  // Pixels computed on request instead of stored (`data` is NULL): writes
+  // the w x h region at (x, y) to `out`, rows `stride` bytes apart. `owner`
+  // is its state. Returns 0, or -1 if out of memory.
+  int (*render)(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t *out, size_t stride);
 } image_t;
 
 // Color of the decoded pixels: an ICC profile, else CICP code points, else sRGB.
@@ -37,9 +41,9 @@ typedef struct {
 
 // JPEG or PNG. Pixels are as stored (EXIF orientation not applied).
 int stb_decode(const uint8_t *buf, size_t len, image_t *img, char *err, size_t err_len);
-// HEIF/HEIC primary image, upright (irot/imir applied), with its color. With
-// `hdr`, a photo with an ISO 21496-1 gain map becomes HDR: 16-bit PQ with SDR
-// white at 203 nits (see gainmap.h).
+// HEIF/HEIC primary image, upright (irot/imir applied), with its color. A
+// photo with an ISO 21496-1 gain map becomes HDR: 16-bit PQ with SDR white
+// at 203 nits, computed on request (see hdr.h); `hdr` says so, or why not.
 int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
                 size_t err_len);
 void heif_decoder_version(char *buf, size_t len);
@@ -48,7 +52,8 @@ void image_free(image_t *img);
 void color_free(color_t *color);
 size_t pixel_size(const image_t *img);  // bytes per pixel
 
-// Turns a decoder-owned or padded image into a packed, malloc'ed one.
+// Turns a decoder-owned, padded or rendered image into a packed, malloc'ed
+// one. Returns 0, or -1 if out of memory.
 int image_make_packed(image_t *img);
 // Removes the alpha channel when every pixel is fully opaque. Returns 1 if removed.
 int image_drop_opaque_alpha(image_t *img);

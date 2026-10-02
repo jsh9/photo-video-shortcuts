@@ -54,6 +54,7 @@ void image_free(image_t *img) {
   }
   img->data = NULL;
   img->owner = NULL;
+  img->render = NULL;
 }
 
 void color_free(color_t *color) {
@@ -67,7 +68,14 @@ int image_make_packed(image_t *img) {
   if (!img->owner && img->stride == row) return 0;
   uint8_t *packed = (uint8_t *)malloc(row * img->h);
   if (!packed) return -1;
-  for (uint32_t y = 0; y < img->h; y++) memcpy(packed + y * row, img->data + y * img->stride, row);
+  if (img->render) {
+    if (img->render(img->owner, 0, 0, img->w, img->h, packed, row) != 0) {
+      free(packed);
+      return -1;
+    }
+  } else {
+    for (uint32_t y = 0; y < img->h; y++) memcpy(packed + y * row, img->data + y * img->stride, row);
+  }
   image_free(img);
   img->data = packed;
   img->stride = row;
@@ -76,7 +84,7 @@ int image_make_packed(image_t *img) {
 
 int image_drop_opaque_alpha(image_t *img) {
   const int c = img->channels;
-  if (c != 2 && c != 4) return 0;
+  if ((c != 2 && c != 4) || img->render) return 0;
   const uint32_t amax = (1u << img->bits) - 1;
   for (uint32_t y = 0; y < img->h; y++) {
     const uint8_t *row = img->data + y * img->stride;
@@ -128,6 +136,7 @@ static inline void copy_px(uint8_t *d, const uint8_t *s, size_t ps) {
 
 int image_orient(image_t *img, int o) {
   if (o < 2 || o > 8) return 0;
+  if (img->render && image_make_packed(img) != 0) return -1;
   const uint32_t w = img->w, h = img->h;
   const size_t ps = pixel_size(img), sstride = img->stride;
   const int swap = o >= 5;

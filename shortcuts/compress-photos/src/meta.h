@@ -32,6 +32,11 @@ const char *format_name(file_format_t format);
 int meta_extract(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_len);
 void meta_free(meta_t *m);
 
+// The ICC profile of HEIF item `id` (its 'colr' property of type 'prof' or
+// 'rICC'), pointing into buf; returns its size, 0 if it has none. libheif
+// gives the profiles of images only, not of other items such as 'tmap'.
+size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint8_t **icc);
+
 // EXIF helpers; `tiff` points at the TIFF header.
 int exif_orientation(const uint8_t *tiff, size_t len);  // 1..8, 0 if absent
 int exif_pixel_dims(const uint8_t *tiff, size_t len, uint32_t *w, uint32_t *h);

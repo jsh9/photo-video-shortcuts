@@ -16,7 +16,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <jxl/cms.h>
 #include <jxl/color_encoding.h>
 #include <jxl/encode.h>
 #ifdef JXLBATCH_THREADS
@@ -249,22 +248,9 @@ static int color_from_cicp(const uint8_t cicp[4], JxlColorEncoding *c) {
   return cicp[2] == 0;  // RGB only
 }
 
-// 1 if libjxl reads the ICC profile `icc` as the color space of CICP `cicp`
-// (Apple's profile for an HDR photo describes its PQ pixels exactly).
-static int profile_matches_cicp(const blob_t *icc, const uint8_t cicp[4]) {
-  JxlColorEncoding want, got;
-  JXL_BOOL cmyk = JXL_FALSE;
-  const JxlCmsInterface *cms = JxlGetDefaultCms();
-  if (!color_from_cicp(cicp, &want) || !cms ||
-      !cms->set_fields_from_icc(cms->set_fields_data, icc->data, icc->size, &got, &cmyk) || cmyk) {
-    return 0;
-  }
-  return got.color_space == want.color_space && got.white_point == want.white_point &&
-         got.primaries == want.primaries && got.transfer_function == want.transfer_function;
-}
-
 // Chunked input: libjxl reads the pixels in place, a region at a time,
-// instead of first copying the whole image (matters for 48 MP photos).
+// instead of first copying the whole image (matters for 48 MP photos). An
+// HDR image is computed a region at a time, as libjxl asks for it.
 typedef struct {
   const image_t *img;
   JxlPixelFormat format;
@@ -276,9 +262,18 @@ static void chunk_color_format(void *opaque, JxlPixelFormat *format) {
 
 static const void *chunk_color_data(void *opaque, size_t xpos, size_t ypos, size_t xsize, size_t ysize,
                                     size_t *row_offset) {
-  (void)xsize;
-  (void)ysize;
   const image_t *img = ((const chunk_source_t *)opaque)->img;
+  if (img->render) {
+    const size_t row = xsize * pixel_size(img);
+    uint8_t *buf = (uint8_t *)malloc(row * ysize);
+    if (buf && img->render(img->owner, (uint32_t)xpos, (uint32_t)ypos, (uint32_t)xsize, (uint32_t)ysize, buf,
+                           row) != 0) {
+      free(buf);
+      buf = NULL;
+    }
+    *row_offset = row;
+    return buf;  // NULL makes libjxl fail the photo
+  }
   *row_offset = img->stride;
   return img->data + ypos * img->stride + xpos * pixel_size(img);
 }
@@ -302,8 +297,44 @@ static const void *chunk_extra_data(void *opaque, size_t index, size_t xpos, siz
 }
 
 static void chunk_release(void *opaque, const void *buf) {
+  if (((const chunk_source_t *)opaque)->img->render) free((void *)buf);
+}
+
+// Output written as libjxl encodes. With it, libjxl reads the input a region
+// at a time; with JxlEncoderProcessOutput, it copies the whole image first.
+// A growable buffer that libjxl can seek in (to fill in sizes).
+typedef struct {
+  uint8_t *data;
+  size_t size, cap, pos;
+} out_buffer_t;
+
+static void *out_get_buffer(void *opaque, size_t *size) {
+  out_buffer_t *o = (out_buffer_t *)opaque;
+  const size_t want = *size ? *size : (size_t)1 << 16;
+  if (want > SIZE_MAX - o->pos) return *size = 0, NULL;
+  if (o->pos + want > o->cap) {
+    size_t cap = o->cap ? o->cap : (size_t)1 << 20;
+    while (cap < o->pos + want) cap *= 2;
+    uint8_t *grown = (uint8_t *)realloc(o->data, cap);
+    if (!grown) return *size = 0, NULL;  // libjxl then fails
+    o->data = grown;
+    o->cap = cap;
+  }
+  *size = want;
+  return o->data + o->pos;
+}
+
+static void out_release_buffer(void *opaque, size_t written) {
+  out_buffer_t *o = (out_buffer_t *)opaque;
+  o->pos += written;
+  if (o->pos > o->size) o->size = o->pos;
+}
+
+static void out_seek(void *opaque, uint64_t position) { ((out_buffer_t *)opaque)->pos = (size_t)position; }
+
+static void out_set_finalized_position(void *opaque, uint64_t position) {
   (void)opaque;
-  (void)buf;
+  (void)position;
 }
 
 enum { ENC_OK = 0, ENC_FAIL = -1, ENC_BAD_ICC = -2 };
@@ -314,6 +345,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
                           const char **color_desc, char *err, size_t err_len) {
   int rc = ENC_FAIL;
   uint8_t *exif_box = NULL, *buf = NULL;
+  out_buffer_t output = {NULL, 0, 0, 0};
   JxlEncoder *enc = JxlEncoderCreate(NULL);
   if (!enc) {
     snprintf(err, err_len, "out of memory creating the encoder");
@@ -328,10 +360,10 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   const uint32_t container_bits = (uint32_t)img->bytes_per_sample * 8;
   const uint32_t bits = (uint32_t)img->bits;  // e.g. 10 for 10-bit HEIF in 16-bit samples
   const color_t *color = em->color;
-  // HDR photos are PQ (see gainmap.h), coded by CICP, or by Apple's profile
-  // for them if libjxl reads it as the same color space.
+  // HDR photos are PQ (see hdr.h), coded by CICP, or by Apple's profile for
+  // them (which describes the same color space).
   const int pq = color && !(use_icc && color->icc.size) && color->cicp_present && color->cicp[1] == 16;
-  const int hdr_icc = pq && use_icc && color->hdr_icc.size && profile_matches_cicp(&color->hdr_icc, color->cicp);
+  const int hdr_icc = pq && use_icc && color->hdr_icc.size;
 
 #define FAIL(...)                              \
   do {                                         \
@@ -342,6 +374,11 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   if (JxlEncoderUseContainer(enc, JXL_TRUE) != JXL_ENC_SUCCESS ||
       JxlEncoderUseBoxes(enc) != JXL_ENC_SUCCESS) {
     FAIL("cannot enable the JPEG XL container");
+  }
+  if (!alpha) {
+    const struct JxlEncoderOutputProcessor processor = {&output, out_get_buffer, out_release_buffer, out_seek,
+                                                       out_set_finalized_position};
+    if (JxlEncoderSetOutputProcessor(enc, processor) != JXL_ENC_SUCCESS) FAIL("cannot set the output");
   }
 
   JxlBasicInfo info;
@@ -452,10 +489,17 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
     chunk_source_t source = {img, pf};
     const struct JxlChunkedFrameInputSource input = {&source,           chunk_color_format, chunk_color_data,
                                               chunk_extra_format, chunk_extra_data,  chunk_release};
-    // As the last frame, this also closes the input.
-    if (JxlEncoderAddChunkedFrame(fs, JXL_TRUE, input) != JXL_ENC_SUCCESS) {
-      FAIL("encoder rejected the image (%s)", jxl_error_name(JxlEncoderGetError(enc)));
+    // As the last frame, this also closes the input; the output processor
+    // gets the whole file.
+    if (JxlEncoderAddChunkedFrame(fs, JXL_TRUE, input) != JXL_ENC_SUCCESS ||
+        JxlEncoderFlushInput(enc) != JXL_ENC_SUCCESS) {
+      FAIL("encoding failed (%s)", jxl_error_name(JxlEncoderGetError(enc)));
     }
+    *out = output.data;
+    *out_len = output.size;
+    output.data = NULL;
+    rc = ENC_OK;
+    goto done;
   }
 
   size_t cap = 1 << 20;
@@ -481,6 +525,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
 #undef FAIL
 done:
   free(buf);
+  free(output.data);
   free(exif_box);
   JxlEncoderDestroy(enc);
   return rc;

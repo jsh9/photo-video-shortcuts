@@ -83,6 +83,11 @@ static const uint8_t *icc_tag(const blob_t *icc, const char sig[4], size_t *size
   return NULL;
 }
 
+int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]) {
+  size_t size = 0;
+  return icc_tag(icc, sig, &size) != NULL;
+}
+
 static double s15(const uint8_t *p) { return (double)(int32_t)rd32(p) / 65536.0; }
 
 // Evaluates a 'para' or 'curv' tone curve at x in [0, 1]; returns -1 if unknown.
@@ -279,101 +284,144 @@ static void source_position(uint32_t i, uint32_t out_size, uint32_t in_size, uin
   *weight = (float)(s - *index);
 }
 
-int gainmap_apply(const image_t *base, const image_t *gm, int gm_full_range, const gainmap_meta_t *m,
-                  image_t *out) {
-  memset(out, 0, sizeof *out);
-  const uint32_t w = base->w, h = base->h;
-  const int ch = base->channels, gch = gm->channels;
-  if ((uint64_t)w * h > SIZE_MAX / ((size_t)ch * 2)) return -1;
-  const uint32_t base_max = (1u << base->bits) - 1;
-  const uint32_t gm_bits = gm->bytes_per_sample == 1 ? 8 : (uint32_t)gm->bits;
-  // Gain map values to [0, 1], expanding limited range (16-235 at 8 bits).
-  const float gm_max = (float)((1u << gm_bits) - 1);
-  const float offset = gm_full_range ? 0.0f : (float)(16u << (gm_bits - 8));
-  const float scale = gm_full_range ? 1.0f / gm_max : 1.0f / (float)(219u << (gm_bits - 8));
+// An HDR image computed on request: the SDR photo, the gain map, and the
+// tables to combine them.
+typedef struct {
+  image_t base, gm;
+  float *linear, *gain, *pq;  // sRGB curve, gain per channel, PQ codes
+  uint32_t *x0;               // per output column: gain map column and weight
+  float *fx;
+  float offset, scale;  // gain map values to [0, 1]
+  float base_offset[3], alternate_offset[3], to_pq;
+  uint32_t base_max;
+  int meta_channels, per_channel;
+} renderer_t;
 
-  float *linear = (float *)malloc(((size_t)base_max + 1) * sizeof *linear);
-  float *gain = (float *)malloc(3 * (GAIN_STEPS + 1) * sizeof *gain);
-  float *pq = (float *)malloc((((size_t)PQ_OCTAVES << PQ_STEPS) + 1) * sizeof *pq);
-  uint32_t *x0 = (uint32_t *)malloc((size_t)w * sizeof *x0);
-  float *fx = (float *)malloc((size_t)w * sizeof *fx);
+static void renderer_free(void *owner) {
+  renderer_t *r = (renderer_t *)owner;
+  if (!r) return;
+  image_free(&r->base);
+  image_free(&r->gm);
+  free(r->linear);
+  free(r->gain);
+  free(r->pq);
+  free(r->x0);
+  free(r->fx);
+  free(r);
+}
+
+// Writes the HDR pixels of the w x h region at (x, y), row by row.
+static int render(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t *out, size_t stride) {
+  const renderer_t *r = (const renderer_t *)owner;
+  const image_t *base = &r->base, *gm = &r->gm;
+  const int ch = base->channels, gch = gm->channels;
   row_cache_t cache = {{(float *)malloc((size_t)w * gch * sizeof(float)),
                         (float *)malloc((size_t)w * gch * sizeof(float))},
                        {-1, -1}};
-  out->data = (uint8_t *)malloc((size_t)w * h * ch * 2);
-  int rc = -1;
-  if (!linear || !gain || !pq || !x0 || !fx || !cache.row[0] || !cache.row[1] || !out->data) goto done;
+  if (!cache.row[0] || !cache.row[1]) {
+    free(cache.row[0]);
+    free(cache.row[1]);
+    return -1;
+  }
+  for (uint32_t yy = y; yy < y + h; yy++) {
+    uint32_t r0;
+    float fy;
+    source_position(yy, base->h, gm->h, &r0, &fy);
+    const uint32_t r1 = r0 + 1 < gm->h ? r0 + 1 : r0;
+    const float *upper = enlarged_row(&cache, gm, r0, r->x0 + x, r->fx + x, w, r->offset, r->scale);
+    const float *lower = enlarged_row(&cache, gm, r1, r->x0 + x, r->fx + x, w, r->offset, r->scale);
+    if (r1 == r0) lower = upper;
+    const uint8_t *src8 = base->data + (size_t)yy * base->stride + (size_t)x * pixel_size(base);
+    const uint16_t *src16 = (const uint16_t *)src8;
+    uint16_t *dst = (uint16_t *)(out + (size_t)(yy - y) * stride);
+    for (uint32_t xx = 0; xx < w; xx++) {
+      float factor[3];
+      for (int c = 0; c < (r->per_channel ? 3 : 1); c++) {
+        const int gc = gch == 3 ? c : 0;
+        const float a = upper[(size_t)xx * gch + gc], b = lower[(size_t)xx * gch + gc];
+        factor[c] = gain_at(r->gain + (r->meta_channels == 3 ? c : 0) * (GAIN_STEPS + 1), a + (b - a) * fy);
+      }
+      if (!r->per_channel) factor[1] = factor[2] = factor[0];
+      const size_t i = (size_t)xx * ch;
+      for (int c = 0; c < 3; c++) {
+        const uint32_t v = base->bytes_per_sample == 1 ? src8[i + c] : src16[i + c];
+        // HDR = (SDR + base offset) * gain - alternate offset, linear, 1.0 = SDR white.
+        const float hdr = (r->linear[v] + r->base_offset[c]) * factor[c] - r->alternate_offset[c];
+        dst[i + c] = pq_code(r->pq, hdr * r->to_pq);
+      }
+      if (ch == 4) {
+        const uint32_t a = base->bytes_per_sample == 1 ? src8[i + 3] : src16[i + 3];
+        dst[i + 3] = (uint16_t)(((uint64_t)a * 65535 + r->base_max / 2) / r->base_max);
+      }
+    }
+  }
+  free(cache.row[0]);
+  free(cache.row[1]);
+  return 0;
+}
 
-  for (uint32_t v = 0; v <= base_max; v++) linear[v] = (float)srgb_to_linear((double)v / base_max);
+int gainmap_prepare(image_t *base, image_t *gm, int gm_full_range, const gainmap_meta_t *m, image_t *out) {
+  memset(out, 0, sizeof *out);
+  const uint32_t w = base->w, h = base->h;
+  const int ch = base->channels;
+  if ((uint64_t)w * h > SIZE_MAX / ((size_t)ch * 2)) return -1;
+  renderer_t *r = (renderer_t *)calloc(1, sizeof *r);
+  if (!r) return -1;
+  r->base_max = (1u << base->bits) - 1;
+  const uint32_t gm_bits = gm->bytes_per_sample == 1 ? 8 : (uint32_t)gm->bits;
+  // Gain map values to [0, 1], expanding limited range (16-235 at 8 bits).
+  const float gm_max = (float)((1u << gm_bits) - 1);
+  r->offset = gm_full_range ? 0.0f : (float)(16u << (gm_bits - 8));
+  r->scale = gm_full_range ? 1.0f / gm_max : 1.0f / (float)(219u << (gm_bits - 8));
+  r->linear = (float *)malloc(((size_t)r->base_max + 1) * sizeof *r->linear);
+  r->gain = (float *)malloc(3 * (GAIN_STEPS + 1) * sizeof *r->gain);
+  r->pq = (float *)malloc((((size_t)PQ_OCTAVES << PQ_STEPS) + 1) * sizeof *r->pq);
+  r->x0 = (uint32_t *)malloc((size_t)w * sizeof *r->x0);
+  r->fx = (float *)malloc((size_t)w * sizeof *r->fx);
+  if (!r->linear || !r->gain || !r->pq || !r->x0 || !r->fx) {
+    renderer_free(r);
+    return -1;
+  }
+  for (uint32_t v = 0; v <= r->base_max; v++) r->linear[v] = (float)srgb_to_linear((double)v / r->base_max);
   // ISO 21496-1: gain (log2) = min + (max - min) * value^(1/gamma), here at
   // full weight (the display's headroom reaching the alternate headroom).
   for (int c = 0; c < 3; c++) {
     for (int i = 0; i <= GAIN_STEPS; i++) {
       const double g = pow((double)i / GAIN_STEPS, 1.0 / m->gamma[c]);
-      gain[c * (GAIN_STEPS + 1) + i] = (float)exp2(m->min[c] + (m->max[c] - m->min[c]) * g);
+      r->gain[c * (GAIN_STEPS + 1) + i] = (float)exp2(m->min[c] + (m->max[c] - m->min[c]) * g);
     }
   }
-  pq_table(pq);
-  for (uint32_t x = 0; x < w; x++) source_position(x, w, gm->w, &x0[x], &fx[x]);
-
-  const float to_pq = (float)(GAINMAP_SDR_WHITE_NITS / 10000.0);
-  float base_offset[3], alternate_offset[3];
+  pq_table(r->pq);
+  for (uint32_t x = 0; x < w; x++) source_position(x, w, gm->w, &r->x0[x], &r->fx[x]);
+  r->to_pq = (float)(GAINMAP_SDR_WHITE_NITS / 10000.0);
   for (int c = 0; c < 3; c++) {
-    base_offset[c] = (float)m->base_offset[c];
-    alternate_offset[c] = (float)m->alternate_offset[c];
+    r->base_offset[c] = (float)m->base_offset[c];
+    r->alternate_offset[c] = (float)m->alternate_offset[c];
   }
-  const int per_channel = m->channels == 3 || gch == 3;
+  r->meta_channels = m->channels;
+  r->per_channel = m->channels == 3 || gm->channels == 3;
+  // The renderer takes over both images.
+  r->base = *base;
+  r->gm = *gm;
+
   out->w = w;
   out->h = h;
   out->channels = ch;
   out->bytes_per_sample = 2;
   out->bits = 16;
   out->stride = (size_t)w * ch * 2;
-  for (uint32_t y = 0; y < h; y++) {
-    uint32_t r0;
-    float fy;
-    source_position(y, h, gm->h, &r0, &fy);
-    const uint32_t r1 = r0 + 1 < gm->h ? r0 + 1 : r0;
-    const float *upper = enlarged_row(&cache, gm, r0, x0, fx, w, offset, scale);
-    const float *lower = enlarged_row(&cache, gm, r1, x0, fx, w, offset, scale);
-    if (r1 == r0) lower = upper;
-    const uint8_t *src8 = base->data + (size_t)y * base->stride;
-    const uint16_t *src16 = (const uint16_t *)src8;
-    uint16_t *dst = (uint16_t *)(out->data + (size_t)y * out->stride);
-    for (uint32_t x = 0; x < w; x++) {
-      float factor[3];
-      for (int c = 0; c < (per_channel ? 3 : 1); c++) {
-        const int gc = gch == 3 ? c : 0;
-        const float a = upper[(size_t)x * gch + gc], b = lower[(size_t)x * gch + gc];
-        factor[c] = gain_at(gain + (m->channels == 3 ? c : 0) * (GAIN_STEPS + 1), a + (b - a) * fy);
-      }
-      if (!per_channel) factor[1] = factor[2] = factor[0];
-      const size_t i = (size_t)x * ch;
-      for (int c = 0; c < 3; c++) {
-        const uint32_t v = base->bytes_per_sample == 1 ? src8[i + c] : src16[i + c];
-        // HDR = (SDR + base offset) * gain - alternate offset, linear, 1.0 = SDR white.
-        const float hdr = (linear[v] + base_offset[c]) * factor[c] - alternate_offset[c];
-        dst[i + c] = pq_code(pq, hdr * to_pq);
-      }
-      if (ch == 4) {
-        const uint32_t a = base->bytes_per_sample == 1 ? src8[i + 3] : src16[i + 3];
-        dst[i + 3] = (uint16_t)(((uint64_t)a * 65535 + base_max / 2) / base_max);
-      }
-    }
-  }
-  rc = 0;
-
-done:
-  if (rc != 0) {
-    free(out->data);
+  out->owner = r;
+  out->owner_free = renderer_free;
+  out->render = render;
+  // With alpha, the encoder takes the whole image at once.
+  if ((ch == 2 || ch == 4) && image_make_packed(out) != 0) {
+    memset(&r->base, 0, sizeof r->base);  // back to the caller
+    memset(&r->gm, 0, sizeof r->gm);
+    renderer_free(r);
     memset(out, 0, sizeof *out);
+    return -1;
   }
-  free(linear);
-  free(gain);
-  free(pq);
-  free(x0);
-  free(fx);
-  free(cache.row[0]);
-  free(cache.row[1]);
-  return rc;
+  memset(base, 0, sizeof *base);
+  memset(gm, 0, sizeof *gm);
+  return 0;
 }

@@ -1,138 +1,20 @@
-// HEIF/HEIC decoding through libheif (HEVC via libde265), including HDR
-// photos with an ISO 21496-1 gain map (see gainmap.h).
+// HEIF/HEIC decoding through libheif (HEVC via libde265), including the parts
+// of an HDR photo with an ISO 21496-1 gain map (see hdr.h).
 #include <libheif/heif.h>
 #include <libheif/heif_items.h>
 #include <libheif/heif_properties.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "gainmap.h"
+#include "hdr.h"
+#include "meta.h"
 #include "pixels.h"
 
 void heif_decoder_version(char *buf, size_t len) { snprintf(buf, len, "libheif %s", heif_get_version()); }
 
 static void release_heif_image(void *owner) { heif_image_release((struct heif_image *)owner); }
-
-static uint32_t be16(const uint8_t *p) { return (uint32_t)p[0] << 8 | p[1]; }
-static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
-
-// One box in [*p, end): its type and payload. Moves *p past it; returns 0 at
-// the end or if the box is malformed.
-typedef struct {
-  uint32_t type;
-  const uint8_t *data;
-  size_t size;
-} box_t;
-
-static int next_box(const uint8_t **p, const uint8_t *end, box_t *box) {
-  const size_t left = (size_t)(end - *p);
-  if (left < 8) return 0;
-  uint64_t size = be32(*p);
-  size_t header = 8;
-  box->type = be32(*p + 4);
-  if (size == 1) {  // 64-bit size
-    if (left < 16) return 0;
-    size = (uint64_t)be32(*p + 8) << 32 | be32(*p + 12);
-    header = 16;
-  } else if (size == 0) {  // up to the end
-    size = left;
-  }
-  if (size < header || size > left) return 0;
-  box->data = *p + header;
-  box->size = (size_t)size - header;
-  *p += size;
-  return 1;
-}
-
-static int find_box(const uint8_t *data, size_t size, uint32_t type, box_t *box) {
-  const uint8_t *p = data;
-  while (next_box(&p, data + size, box)) {
-    if (box->type == type) return 1;
-  }
-  return 0;
-}
-
-// The ICC profile in property `index` (from 1) of 'ipco', if that is a 'colr'
-// with one. Returns its size, 0 if it isn't one.
-static size_t ipco_icc(const box_t *ipco, uint32_t index, const uint8_t **icc) {
-  const uint8_t *p = ipco->data;
-  box_t prop;
-  if (index == 0) return 0;  // no property
-  for (uint32_t i = 1; next_box(&p, ipco->data + ipco->size, &prop); i++) {
-    if (i < index) continue;
-    if (prop.type != heif_fourcc('c', 'o', 'l', 'r') || prop.size < 4) return 0;
-    const uint32_t kind = be32(prop.data);
-    if (kind != heif_fourcc('p', 'r', 'o', 'f') && kind != heif_fourcc('r', 'I', 'C', 'C')) return 0;
-    *icc = prop.data + 4;
-    return prop.size - 4;
-  }
-  return 0;
-}
-
-// The ICC profile of `item`, read from the file's item properties: libheif
-// gives the profiles of images only, not of the 'tmap' item. Returns its size
-// (0 if it has none), with *icc pointing into buf.
-static size_t item_icc(const uint8_t *buf, size_t len, heif_item_id item, const uint8_t **icc) {
-  box_t meta, iprp, ipco, ipma;
-  if (!find_box(buf, len, heif_fourcc('m', 'e', 't', 'a'), &meta) || meta.size < 4 ||
-      !find_box(meta.data + 4, meta.size - 4, heif_fourcc('i', 'p', 'r', 'p'), &iprp) ||
-      !find_box(iprp.data, iprp.size, heif_fourcc('i', 'p', 'c', 'o'), &ipco)) {
-    return 0;
-  }
-  const uint8_t *p = iprp.data;
-  while (next_box(&p, iprp.data + iprp.size, &ipma)) {
-    if (ipma.type != heif_fourcc('i', 'p', 'm', 'a') || ipma.size < 8) continue;
-    const size_t id_size = ipma.data[0] == 0 ? 2 : 4;  // by version
-    const size_t index_size = ipma.data[3] & 1 ? 2 : 1;  // by flags
-    const uint8_t *q = ipma.data + 8, *end = ipma.data + ipma.size;
-    for (uint32_t n = be32(ipma.data + 4); n > 0 && (size_t)(end - q) > id_size; n--) {
-      const uint32_t id = id_size == 2 ? be16(q) : be32(q);
-      const size_t count = q[id_size];
-      q += id_size + 1;
-      if ((size_t)(end - q) < count * index_size) break;
-      for (size_t i = 0; id == item && i < count; i++) {
-        const uint32_t index = index_size == 2 ? be16(q + 2 * i) & 0x7fff : q[i] & 0x7fu;
-        const size_t size = ipco_icc(&ipco, index, icc);
-        if (size) return size;
-      }
-      q += count * index_size;
-    }
-  }
-  return 0;
-}
-
-// 1 if an ICC profile has Apple's HDR tone-mapping curve, its 'hdgm' tag.
-static int has_tone_curve(const uint8_t *icc, size_t size) {
-  if (size < 132) return 0;
-  const uint32_t n = be32(icc + 128);
-  if (n > (size - 132) / 12) return 0;
-  for (uint32_t i = 0; i < n; i++) {
-    if (be32(icc + 132 + 12 * i) == heif_fourcc('h', 'd', 'g', 'm')) return 1;
-  }
-  return 0;
-}
-
-// Copies Apple's profile for the HDR rendition into color->hdr_icc, if the
-// photo has one: Display P3 with PQ, plus the curve Apple derived from the
-// gain map, which it tone-maps the HDR with on screens that can't show all of
-// it. ISO 21496-1 puts it on the 'tmap' item; it is looked for on the gain map
-// too, which carries it in a JPEG.
-static void keep_hdr_profile(const uint8_t *buf, size_t len, heif_item_id tmap, heif_item_id gain_map,
-                             color_t *color) {
-  const heif_item_id items[] = {tmap, gain_map};
-  for (int i = 0; i < 2; i++) {
-    const uint8_t *icc = NULL;
-    const size_t size = item_icc(buf, len, items[i], &icc);
-    if (!size || !has_tone_curve(icc, size)) continue;
-    color->hdr_icc.data = (uint8_t *)malloc(size);
-    if (!color->hdr_icc.data) return;  // not needed for the pixels
-    memcpy(color->hdr_icc.data, icc, size);
-    color->hdr_icc.size = size;
-    return;
-  }
-}
 
 // Finds the 'tmap' item derived from `primary` and its gain map. libheif
 // doesn't read 'tmap' items itself. Returns 1 if found, 0 if there is none,
@@ -280,68 +162,34 @@ done:
 }
 
 // Replaces the decoded SDR image with its HDR rendition when the file has an
-// ISO 21496-1 gain map. Otherwise leaves it, with a note if the gain map
-// can't be used.
+// ISO 21496-1 gain map (see hdr.h). Otherwise leaves it, with a note if the
+// gain map can't be used.
 static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len,
                            struct heif_image_handle *primary, image_t *img, color_t *color, hdr_info_t *hdr) {
-  gainmap_meta_t meta;
+  hdr_parts_t parts;
+  memset(&parts, 0, sizeof parts);
   heif_item_id tmap_id = 0, gain_map_id = 0;
-  char *note = hdr->note;
-  const size_t note_len = sizeof hdr->note;
-  const int found = find_gain_map(ctx, heif_image_handle_get_item_id(primary), &tmap_id, &gain_map_id, &meta,
-                                  note, note_len);
-  if (found <= 0) return;
-  const int primaries = gainmap_srgb_primaries(color);
-  if (!primaries) {
-    char name[64];
-    gainmap_color_name(color, name, sizeof name);
-    snprintf(note, note_len, "unsupported color profile: %s", name);
+  if (find_gain_map(ctx, heif_image_handle_get_item_id(primary), &tmap_id, &gain_map_id, &parts.meta, hdr->note,
+                    sizeof hdr->note) <= 0) {
     return;
   }
-  if (!meta.use_base_color_space) {
-    snprintf(note, note_len, "gain map in another color space");
+  const int primaries = hdr_check(color, &parts.meta, hdr);
+  if (!primaries || decode_gain_map(ctx, primary, gain_map_id, &parts.gain_map, &parts.gain_map_full_range,
+                                    hdr->note, sizeof hdr->note) != 0) {
     return;
   }
-  if (!(meta.alternate_headroom > meta.base_headroom)) {
-    snprintf(note, note_len, "the gain map doesn't make the photo brighter");
-    return;
-  }
-  image_t gm;
-  int full_range = 1;
-  if (decode_gain_map(ctx, primary, gain_map_id, &gm, &full_range, note, note_len) != 0) return;
-  // After rotation, the gain map must have the photo's shape (a mismatch
-  // would apply the gain to the wrong places).
-  const double aspect = (double)img->w / img->h, gm_aspect = (double)gm.w / gm.h;
-  if (fabs(gm_aspect / aspect - 1) > 0.05) {
-    snprintf(note, note_len, "the gain map doesn't match the photo (%ux%u, photo %ux%u)", gm.w, gm.h, img->w,
-             img->h);
-    image_free(&gm);
-    return;
-  }
-  image_t out;
-  const int rc = gainmap_apply(img, &gm, full_range, &meta, &out);
-  image_free(&gm);
-  if (rc != 0) {
-    snprintf(note, note_len, "not enough memory");
-    return;
-  }
-  image_free(img);
-  *img = out;
-  color_free(color);
-  color->cicp_present = 1;
-  color->cicp[0] = (uint8_t)primaries;
-  color->cicp[1] = 16;  // PQ
-  color->cicp[2] = 0;
-  color->cicp[3] = 1;
-  keep_hdr_profile(buf, len, tmap_id, gain_map_id, color);
-  hdr->headroom = exp2(meta.alternate_headroom);
+  // Apple's HDR profile: ISO 21496-1 puts it on the 'tmap' item; it is looked
+  // for on the gain map too, which carries it in a JPEG.
+  parts.profile_sizes[0] = heif_item_profile(buf, len, tmap_id, &parts.profiles[0]);
+  parts.profile_sizes[1] = heif_item_profile(buf, len, gain_map_id, &parts.profiles[1]);
+  hdr_apply(img, color, primaries, &parts, hdr);
 }
 
 int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
                 size_t err_len) {
   memset(img, 0, sizeof *img);
   memset(color, 0, sizeof *color);
-  if (hdr) memset(hdr, 0, sizeof *hdr);
+  memset(hdr, 0, sizeof *hdr);
   struct heif_context *ctx = heif_context_alloc();
   struct heif_image_handle *handle = NULL;
   struct heif_image *image = NULL;
@@ -416,7 +264,7 @@ int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hd
   img->owner = image;  // the decoded image outlives the context
   img->owner_free = release_heif_image;
   image = NULL;
-  if (hdr) apply_gain_map(ctx, buf, len, handle, img, color, hdr);
+  apply_gain_map(ctx, buf, len, handle, img, color, hdr);
   rc = 0;
 
 done:

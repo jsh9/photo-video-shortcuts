@@ -32,15 +32,21 @@ int gainmap_srgb_primaries(const color_t *color);
 // or the CICP code points.
 void gainmap_color_name(const color_t *color, char *buf, size_t len);
 
-// Applies the gain map at full strength, giving the HDR (alternate) image.
+// Gives the HDR (alternate) image: the gain map applied at full strength.
 // `base`: upright RGB or RGBA, 8 to 16 bits, sRGB transfer curve.
 // `gain_map`: 1 or 3 channels, 8 to 16 bits, aligned with `base`; it is
 // enlarged to the base's size (bilinear). Limited-range values (16-235 for
 // 8 bits) are expanded unless `gain_map_full_range`.
-// `out` gets a 16-bit PQ image in the base's primaries, with SDR white at
-// GAINMAP_SDR_WHITE_NITS, computed row by row. Returns 0, or -1 if out of
-// memory.
-int gainmap_apply(const image_t *base, const image_t *gain_map, int gain_map_full_range,
-                  const gainmap_meta_t *meta, image_t *out);
+// `out` becomes a 16-bit PQ image in the base's primaries, with SDR white at
+// GAINMAP_SDR_WHITE_NITS. Its pixels are computed on request (out->render),
+// a region at a time, so no 16-bit copy of the whole photo is held; with
+// alpha, they are computed at once. `out` takes over `base` and `gain_map`
+// (both are emptied). Returns 0, or -1 if out of memory (both left as they
+// were).
+int gainmap_prepare(image_t *base, image_t *gain_map, int gain_map_full_range, const gainmap_meta_t *meta,
+                    image_t *out);
+
+// 1 if an ICC profile has the tag `sig`.
+int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]);
 
 #endif

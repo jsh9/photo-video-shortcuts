@@ -376,22 +376,88 @@ static uint32_t heif_pick_item(const heif_t *h, uint32_t type, const char *conte
   return best;
 }
 
-static int parse_heif(const uint8_t *buf, size_t len, meta_t *m) {
+// The 'meta' box of a HEIF file (a FullBox: payload after its 4 bytes of
+// version and flags), or an empty span.
+static span_t heif_meta(const uint8_t *buf, size_t len) {
   box_iter_t top = {buf, len, 0};
   uint32_t t;
-  span_t pl, meta = {NULL, 0};
+  span_t pl, none = {NULL, 0};
   while (box_next(&top, &t, &pl)) {
     if (t == FOURCC('m', 'e', 't', 'a')) {
-      meta = pl;
-      break;
+      if (pl.n < 4) return none;
+      pl.p += 4;
+      pl.n -= 4;
+      return pl;
     }
   }
-  if (!meta.p || meta.n < 4) return 0;
+  return none;
+}
+
+static span_t child_box(span_t parent, uint32_t type) {
+  box_iter_t it = {parent.p, parent.n, 0};
+  uint32_t t;
+  span_t pl, none = {NULL, 0};
+  while (box_next(&it, &t, &pl)) {
+    if (t == type) return pl;
+  }
+  return none;
+}
+
+// The ICC profile in property `index` (from 1) of 'ipco', if that property is
+// a 'colr' with one. Returns its size, 0 if it isn't one.
+static size_t ipco_profile(span_t ipco, uint32_t index, const uint8_t **icc) {
+  box_iter_t it = {ipco.p, ipco.n, 0};
+  uint32_t t;
+  span_t prop;
+  if (index == 0) return 0;  // no property
+  for (uint32_t i = 1; box_next(&it, &t, &prop); i++) {
+    if (i < index) continue;
+    if (t != FOURCC('c', 'o', 'l', 'r') || prop.n < 4) return 0;
+    const uint32_t kind = rd32be(prop.p);
+    if (kind != FOURCC('p', 'r', 'o', 'f') && kind != FOURCC('r', 'I', 'C', 'C')) return 0;
+    *icc = prop.p + 4;
+    return prop.n - 4;
+  }
+  return 0;
+}
+
+size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint8_t **icc) {
+  const span_t iprp = child_box(heif_meta(buf, len), FOURCC('i', 'p', 'r', 'p'));
+  const span_t ipco = child_box(iprp, FOURCC('i', 'p', 'c', 'o'));
+  if (!ipco.p) return 0;
+  box_iter_t it = {iprp.p, iprp.n, 0};
+  uint32_t t;
+  span_t ipma;
+  while (box_next(&it, &t, &ipma)) {  // every 'ipma'
+    if (t != FOURCC('i', 'p', 'm', 'a') || ipma.n < 8) continue;
+    const size_t id_size = ipma.p[0] == 0 ? 2 : 4;      // by version
+    const size_t index_size = ipma.p[3] & 1 ? 2 : 1;  // by flags
+    const uint8_t *q = ipma.p + 8, *end = ipma.p + ipma.n;
+    for (uint32_t n = rd32be(ipma.p + 4); n > 0 && (size_t)(end - q) > id_size; n--) {
+      const uint32_t item = id_size == 2 ? rd16be(q) : rd32be(q);
+      const size_t count = q[id_size];
+      q += id_size + 1;
+      if ((size_t)(end - q) < count * index_size) break;
+      for (size_t i = 0; item == id && i < count; i++) {
+        const uint32_t index = index_size == 2 ? rd16be(q + 2 * i) & 0x7fffu : q[i] & 0x7fu;
+        const size_t size = ipco_profile(ipco, index, icc);
+        if (size) return size;
+      }
+      q += count * index_size;
+    }
+  }
+  return 0;
+}
+
+static int parse_heif(const uint8_t *buf, size_t len, meta_t *m) {
+  const span_t meta = heif_meta(buf, len);
+  if (!meta.p) return 0;
 
   heif_t h;
   memset(&h, 0, sizeof h);
-  span_t iinf = {NULL, 0}, iloc = {NULL, 0}, iref = {NULL, 0};
-  box_iter_t mi = {meta.p + 4, meta.n - 4, 0};  // meta is a FullBox
+  uint32_t t;
+  span_t pl, iinf = {NULL, 0}, iloc = {NULL, 0}, iref = {NULL, 0};
+  box_iter_t mi = {meta.p, meta.n, 0};
   while (box_next(&mi, &t, &pl)) {
     if (t == FOURCC('p', 'i', 't', 'm') && pl.n >= 6) {
       h.primary = pl.p[0] == 0 ? rd16be(pl.p + 4) : (pl.n >= 8 ? rd32be(pl.p + 4) : 0);
