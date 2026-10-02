@@ -14,7 +14,8 @@
 // A gain map photo's parts, as the decoder found them.
 typedef struct {
   gainmap_meta_t meta;
-  image_t gain_map;  // aligned with the upright photo
+  image_t gain_map;   // upright
+  double window[4];   // its part covering the upright photo: x0, y0, x1, y1
   int gain_map_full_range;
   // Candidates for the HDR rendition's ICC profile, in order of preference
   // (e.g. on the 'tmap' item, then on the gain map), pointing into the file.
@@ -31,8 +32,10 @@ int hdr_check(const color_t *color, const gainmap_meta_t *meta, hdr_info_t *hdr)
 // computed on request; see gainmap_prepare) and `color` with its color:
 // PQ in `primaries` by CICP, and Apple's HDR profile when the photo has one
 // that describes those pixels (with the tone curve Apple uses on screens
-// that can't show all of the HDR). Takes over parts->gain_map. If the gain
-// map can't be used, leaves both, with the reason in hdr->note.
+// that can't show all of the HDR). Without one, an ISO 21496-1 photo gets a
+// warning in hdr->warning (Apple's older gain maps never have one). Takes
+// over parts->gain_map. If the gain map can't be used, leaves both, with the
+// reason in hdr->note.
 void hdr_apply(image_t *img, color_t *color, int primaries, hdr_parts_t *parts, hdr_info_t *hdr);
 
 #endif

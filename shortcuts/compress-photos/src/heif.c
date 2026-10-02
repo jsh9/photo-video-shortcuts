@@ -1,5 +1,6 @@
 // HEIF/HEIC decoding through libheif (HEVC via libde265), including the parts
-// of an HDR photo with an ISO 21496-1 gain map (see hdr.h).
+// of an HDR photo with a gain map (see hdr.h): ISO 21496-1, or Apple's older
+// format.
 #include <libheif/heif.h>
 #include <libheif/heif_items.h>
 #include <libheif/heif_properties.h>
@@ -56,6 +57,65 @@ static int find_gain_map(struct heif_context *ctx, heif_item_id primary, heif_it
   return rc;
 }
 
+// Apple's older gain map (photos taken before iOS 18): an auxiliary image of
+// `primary` of this type. ISO 21496-1 gain maps in Apple's photos have it too.
+#define APPLE_GAIN_MAP "urn:com:apple:photo:2020:aux:hdrgainmap"
+
+// 1 if `from` has a reference of `type` to `to` (alone).
+static int refers_to(struct heif_context *ctx, heif_item_id from, uint32_t type, heif_item_id to) {
+  int found = 0;
+  for (int r = 0; !found; r++) {
+    uint32_t t = 0;
+    heif_item_id *ids = NULL;
+    const size_t k = heif_context_get_item_references(ctx, from, r, &t, &ids);
+    found = k == 1 && t == type && ids[0] == to;
+    heif_release_item_references(ctx, &ids);
+    if (k == 0) break;
+  }
+  return found;
+}
+
+// Finds Apple's older gain map of `primary`. Returns its ID, 0 if none.
+static heif_item_id find_older_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len,
+                                        heif_item_id primary) {
+  const int n = heif_context_get_number_of_items(ctx);
+  heif_item_id *ids = n > 0 ? (heif_item_id *)malloc((size_t)n * sizeof *ids) : NULL;
+  if (!ids) return 0;
+  const int count = heif_context_get_list_of_item_IDs(ctx, ids, n);
+  heif_item_id found = 0;
+  for (int i = 0; i < count && !found; i++) {
+    if (ids[i] != primary && heif_item_has_aux_type(buf, len, ids[i], APPLE_GAIN_MAP) &&
+        refers_to(ctx, ids[i], heif_fourcc('a', 'u', 'x', 'l'), primary)) {
+      found = ids[i];
+    }
+  }
+  free(ids);
+  return found;
+}
+
+// The headroom of Apple's older gain map, from the photo's maker notes (tags
+// 33 and 48). Returns 1 if found.
+static int older_gain_map_meta(struct heif_image_handle *primary, gainmap_meta_t *meta) {
+  heif_item_id ids[4];
+  const int n = heif_image_handle_get_list_of_metadata_block_IDs(primary, "Exif", ids, 4);
+  int found = 0;
+  for (int i = 0; i < n && !found; i++) {
+    const size_t size = heif_image_handle_get_metadata_size(primary, ids[i]);
+    uint8_t *data = size > 4 ? (uint8_t *)malloc(size) : NULL;
+    if (data && heif_image_handle_get_metadata(primary, ids[i], data).code == heif_error_Ok) {
+      // a 4-byte offset to the TIFF header, counted from byte 4
+      const uint32_t offset = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
+      double headroom = 0, gain = 0;
+      if (offset < size - 4 && exif_apple_hdr(data + 4 + offset, size - 4 - offset, &headroom, &gain)) {
+        gainmap_apple_meta(headroom, gain, meta);
+        found = 1;
+      }
+    }
+    free(data);
+  }
+  return found;
+}
+
 // 1 if `item` is rotated or mirrored ('irot' other than 0, or 'imir').
 static int is_turned(struct heif_context *ctx, heif_item_id item) {
   heif_property_id props[16];
@@ -71,32 +131,74 @@ static int is_turned(struct heif_context *ctx, heif_item_id item) {
   return 0;
 }
 
-// Applies `item`'s rotation and mirroring (not its crop) to `img`, as
-// libheif applies them to that item's own pixels. Returns -1 if out of memory.
-static int apply_rotation(struct heif_context *ctx, heif_item_id item, image_t *img) {
-  heif_property_id props[16];
-  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
-  for (int i = 0; i < n; i++) {
-    int orientation;  // the EXIF orientation that does the same
-    const uint32_t type = (uint32_t)heif_item_get_property_type(ctx, item, props[i]);
-    if (type == heif_fourcc('i', 'r', 'o', 't')) {
-      const int ccw = heif_item_get_property_transform_rotation_ccw(ctx, item, props[i]);
-      orientation = ccw == 90 ? 8 : ccw == 180 ? 3 : ccw == 270 ? 6 : 1;
-    } else if (type == heif_fourcc('i', 'm', 'i', 'r')) {
-      const enum heif_transform_mirror_direction d = heif_item_get_property_transform_mirror(ctx, item, props[i]);
-      if (d == heif_transform_mirror_direction_invalid) continue;
-      orientation = d == heif_transform_mirror_direction_horizontal ? 2 : 4;
-    } else {
-      continue;  // a crop ('clap'): the gain map is scaled to the photo anyway
-    }
-    if (image_orient(img, orientation) != 0) return -1;
+// The EXIF orientation that rotates or mirrors like property `prop` ('irot'
+// or 'imir'); 0 for other properties.
+static int transform_orientation(struct heif_context *ctx, heif_item_id item, heif_property_id prop) {
+  const uint32_t type = (uint32_t)heif_item_get_property_type(ctx, item, prop);
+  if (type == heif_fourcc('i', 'r', 'o', 't')) {
+    const int ccw = heif_item_get_property_transform_rotation_ccw(ctx, item, prop);
+    return ccw == 90 ? 8 : ccw == 180 ? 3 : ccw == 270 ? 6 : 0;
+  }
+  if (type == heif_fourcc('i', 'm', 'i', 'r')) {
+    const enum heif_transform_mirror_direction d = heif_item_get_property_transform_mirror(ctx, item, prop);
+    return d == heif_transform_mirror_direction_horizontal ? 2 : d == heif_transform_mirror_direction_vertical ? 4 : 0;
   }
   return 0;
 }
 
-// Decodes the gain map, aligned with the upright primary image.
-static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *primary, heif_item_id id,
-                           image_t *gm, int *full_range, char *note, size_t note_len) {
+// Turns `win` (x0, y0, x1, y1, in the pixels of a w x h image) the way EXIF
+// orientation `o` (2, 3, 4, 6 or 8) turns the image (see image_orient).
+static void orient_window(double *win, double w, double h, int o) {
+  const double x0 = win[0], y0 = win[1], x1 = win[2], y1 = win[3];
+  double out[4] = {x0, y0, x1, y1};
+  if (o == 2 || o == 3) out[0] = w - x1, out[2] = w - x0;
+  if (o == 3 || o == 4) out[1] = h - y1, out[3] = h - y0;
+  if (o == 6) out[0] = h - y1, out[1] = x0, out[2] = h - y0, out[3] = x1;
+  if (o == 8) out[0] = y0, out[1] = w - x1, out[2] = y1, out[3] = w - x0;
+  memcpy(win, out, sizeof out);
+}
+
+// Applies the primary image's transforms, in order, to a gain map stored like
+// it: rotations and mirrors turn the gain map, and a crop narrows the part of
+// it (`win`) that covers the photo. Returns -1 if out of memory.
+static int follow_primary(struct heif_context *ctx, struct heif_image_handle *primary, image_t *gm, double *win) {
+  const heif_item_id item = heif_image_handle_get_item_id(primary);
+  int w = heif_image_handle_get_ispe_width(primary), h = heif_image_handle_get_ispe_height(primary);
+  heif_property_id props[16];
+  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
+  for (int i = 0; i < n; i++) {
+    if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('c', 'l', 'a', 'p')) {
+      int left = 0, top = 0, right = 0, bottom = 0;
+      heif_item_get_property_transform_crop_borders(ctx, item, props[i], w, h, &left, &top, &right, &bottom);
+      if (w <= 0 || h <= 0 || left + right >= w || top + bottom >= h) continue;
+      const double sx = (win[2] - win[0]) / w, sy = (win[3] - win[1]) / h;
+      win[0] += left * sx;
+      win[2] -= right * sx;
+      win[1] += top * sy;
+      win[3] -= bottom * sy;
+      w -= left + right;
+      h -= top + bottom;
+      continue;
+    }
+    const int o = transform_orientation(ctx, item, props[i]);
+    if (!o) continue;
+    orient_window(win, gm->w, gm->h, o);
+    if (image_orient(gm, o) != 0) return -1;
+    if (o == 6 || o == 8) {
+      const int t = w;
+      w = h;
+      h = t;
+    }
+  }
+  return 0;
+}
+
+// Decodes the gain map, upright, and the part of it that covers the upright
+// photo (img_w x img_h).
+static int decode_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, struct heif_image_handle *primary,
+                           heif_item_id id, uint32_t img_w, uint32_t img_h, hdr_parts_t *parts, char *note,
+                           size_t note_len) {
+  image_t *gm = &parts->gain_map;
   struct heif_image_handle *handle = NULL;
   struct heif_image *image = NULL;
   struct heif_decoding_options *options = NULL;
@@ -111,6 +213,7 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   heif_image_handle_get_preferred_decoding_colorspace(handle, &space, &chroma);
   const int mono = space == heif_colorspace_monochrome;
   const int wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;
+  // Default options apply the gain map's own transforms, if it has any.
   options = heif_decoding_options_alloc();
   struct heif_error e =
       mono ? heif_decode_image(handle, &image, heif_colorspace_monochrome, heif_chroma_monochrome, options)
@@ -138,16 +241,23 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   gm->owner_free = release_heif_image;
   // Monochrome values are as coded: full or limited range, as signaled by
   // the colr box or else the HEVC stream. RGB comes out full range.
-  *full_range = 1;
+  parts->gain_map_full_range = 1;
   struct heif_color_profile_nclx *nclx = NULL;
   if (mono && heif_image_get_nclx_color_profile(image, &nclx).code == heif_error_Ok && nclx) {
-    *full_range = nclx->full_range_flag != 0;
+    parts->gain_map_full_range = nclx->full_range_flag != 0;
   }
   heif_nclx_color_profile_free(nclx);
   image = NULL;
-  // Apple stores the gain map like the primary image, without turning it
-  // (ImageIO writes 'irot' 0): the primary's rotation and mirroring apply.
-  if (!is_turned(ctx, id) && apply_rotation(ctx, heif_image_handle_get_item_id(primary), gm) != 0) {
+  // Apple stores its gain maps like the primary image, without its
+  // transforms (ImageIO writes 'irot' 0): the primary's transforms, crop
+  // included, apply. Other gain maps have their own transforms, unless their
+  // shape shows they are stored like Apple's.
+  parts->window[0] = parts->window[1] = 0;
+  parts->window[2] = gm->w;
+  parts->window[3] = gm->h;
+  const int apple = heif_item_has_aux_type(buf, len, id, APPLE_GAIN_MAP);
+  if (!is_turned(ctx, id) && (apple || !gainmap_same_shape(gm->w, gm->h, img_w, img_h)) &&
+      follow_primary(ctx, primary, gm, parts->window) != 0) {
     snprintf(note, note_len, "not enough memory");
     goto done;
   }
@@ -161,31 +271,43 @@ done:
   return rc;
 }
 
-// Replaces the decoded SDR image with its HDR rendition when the file has an
-// ISO 21496-1 gain map (see hdr.h). Otherwise leaves it, with a note if the
-// gain map can't be used.
-static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len,
+// Replaces the decoded SDR image with its HDR rendition when the file has a
+// gain map (see hdr.h): an ISO 21496-1 one, or else Apple's older one.
+// Otherwise leaves it, with a note if the gain map can't be used.
+static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, int sdr,
                            struct heif_image_handle *primary, image_t *img, color_t *color, hdr_info_t *hdr) {
   hdr_parts_t parts;
   memset(&parts, 0, sizeof parts);
+  const heif_item_id primary_id = heif_image_handle_get_item_id(primary);
   heif_item_id tmap_id = 0, gain_map_id = 0;
-  if (find_gain_map(ctx, heif_image_handle_get_item_id(primary), &tmap_id, &gain_map_id, &parts.meta, hdr->note,
-                    sizeof hdr->note) <= 0) {
+  const int iso = find_gain_map(ctx, primary_id, &tmap_id, &gain_map_id, &parts.meta, hdr->note, sizeof hdr->note);
+  if (iso == 0) gain_map_id = find_older_gain_map(ctx, buf, len, primary_id);
+  if (iso == 0 && !gain_map_id) return;
+  hdr->has_gain_map = 1;
+  if (sdr) {  // asked for SDR: nothing to say
+    hdr->note[0] = 0;
+    return;
+  }
+  if (iso < 0) return;
+  if (iso == 0 && !older_gain_map_meta(primary, &parts.meta)) {
+    snprintf(hdr->note, sizeof hdr->note, "Apple's older gain map without its headroom");
     return;
   }
   const int primaries = hdr_check(color, &parts.meta, hdr);
-  if (!primaries || decode_gain_map(ctx, primary, gain_map_id, &parts.gain_map, &parts.gain_map_full_range,
-                                    hdr->note, sizeof hdr->note) != 0) {
+  if (!primaries ||
+      decode_gain_map(ctx, buf, len, primary, gain_map_id, img->w, img->h, &parts, hdr->note, sizeof hdr->note) != 0) {
     return;
   }
   // Apple's HDR profile: ISO 21496-1 puts it on the 'tmap' item; it is looked
   // for on the gain map too, which carries it in a JPEG.
-  parts.profile_sizes[0] = heif_item_profile(buf, len, tmap_id, &parts.profiles[0]);
-  parts.profile_sizes[1] = heif_item_profile(buf, len, gain_map_id, &parts.profiles[1]);
+  if (tmap_id) {
+    parts.profile_sizes[0] = heif_item_profile(buf, len, tmap_id, &parts.profiles[0]);
+    parts.profile_sizes[1] = heif_item_profile(buf, len, gain_map_id, &parts.profiles[1]);
+  }
   hdr_apply(img, color, primaries, &parts, hdr);
 }
 
-int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
+int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
                 size_t err_len) {
   memset(img, 0, sizeof *img);
   memset(color, 0, sizeof *color);
@@ -264,7 +386,7 @@ int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, hd
   img->owner = image;  // the decoded image outlives the context
   img->owner_free = release_heif_image;
   image = NULL;
-  apply_gain_map(ctx, buf, len, handle, img, color, hdr);
+  apply_gain_map(ctx, buf, len, sdr, handle, img, color, hdr);
   rc = 0;
 
 done:

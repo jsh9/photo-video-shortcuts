@@ -22,8 +22,12 @@ static int fraction(const uint8_t *p, int is_signed, double *out) {
 int gainmap_parse(const uint8_t *p, size_t len, gainmap_meta_t *m, char *err, size_t err_len) {
   memset(m, 0, sizeof *m);
   // ToneMapImage: version, then GainMapMetadata (ISO 21496-1, 7.2.2).
-  if (len < 6 || p[0] != 0) {
+  if (len >= 1 && p[0] != 0) {
     snprintf(err, err_len, "unsupported tone map version");
+    return -1;
+  }
+  if (len < 6) {
+    snprintf(err, err_len, "malformed gain map metadata");
     return -1;
   }
   const unsigned min_version = (unsigned)(p[1] << 8 | p[2]), writer_version = (unsigned)(p[3] << 8 | p[4]);
@@ -61,10 +65,41 @@ int gainmap_parse(const uint8_t *p, size_t len, gainmap_meta_t *m, char *err, si
   return 0;
 }
 
+void gainmap_apple_meta(double maker33, double maker48, gainmap_meta_t *m) {
+  // Apple's formula, from "Applying Apple HDR effect to your photos"
+  double stops;
+  if (maker33 < 1.0) {
+    stops = maker48 <= 0.01 ? -20.0 * maker48 + 1.8 : -0.101 * maker48 + 1.601;
+  } else {
+    stops = maker48 <= 0.01 ? -70.0 * maker48 + 3.0 : -0.303 * maker48 + 2.303;
+  }
+  const double headroom = exp2(stops > 0 ? stops : 0);
+  memset(m, 0, sizeof *m);
+  m->channels = 1;
+  m->use_base_color_space = 1;
+  m->alternate_headroom = log2(headroom);
+  m->apple_headroom = headroom;
+}
+
+double gainmap_peak(const gainmap_meta_t *m) {
+  if (m->apple_headroom > 0) return m->apple_headroom;
+  double peak = 0;
+  for (int c = 0; c < m->channels; c++) {
+    const double v = (1 + m->base_offset[c]) * exp2(m->max[c]) - m->alternate_offset[c];
+    if (v > peak) peak = v;
+  }
+  return peak;
+}
+
+int gainmap_same_shape(double w1, double h1, double w2, double h2) {
+  return w1 > 0 && h1 > 0 && w2 > 0 && h2 > 0 && fabs((w1 / h1) / (w2 / h2) - 1) <= 0.05;
+}
+
 // ---------------------------------------------------------------------------
 // Color of the SDR image
 
 static double srgb_to_linear(double v) { return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
+static double rec709_to_linear(double v) { return v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1 / 0.45); }
 
 // An ICC tag's data, or NULL.
 static const uint8_t *icc_tag(const blob_t *icc, const char sig[4], size_t *size) {
@@ -131,7 +166,7 @@ static int icc_is_srgb_curve(const blob_t *icc) {
     if (!t) return 0;
     for (int k = 0; k <= 64; k++) {
       const double x = k / 64.0, y = icc_curve(t, n, x);
-      if (y < 0 || fabs(y - srgb_to_linear(x)) > 0.002) return 0;
+      if (!(y >= 0 && fabs(y - srgb_to_linear(x)) <= 0.002)) return 0;  // also NaN
     }
   }
   return 1;
@@ -275,9 +310,11 @@ static const float *enlarged_row(row_cache_t *cache, const image_t *gm, uint32_t
   return out;
 }
 
-// Center-aligned bilinear source position of output pixel i: index and weight.
-static void source_position(uint32_t i, uint32_t out_size, uint32_t in_size, uint32_t *index, float *weight) {
-  double s = (i + 0.5) * in_size / out_size - 0.5;
+// Center-aligned bilinear source position of output pixel i, scaling
+// [start, end) of the source to out_size pixels: index and weight.
+static void source_position(uint32_t i, uint32_t out_size, double start, double end, uint32_t in_size,
+                            uint32_t *index, float *weight) {
+  double s = start + (i + 0.5) * (end - start) / out_size - 0.5;
   if (s < 0) s = 0;
   if (s > in_size - 1) s = in_size - 1;
   *index = (uint32_t)s;
@@ -293,6 +330,7 @@ typedef struct {
   float *fx;
   float offset, scale;  // gain map values to [0, 1]
   float base_offset[3], alternate_offset[3], to_pq;
+  double window_y[2];  // the gain map rows scaled to the photo's height
   uint32_t base_max;
   int meta_channels, per_channel;
 } renderer_t;
@@ -326,7 +364,7 @@ static int render(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, u
   for (uint32_t yy = y; yy < y + h; yy++) {
     uint32_t r0;
     float fy;
-    source_position(yy, base->h, gm->h, &r0, &fy);
+    source_position(yy, base->h, r->window_y[0], r->window_y[1], gm->h, &r0, &fy);
     const uint32_t r1 = r0 + 1 < gm->h ? r0 + 1 : r0;
     const float *upper = enlarged_row(&cache, gm, r0, r->x0 + x, r->fx + x, w, r->offset, r->scale);
     const float *lower = enlarged_row(&cache, gm, r1, r->x0 + x, r->fx + x, w, r->offset, r->scale);
@@ -360,7 +398,8 @@ static int render(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, u
   return 0;
 }
 
-int gainmap_prepare(image_t *base, image_t *gm, int gm_full_range, const gainmap_meta_t *m, image_t *out) {
+int gainmap_prepare(image_t *base, image_t *gm, const double window[4], int gm_full_range, const gainmap_meta_t *m,
+                    image_t *out) {
   memset(out, 0, sizeof *out);
   const uint32_t w = base->w, h = base->h;
   const int ch = base->channels;
@@ -383,16 +422,26 @@ int gainmap_prepare(image_t *base, image_t *gm, int gm_full_range, const gainmap
     return -1;
   }
   for (uint32_t v = 0; v <= r->base_max; v++) r->linear[v] = (float)srgb_to_linear((double)v / r->base_max);
-  // ISO 21496-1: gain (log2) = min + (max - min) * value^(1/gamma), here at
-  // full weight (the display's headroom reaching the alternate headroom).
   for (int c = 0; c < 3; c++) {
     for (int i = 0; i <= GAIN_STEPS; i++) {
-      const double g = pow((double)i / GAIN_STEPS, 1.0 / m->gamma[c]);
-      r->gain[c * (GAIN_STEPS + 1) + i] = (float)exp2(m->min[c] + (m->max[c] - m->min[c]) * g);
+      const double v = (double)i / GAIN_STEPS;
+      double gain;
+      if (m->apple_headroom > 0) {
+        // Apple's older gain map: 1 + (headroom - 1) * value, linearized
+        // with the inverse Rec. 709 curve.
+        gain = 1 + (m->apple_headroom - 1) * rec709_to_linear(v);
+      } else {
+        // ISO 21496-1: gain (log2) = min + (max - min) * value^(1/gamma), here
+        // at full weight (the display's headroom reaching the alternate one).
+        gain = exp2(m->min[c] + (m->max[c] - m->min[c]) * pow(v, 1.0 / m->gamma[c]));
+      }
+      r->gain[c * (GAIN_STEPS + 1) + i] = (float)gain;
     }
   }
   pq_table(r->pq);
-  for (uint32_t x = 0; x < w; x++) source_position(x, w, gm->w, &r->x0[x], &r->fx[x]);
+  for (uint32_t x = 0; x < w; x++) source_position(x, w, window[0], window[2], gm->w, &r->x0[x], &r->fx[x]);
+  r->window_y[0] = window[1];
+  r->window_y[1] = window[3];
   r->to_pq = (float)(GAINMAP_SDR_WHITE_NITS / 10000.0);
   for (int c = 0; c < 3; c++) {
     r->base_offset[c] = (float)m->base_offset[c];

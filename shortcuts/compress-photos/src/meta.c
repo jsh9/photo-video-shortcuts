@@ -403,25 +403,20 @@ static span_t child_box(span_t parent, uint32_t type) {
   return none;
 }
 
-// The ICC profile in property `index` (from 1) of 'ipco', if that property is
-// a 'colr' with one. Returns its size, 0 if it isn't one.
-static size_t ipco_profile(span_t ipco, uint32_t index, const uint8_t **icc) {
+// Property `index` (from 1) of 'ipco': its type and payload. Returns 0 if
+// there is none.
+static int ipco_property(span_t ipco, uint32_t index, uint32_t *type, span_t *prop) {
   box_iter_t it = {ipco.p, ipco.n, 0};
-  uint32_t t;
-  span_t prop;
-  if (index == 0) return 0;  // no property
-  for (uint32_t i = 1; box_next(&it, &t, &prop); i++) {
-    if (i < index) continue;
-    if (t != FOURCC('c', 'o', 'l', 'r') || prop.n < 4) return 0;
-    const uint32_t kind = rd32be(prop.p);
-    if (kind != FOURCC('p', 'r', 'o', 'f') && kind != FOURCC('r', 'I', 'C', 'C')) return 0;
-    *icc = prop.p + 4;
-    return prop.n - 4;
+  for (uint32_t i = 1; index > 0 && box_next(&it, type, prop); i++) {
+    if (i == index) return 1;
   }
   return 0;
 }
 
-size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint8_t **icc) {
+// Calls `fn` on each property of HEIF item `id`, in order, until it returns
+// nonzero; returns that value (0 if none did).
+static size_t each_item_property(const uint8_t *buf, size_t len, uint32_t id,
+                                 size_t (*fn)(uint32_t type, span_t prop, void *arg), void *arg) {
   const span_t iprp = child_box(heif_meta(buf, len), FOURCC('i', 'p', 'r', 'p'));
   const span_t ipco = child_box(iprp, FOURCC('i', 'p', 'c', 'o'));
   if (!ipco.p) return 0;
@@ -440,13 +435,42 @@ size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint
       if ((size_t)(end - q) < count * index_size) break;
       for (size_t i = 0; item == id && i < count; i++) {
         const uint32_t index = index_size == 2 ? rd16be(q + 2 * i) & 0x7fffu : q[i] & 0x7fu;
-        const size_t size = ipco_profile(ipco, index, icc);
-        if (size) return size;
+        uint32_t type;
+        span_t prop;
+        if (!ipco_property(ipco, index, &type, &prop)) continue;
+        const size_t result = fn(type, prop, arg);
+        if (result) return result;
       }
       q += count * index_size;
     }
   }
   return 0;
+}
+
+// A 'colr' property with an ICC profile: its size, with `arg` set to it.
+static size_t profile_of(uint32_t type, span_t prop, void *arg) {
+  if (type != FOURCC('c', 'o', 'l', 'r') || prop.n < 4) return 0;
+  const uint32_t kind = rd32be(prop.p);
+  if (kind != FOURCC('p', 'r', 'o', 'f') && kind != FOURCC('r', 'I', 'C', 'C')) return 0;
+  *(const uint8_t **)arg = prop.p + 4;
+  return prop.n - 4;
+}
+
+size_t heif_item_profile(const uint8_t *buf, size_t len, uint32_t id, const uint8_t **icc) {
+  return each_item_property(buf, len, id, profile_of, (void *)icc);
+}
+
+// 1 if the property is an 'auxC' with the type in `arg`.
+static size_t is_aux_type(uint32_t type, span_t prop, void *arg) {
+  const char *want = (const char *)arg;
+  const size_t n = strlen(want);
+  // version and flags, then the type, NUL-terminated
+  return type == FOURCC('a', 'u', 'x', 'C') && prop.n > 4 + n && memcmp(prop.p + 4, want, n) == 0 &&
+         prop.p[4 + n] == 0;
+}
+
+int heif_item_has_aux_type(const uint8_t *buf, size_t len, uint32_t id, const char *aux_type) {
+  return each_item_property(buf, len, id, is_aux_type, (void *)aux_type) != 0;
 }
 
 static int parse_heif(const uint8_t *buf, size_t len, meta_t *m) {
@@ -888,6 +912,77 @@ int exif_pixel_dims(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
   if (!exif) return 0;
   return entry_uint(&t, ifd_find(&t, exif, 0xA002), w) &&
          entry_uint(&t, ifd_find(&t, exif, 0xA003), h);
+}
+
+// A number in TIFF entry `e`: rational, signed rational, float or double,
+// with offsets counted from `base` in the TIFF data. Returns 1 if read.
+static int entry_number(const tiff_t *t, size_t e, size_t base, double *v) {
+  if (!e || t32(t, e + 4) != 1) return 0;
+  const uint16_t type = t16(t, e + 2);
+  if (type == 11) {  // float, stored in the entry
+    const uint32_t bits = t32(t, e + 8);
+    float f;
+    memcpy(&f, &bits, sizeof f);
+    *v = f;
+    return 1;
+  }
+  const size_t at = base + t32(t, e + 8);
+  if (at < base || at > t->n || t->n - at < 8) return 0;
+  if (type == 12) {  // double
+    const uint64_t bits = t->le ? ((uint64_t)t32(t, at + 4) << 32 | t32(t, at)) : ((uint64_t)t32(t, at) << 32 | t32(t, at + 4));
+    memcpy(v, &bits, sizeof *v);
+    return 1;
+  }
+  const uint32_t n = t32(t, at), d = t32(t, at + 4);
+  if ((type != 5 && type != 10) || d == 0) return 0;
+  *v = (type == 10 ? (double)(int32_t)n : (double)n) / (type == 10 ? (double)(int32_t)d : (double)d);
+  return 1;
+}
+
+int exif_apple_hdr(const uint8_t *p, size_t n, double *headroom, double *gain) {
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return 0;
+  const size_t e = ifd_find(&t, exif_ifd_offset(&t), 0x927C);  // MakerNote
+  if (!e || t16(&t, e + 2) != 7) return 0;
+  const uint32_t size = t32(&t, e + 4), at = t32(&t, e + 8);
+  if (size <= 4 || at > n || size > n - at) return 0;
+  // "Apple iOS\0", version, byte order, then an IFD; offsets count from the
+  // start of the maker note.
+  const uint8_t *note = p + at;
+  if (size < 16 || memcmp(note, "Apple iOS", 10) != 0 || (memcmp(note + 12, "MM", 2) != 0 && memcmp(note + 12, "II", 2) != 0)) {
+    return 0;
+  }
+  tiff_t m = {(uint8_t *)note, size, note[12] == 'I'};
+  const uint16_t count = t16(&m, 14);
+  if (16 + (size_t)count * 12 > size) return 0;
+  int found = 0;
+  for (uint16_t i = 0; i < count; i++) {
+    const size_t entry = 16 + (size_t)i * 12;
+    const uint16_t tag = t16(&m, entry);
+    if (tag == 33) found |= entry_number(&m, entry, 0, headroom);
+    if (tag == 48) found |= entry_number(&m, entry, 0, gain) << 1;
+  }
+  return found == 3;
+}
+
+static int contains(const uint8_t *p, size_t n, const char *text) {
+  const size_t k = strlen(text);
+  for (size_t i = 0; n >= k && i <= n - k; i++) {
+    if (p[i] == (uint8_t)text[0] && memcmp(p + i, text, k) == 0) return 1;
+  }
+  return 0;
+}
+
+int jpeg_has_gain_map(const uint8_t *p, size_t n) {
+  // A second image (MPF) with gain map metadata: ISO 21496-1, Adobe's
+  // (hdrgm) or Apple's
+  int mpf = 0;  // an APP2 segment "MPF\0"
+  for (size_t i = 0; !mpf && n >= 8 && i <= n - 8; i++) {
+    mpf = p[i] == 0xFF && p[i + 1] == 0xE2 && memcmp(p + i + 4, "MPF", 4) == 0;
+  }
+  return mpf && (contains(p, n, "urn:iso:std:iso:ts:21496:-1") ||
+                                    contains(p, n, "http://ns.adobe.com/hdr-gain-map/") ||
+                                    contains(p, n, "HDRGainMapVersion"));
 }
 
 static int patch_uint(const tiff_t *t, size_t e, uint32_t v) {
