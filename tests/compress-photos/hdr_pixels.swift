@@ -9,11 +9,7 @@
 // decoding (kCGImageSourceDecodeToSDR), which shows a gain map photo's SDR
 // image and tone-maps HDR pixels (with the image's tone curve, if it has
 // one), then the orientation.
-//
-// With --profile, writes instead the ICC profile of ImageIO's HDR decoding
-// (kCGImageSourceDecodeToHDR) of a gain map photo: on recent macOS it carries
-// the tone curve Apple derives from the gain map ('hdgm' tag).
-// usage: hdr_pixels [--sdr | --profile] IN OUT
+// usage: hdr_pixels [--sdr] IN OUT
 import CoreImage
 import Foundation
 import ImageIO
@@ -26,40 +22,10 @@ func fail(_ message: String) -> Never {
 var args = Array(CommandLine.arguments.dropFirst())
 let mode = args.first?.hasPrefix("--") == true ? args.removeFirst() : ""
 let sdr = mode == "--sdr"
-guard args.count == 2, ["", "--sdr", "--profile", "--hdr-file"].contains(mode) else {
-  fail("usage: hdr_pixels [--sdr | --profile | --hdr-file] IN OUT")
+guard args.count == 2, ["", "--sdr"].contains(mode) else {
+  fail("usage: hdr_pixels [--sdr] IN OUT")
 }
 let input = URL(fileURLWithPath: args[0])
-
-// Diagnostics: saves ImageIO's HDR decoding, with its own color space, as
-// OUT (.png or .heic), and prints how it is stored.
-if mode == "--hdr-file" {
-  guard let source = CGImageSourceCreateWithURL(input as CFURL, nil) else { fail("cannot read \(input.path)") }
-  let options = [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR] as CFDictionary
-  guard let image = CGImageSourceCreateImageAtIndex(source, 0, options) else { fail("no HDR decoding") }
-  let space = image.colorSpace
-  print("HDR decoding: \(image.width)x\(image.height), \(image.bitsPerComponent) bits/component, "
-    + "bitmapInfo \(image.bitmapInfo.rawValue), color space \(space?.name as String? ?? "?"), "
-    + "ICC \(space?.copyICCData().map { CFDataGetLength($0) } ?? 0) bytes")
-  let out = URL(fileURLWithPath: args[1])
-  let type = out.pathExtension.lowercased() == "png" ? "public.png" : "public.heic"
-  guard let dest = CGImageDestinationCreateWithURL(out as CFURL, type as CFString, 1, nil) else {
-    fail("cannot create \(out.path)")
-  }
-  CGImageDestinationAddImage(dest, image, nil)
-  if !CGImageDestinationFinalize(dest) { fail("cannot write \(out.path)") }
-  exit(0)
-}
-
-if mode == "--profile" {
-  guard let source = CGImageSourceCreateWithURL(input as CFURL, nil) else { fail("cannot read \(input.path)") }
-  let options = [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR] as CFDictionary
-  guard let image = CGImageSourceCreateImageAtIndex(source, 0, options),
-    let icc = image.colorSpace?.copyICCData() as Data?
-  else { fail("no HDR profile for \(input.path)") }
-  do { try icc.write(to: URL(fileURLWithPath: args[1])) } catch { fail("cannot write \(args[1])") }
-  exit(0)
-}
 
 // ImageIO's decoding (kCGImageSourceDecodeToSDR or ...ToHDR), oriented.
 func imageIOImage(_ url: URL, _ request: CFString) -> CIImage? {

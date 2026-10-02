@@ -160,9 +160,11 @@ original there too. A photo without that profile, such as one taken before iOS
 the original there. a-Shell then says `! Apple's HDR profile not found` (except
 for photos taken before iOS 18, which never have one).
 
-Size: in tests, an HDR JXL was between 2% smaller and 14% larger than the same
-photo converted as SDR. To convert HDR photos as SDR anyway, run `jxlbatch` in
-a-Shell with `--sdr`; the shortcut doesn't offer it.
+Size: with a smooth gain map, like an iPhone's, an HDR JXL is about as large as
+the same photo converted as SDR (in tests, 4% smaller to 14% larger). A gain
+map with fine, noisy detail costs more (up to about 1.5× in tests). To convert
+HDR photos as SDR anyway, run `jxlbatch` in a-Shell with `--sdr`; the shortcut
+doesn't offer it.
 
 Apps other than Apple's may show the HDR JXL without its highlights: few of
 them read HDR JPEG XL yet.

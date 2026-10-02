@@ -10,7 +10,8 @@
 // (which it may store as 10-bit HEIC). --hdr (HEIC, macOS 15 or later) adds an
 // ISO 21496-1 gain map, as iPhones do since iOS 18. In the HDR rendition,
 // linear values v become v * (1 + 3 v^2): white is 4 times as bright, dark
-// tones barely change.
+// tones barely change. The gain (1 + 3 v^2) is blurred, so the gain map is
+// smooth, like an iPhone's.
 import CoreGraphics
 import CoreImage
 import Foundation
@@ -78,6 +79,9 @@ if hdr {
     "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
     "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 0),
   ])
+    // Smooth, like an iPhone's gain map: per pixel, the scene's noise would
+    // go into the gain map and cost bytes no real photo spends.
+    .clampedToExtent().applyingGaussianBlur(sigma: 4).cropped(to: sdr.extent)
   let hdrImage = sdr.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: gain])
   let temporary = FileManager.default.temporaryDirectory
     .appendingPathComponent(UUID().uuidString + ".heic")
