@@ -231,11 +231,16 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
-- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 37 tiny HEICs
+- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 41 tiny HEICs
   covering these layouts, with expected results from an independent NumPy
-  implementation (`hdr_reference.py`). `make_hdr_fixtures.py` writes them, and
-  `src/selftest_hdr_heic.h` (the `--selftest` HDR photo); regenerating needs
-  ffmpeg with libx265, libheif's `heif-dec` and libjxl's `djxl`.
+  implementation (`hdr_reference.py`); `fixtures/heif/` holds 8 SDR photos in
+  HEIF layouts beyond an iPhone's (see "The photo" and "Derived photos" above).
+  `make_hdr_fixtures.py` writes them, and `src/selftest_hdr_heic.h` (the
+  `--selftest` HDR photo); regenerating needs ffmpeg with libx265, libheif's
+  `heif-dec` and libjxl's `djxl` and `cjxl`. Apple's rendering is compared with
+  Core Image test photos (`make_photo.swift`, ISO 21496-1 only); Apple can't
+  decode the synthetic older-format photos (`apple_older*.heic`), so for that
+  format only your own photos are compared with it (`test_samples.py`).
 
 ## 2. Layout
 

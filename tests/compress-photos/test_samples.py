@@ -6,8 +6,8 @@ ISO 21496-1 gain map (iPhone, iOS 18 or later), such as hdr/chinatown.heic,
 must become HDR and match Apple's HDR rendering, keeping Apple's HDR profile
 (tone curve) if it has one, and then look like the original on SDR screens too.
 So must a photo with Apple's older gain map (iOS 14 to 17), such as
-hdr/iphone13.heic. An HDR result must be at most 25% larger than an SDR one
-(--sdr). Other photos must match Apple's SDR rendering.
+hdr/2021-10-31.heic (iPhone 13). An HDR result must be at most 25% larger than
+an SDR one (--sdr). Other photos must match Apple's SDR rendering.
 """
 
 import numpy as np

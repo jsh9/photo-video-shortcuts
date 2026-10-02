@@ -7,14 +7,15 @@ gain maps; sRGB and unspecified color; a gain map brighter than PQ can store;
 Apple's older gain maps (before iOS 18); and gain maps that can't be used.
 
 Converted losslessly (-q 100), an HDR photo must match the reference math
-(hdr_reference.py) to 1/65535. A photo whose gain map can't be used must say
+(hdr_reference.py) to 1/65535. (Apple can't decode the synthetic photos with
+its older gain maps, so Apple's rendering of those is compared only with your
+own photos, in test_samples.py.) A photo whose gain map can't be used must say
 why, stay SDR, and be marked so that its original is kept; except a photo whose
 gain map isn't labeled as Apple's (not taken by an iPhone camera), whose
 original may be deleted.
 """
 
 import json
-import subprocess
 
 import numpy as np
 import photo_helpers as ph
@@ -24,7 +25,6 @@ FIXTURES = ph.HERE / 'fixtures' / 'hdr'
 CASES = json.loads((FIXTURES / 'cases.json').read_text())
 HDR = sorted(n for n, c in CASES.items() if 'note' not in c)
 NOT_USED = sorted(n for n, c in CASES.items() if 'note' in c)
-APPLE_OLDER = [n for n in HDR if n.startswith('apple_older')]
 # a sample for each build: rotation, crop, older gain map, 10-bit, channels
 EVERY_BUILD = ['o5', 'crop_o6', 'apple_older_o6', 'ten_bit', 'multichannel']
 
@@ -109,24 +109,3 @@ def test_every_build(encoder, expected, name, tmp_path):
     jxl, output, _ = convert(encoder, [name], tmp_path)[name]
     ours = decoded(jxl, tmp_path / 'ours.ppm')
     assert np.abs(ours - expected[name].astype(np.int64)).max() <= 1, output
-
-
-@pytest.mark.parametrize('name', APPLE_OLDER)
-def test_older_gain_map_matches_apple(converted, apple_hdr, name, tmp_path):
-    # Apple's own rendering of its older gain map, if Core Image reads it
-    # from this test photo (its maker notes are written by the generator).
-    try:
-        apple = apple_hdr(FIXTURES / f'{name}.heic')
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"Apple can't decode this test photo: {error.stderr}")
-
-    if ph.brightness(apple)[-1] < 1.2:
-        pytest.skip("Core Image doesn't render this photo's older gain map")
-
-    jxl, _, _ = converted[name]
-    ours = ph.jxl_hdr_pixels(jxl, tmp_path / 'ours.ppm')
-    assert ours.shape == apple.shape
-    np.testing.assert_allclose(
-        ph.brightness(ours), ph.brightness(apple), rtol=0.05, atol=0.01
-    )
-    assert ph.pq_psnr(apple, ours) >= ph.MIN_PQ_PSNR
