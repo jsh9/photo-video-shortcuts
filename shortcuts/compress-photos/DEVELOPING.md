@@ -138,12 +138,19 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
   is Apple's auxiliary image (above), half or a quarter of the photo's size,
   8-bit grey. Apple stores it like the primary image, without its transforms
-  (ImageIO writes `irot` 0 on it), so the primary's transforms apply to it, in
+  (ImageIO writes `irot` 0 on it, and gives a full-size gain map the primary's
+  crop but not its rotation), so the primary's transforms apply to it, in
   order: rotations and mirrors turn it, and a crop (`clap`) narrows the part of
   it that covers the photo (the *window*). Other gain maps use their own
   transforms, unless their shape shows they are stored like Apple's (a 90°
-  photo with an unturned gain map of the stored photo's shape). Monochrome
-  values are expanded if the stream says limited range.
+  photo with an unturned gain map of the stored photo's shape). Either way, the
+  gain map is decoded as stored and exactly one set of transforms applies.
+  Monochrome values are expanded if the stream says limited range.
+- **The photo** is decoded as stored too, then cropped and turned in RGB.
+  libheif would crop and turn it before converting to RGB, which shifts the
+  colors of a 4:2:0 photo cropped at an odd offset (up to 96 of 255 along the
+  border of a rotated 427-row photo); Apple's rendering doesn't depend on that.
+  Photos without a crop come out the same either way.
 - **The math**, at full strength (the alternate rendition): the window is
   enlarged to the photo's size (center-aligned bilinear). For an ISO gain map
   value `g`, the gain is `log2 G = min + (max - min) * g^(1/gamma)`, and the

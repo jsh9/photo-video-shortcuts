@@ -158,12 +158,15 @@ static void orient_window(double *win, double w, double h, int o) {
   memcpy(win, out, sizeof out);
 }
 
-// Applies the primary image's transforms, in order, to a gain map stored like
-// it: rotations and mirrors turn the gain map, and a crop narrows the part of
-// it (`win`) that covers the photo. Returns -1 if out of memory.
-static int follow_primary(struct heif_context *ctx, struct heif_image_handle *primary, image_t *gm, double *win) {
-  const heif_item_id item = heif_image_handle_get_item_id(primary);
-  int w = heif_image_handle_get_ispe_width(primary), h = heif_image_handle_get_ispe_height(primary);
+// Applies the transforms of the image item `owner`, in order, to a gain map
+// stored like it (gw x gh pixels spanning owner's stored size): rotations
+// and mirrors turn the gain map, and a crop narrows `win`, the part of it
+// covering the image. With gm NULL, only follows `win` and the size. Returns
+// -1 if out of memory.
+static int apply_transforms(struct heif_context *ctx, struct heif_image_handle *owner, image_t *gm, uint32_t *gw,
+                            uint32_t *gh, double *win) {
+  const heif_item_id item = heif_image_handle_get_item_id(owner);
+  int w = heif_image_handle_get_ispe_width(owner), h = heif_image_handle_get_ispe_height(owner);
   heif_property_id props[16];
   const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
   for (int i = 0; i < n; i++) {
@@ -182,13 +185,44 @@ static int follow_primary(struct heif_context *ctx, struct heif_image_handle *pr
     }
     const int o = transform_orientation(ctx, item, props[i]);
     if (!o) continue;
-    orient_window(win, gm->w, gm->h, o);
-    if (image_orient(gm, o) != 0) return -1;
+    orient_window(win, *gw, *gh, o);
+    if (gm && image_orient(gm, o) != 0) return -1;
     if (o == 6 || o == 8) {
       const int t = w;
       w = h;
       h = t;
+      const uint32_t g = *gw;
+      *gw = *gh;
+      *gh = g;
     }
+  }
+  return 0;
+}
+
+// Applies the photo's transforms (crop, rotation, mirroring), in order, to
+// its decoded RGB pixels. libheif would apply them before converting to RGB,
+// which shifts the colors of a 4:2:0 photo cropped at an odd offset (Apple's
+// rendering doesn't). Returns -1 if out of memory.
+static int transform_photo(struct heif_context *ctx, struct heif_image_handle *handle, image_t *img) {
+  const heif_item_id item = heif_image_handle_get_item_id(handle);
+  heif_property_id props[16];
+  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
+  for (int i = 0; i < n; i++) {
+    if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('c', 'l', 'a', 'p')) {
+      int left = 0, top = 0, right = 0, bottom = 0;
+      heif_item_get_property_transform_crop_borders(ctx, item, props[i], (int)img->w, (int)img->h, &left, &top,
+                                                    &right, &bottom);
+      if (left < 0 || top < 0 || right < 0 || bottom < 0 || (uint32_t)(left + right) >= img->w ||
+          (uint32_t)(top + bottom) >= img->h) {
+        continue;
+      }
+      img->data += (size_t)top * img->stride + (size_t)left * pixel_size(img);
+      img->w -= (uint32_t)(left + right);
+      img->h -= (uint32_t)(top + bottom);
+      continue;
+    }
+    const int o = transform_orientation(ctx, item, props[i]);
+    if (o && image_orient(img, o) != 0) return -1;
   }
   return 0;
 }
@@ -213,8 +247,9 @@ static int decode_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   heif_image_handle_get_preferred_decoding_colorspace(handle, &space, &chroma);
   const int mono = space == heif_colorspace_monochrome;
   const int wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;
-  // Default options apply the gain map's own transforms, if it has any.
+  // As stored: either its own transforms or the primary's are applied below.
   options = heif_decoding_options_alloc();
+  options->ignore_transformations = 1;
   struct heif_error e =
       mono ? heif_decode_image(handle, &image, heif_colorspace_monochrome, heif_chroma_monochrome, options)
            : heif_decode_image(handle, &image, heif_colorspace_RGB,
@@ -249,15 +284,21 @@ static int decode_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   heif_nclx_color_profile_free(nclx);
   image = NULL;
   // Apple stores its gain maps like the primary image, without its
-  // transforms (ImageIO writes 'irot' 0): the primary's transforms, crop
+  // transforms (ImageIO writes 'irot' 0, and a full-size gain map gets the
+  // primary's crop but not its rotation): the primary's transforms, crop
   // included, apply. Other gain maps have their own transforms, unless their
-  // shape shows they are stored like Apple's.
+  // shape shows they are stored like Apple's. Either way, one set applies.
+  const int apple = heif_item_has_aux_type(buf, len, id, APPLE_GAIN_MAP);
+  uint32_t gw = gm->w, gh = gm->h;
+  double own[4] = {0, 0, gm->w, gm->h};
+  apply_transforms(ctx, handle, NULL, &gw, &gh, own);  // its shape with its own transforms
+  const int follow = !is_turned(ctx, id) && (apple || !gainmap_same_shape(own[2] - own[0], own[3] - own[1], img_w, img_h));
+  gw = gm->w;
+  gh = gm->h;
   parts->window[0] = parts->window[1] = 0;
   parts->window[2] = gm->w;
   parts->window[3] = gm->h;
-  const int apple = heif_item_has_aux_type(buf, len, id, APPLE_GAIN_MAP);
-  if (!is_turned(ctx, id) && (apple || !gainmap_same_shape(gm->w, gm->h, img_w, img_h)) &&
-      follow_primary(ctx, primary, gm, parts->window) != 0) {
+  if (apply_transforms(ctx, follow ? primary : handle, gm, &gw, &gh, parts->window) != 0) {
     snprintf(note, note_len, "not enough memory");
     goto done;
   }
@@ -363,8 +404,9 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
     }
   }
 
-  // Default options apply the HEIF rotation/mirroring, so pixels come out upright.
+  // As stored; transform_photo turns it upright.
   options = heif_decoding_options_alloc();
+  options->ignore_transformations = 1;
   e = heif_decode_image(handle, &image, heif_colorspace_RGB, chroma, options);
   if (e.code != heif_error_Ok) {
     snprintf(err, err_len, "HEIF decoding failed (%s)", e.message);
@@ -386,11 +428,18 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   img->owner = image;  // the decoded image outlives the context
   img->owner_free = release_heif_image;
   image = NULL;
+  if (transform_photo(ctx, handle, img) != 0) {
+    snprintf(err, err_len, "out of memory");
+    goto done;
+  }
   apply_gain_map(ctx, buf, len, sdr, handle, img, color, hdr);
   rc = 0;
 
 done:
-  if (rc != 0) color_free(color);
+  if (rc != 0) {
+    image_free(img);
+    color_free(color);
+  }
   heif_decoding_options_free(options);
   if (image) heif_image_release(image);
   if (handle) heif_image_handle_release(handle);
