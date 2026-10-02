@@ -41,6 +41,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hdr_reference as ref  # noqa: E402
+import photo_helpers as ph  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / 'fixtures' / 'hdr'
@@ -587,30 +588,6 @@ def libjxl_profile(space):
         return icc.read_bytes()
 
 
-def with_tag(icc, signature, data):
-    """An ICC profile with one more tag (e.g. a placeholder 'hdgm')."""
-    count = struct.unpack('>I', icc[128:132])[0]
-    tags = {}
-    for i in range(count):
-        sig, off, size = struct.unpack(
-            '>4sII', icc[132 + 12 * i : 144 + 12 * i]
-        )
-        tags[sig] = icc[off : off + size]
-
-    tags[signature.encode()] = data
-    table_end = 132 + 12 * len(tags)
-    table, body = struct.pack('>I', len(tags)), b''
-    for sig, value in tags.items():
-        body += b'\0' * (-(table_end + len(body)) % 4)
-        table += struct.pack('>4sII', sig, table_end + len(body), len(value))
-        body += value
-
-    out = bytearray(icc[:128] + table + body)
-    out[0:4] = struct.pack('>I', len(out))
-    out[84:100] = bytes(16)
-    return bytes(out)
-
-
 # ---------------------------------------------------------------------------
 # Test photos
 
@@ -1123,8 +1100,8 @@ def write_selftest(profiles):
         gain, gplanes = write_photo(case, heic, profiles)
         pixels, headroom, _ = expected(case, heic, gain, gplanes, profiles)
         # Apple's HDR profile: Display P3 with PQ, plus a placeholder curve
-        hdr = with_tag(libjxl_profile('RGB_D65_DCI_Rel_PeQ'), 'hdgm',
-                       b'hdgm' + bytes(4) + bytes(range(32)))  # fmt: skip
+        hdr = ph.add_icc_tag(libjxl_profile('RGB_D65_DCI_Rel_PeQ'), 'hdgm',
+                             b'hdgm' + bytes(4) + bytes(range(32)))  # fmt: skip
         data = with_tmap_profile(heic, hdr, Path(d) / 'with_profile.heic')
 
     points = [(8, 8), (16, 14), (40, 24), (56, 40)]
@@ -1158,8 +1135,6 @@ def write_selftest(profiles):
 
 def with_tmap_profile(heic, icc, out):
     """The test photo's bytes, with ICC profile ``icc`` on its tmap item."""
-    import photo_helpers as ph
-
     ph.with_item_profile(heic, 'tmap', icc, out)
     return out.read_bytes()
 

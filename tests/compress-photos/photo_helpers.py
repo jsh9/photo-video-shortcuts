@@ -16,6 +16,16 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageOps, PngImagePlugin
 
+# SDR white in jxlbatch's PQ result (nits), and PQ's constants
+from hdr_reference import (  # noqa: E402
+    PQ_C1,
+    PQ_C2,
+    PQ_C3,
+    PQ_M1,
+    PQ_M2,
+    SDR_WHITE_NITS,
+)
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 TOOL = REPO / 'shortcuts' / 'compress-photos'
@@ -427,13 +437,10 @@ def ashell_commands(actions, values):
 # ---------------------------------------------------------------------------
 # HDR
 
-SDR_WHITE_NITS = 203  # SDR white in jxlbatch's PQ result
 # PSNR of HDR images compared as PQ signals (dB): quality 83 gives about 40
 # against the exact result; a misaligned gain map gives about 28, the SDR
 # photo about 30.
 MIN_PQ_PSNR = 35.0
-PQ_M1, PQ_M2 = 2610 / 16384, 2523 / 4096 * 128
-PQ_C1, PQ_C2, PQ_C3 = 3424 / 4096, 2413 / 4096 * 32, 2392 / 4096 * 32
 
 
 def _boxes(data, start=0, end=None):
