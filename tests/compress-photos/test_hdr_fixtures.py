@@ -109,3 +109,26 @@ def test_every_build(encoder, expected, name, tmp_path):
     jxl, output, _ = convert(encoder, [name], tmp_path)[name]
     ours = decoded(jxl, tmp_path / 'ours.ppm')
     assert np.abs(ours - expected[name].astype(np.int64)).max() <= 1, output
+
+
+def test_not_iphone_with_sdr_option(encoder, tmp_path):
+    # Its gain map isn't used either way, so --sdr doesn't keep the original.
+    ph.stage(tmp_path, [FIXTURES / 'not_iphone_o3.heic'])
+    result = encoder.run(['--sdr', '-q', '100', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 1 in ph.read_done(tmp_path)
+    assert not ph.kept_originals(tmp_path), result.stdout
+
+
+def test_batch_says_how_many_not_iphone(encoder, tmp_path):
+    # Said again at the end, as the per-photo notes scroll away before the
+    # shortcut offers the originals for deletion.
+    names = ['not_iphone_o3', 'not_iphone_o6']
+    ph.stage(tmp_path, [FIXTURES / f'{n}.heic' for n in names])
+    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    output = ' '.join(result.stdout.split())
+    assert (
+        '2 HDR photos saved as SDR (not an iPhone camera photo); their '
+        'originals are offered for deletion.'
+    ) in output

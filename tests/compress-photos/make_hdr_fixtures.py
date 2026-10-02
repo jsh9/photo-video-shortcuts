@@ -663,6 +663,10 @@ CASES += [
     Case('high_headroom', meta={
         **ISO_META, 'alt_headroom': 9.0,
         'channels': [{**ISO_META['channels'][0], 'max': 9.0}]}),
+    # the most jxlbatch accepts: 16 stops
+    Case('headroom_16_stops', meta={
+        **ISO_META, 'alt_headroom': 16.0,
+        'channels': [{**ISO_META['channels'][0], 'max': 16.0}]}),
     # Apple's older gain map (before iOS 18): maker notes, no 'tmap'
     Case('apple_older', tmap=False, maker=APPLE_MAKER, xmp=True),
     Case('apple_older_o6', o=6, tmap=False, maker=APPLE_MAKER, xmp=True),
@@ -682,6 +686,11 @@ CASES += [
          note="the gain map doesn't match the photo"),
     Case('not_used_malformed', tmap_data=b'\0\0\0\0\0',
          note='malformed gain map metadata'),
+    # more than 16 stops brighter: not a real photo's
+    Case('not_used_absurd_headroom', meta={
+        **ISO_META, 'alt_headroom': 130.0,
+        'channels': [{**ISO_META['channels'][0], 'max': 130.0}]},
+         note='malformed gain map metadata'),
     # the photo as a derived image of a turned source: its gain map's
     # alignment isn't defined
     Case('not_used_derived_photo', iden_source_turns=2,
@@ -692,6 +701,9 @@ CASES += [
     Case('not_iphone_o3', o=3, apple=False,
          note='not an iPhone camera photo', delete=True),
     Case('not_iphone_o6', o=6, apple=False,
+         note='not an iPhone camera photo', delete=True),
+    # whatever else is wrong with it
+    Case('not_iphone_malformed', apple=False, tmap_data=b'\0\0\0\0\0',
          note='not an iPhone camera photo', delete=True),
 ]  # fmt: skip
 

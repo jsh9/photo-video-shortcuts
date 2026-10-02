@@ -53,6 +53,11 @@
     "peak": 3.491194551155358,
     "primaries": "p3"
   },
+  "headroom_16_stops": {
+    "headroom": 65536.0,
+    "peak": 65536.62499046326,
+    "primaries": "p3"
+  },
   "high_headroom": {
     "headroom": 512.0,
     "peak": 512.0048732757568,
@@ -68,6 +73,11 @@
     "peak": 4.046875,
     "primaries": "p3"
   },
+  "not_iphone_malformed": {
+    "delete": true,
+    "note": "not an iPhone camera photo",
+    "primaries": "p3"
+  },
   "not_iphone_o3": {
     "delete": true,
     "note": "not an iPhone camera photo",
@@ -76,6 +86,10 @@
   "not_iphone_o6": {
     "delete": true,
     "note": "not an iPhone camera photo",
+    "primaries": "p3"
+  },
+  "not_used_absurd_headroom": {
+    "note": "malformed gain map metadata",
     "primaries": "p3"
   },
   "not_used_color": {
