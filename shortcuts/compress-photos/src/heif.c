@@ -158,42 +158,51 @@ static void orient_window(double *win, double w, double h, int o) {
   memcpy(win, out, sizeof out);
 }
 
-// Applies the transforms of the image item `owner`, in order, to a gain map
-// stored like it (gw x gh pixels spanning owner's stored size): rotations
-// and mirrors turn the gain map, and a crop narrows `win`, the part of it
-// covering the image. With gm NULL, only follows `win` and the size. Returns
-// -1 if out of memory.
-static int apply_transforms(struct heif_context *ctx, struct heif_image_handle *owner, image_t *gm, uint32_t *gw,
-                            uint32_t *gh, double *win) {
-  const heif_item_id item = heif_image_handle_get_item_id(owner);
-  int w = heif_image_handle_get_ispe_width(owner), h = heif_image_handle_get_ispe_height(owner);
+// Applies the transforms of image item `item` (w x h pixels as stored), in
+// the file's order: crops ('clap', cut to the image as libheif does),
+// rotations and mirrors. They apply to `img` if given, and to `gm` if given:
+// a gain map stored like the item, whose part covering it, `win`, a crop
+// narrows. Returns 0; -1 if out of memory; -2 if a crop leaves nothing
+// (libheif then refuses to decode the image).
+static int apply_transforms(struct heif_context *ctx, heif_item_id item, int w, int h, image_t *img, image_t *gm,
+                            double *win) {
   heif_property_id props[16];
   const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
   for (int i = 0; i < n; i++) {
     if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('c', 'l', 'a', 'p')) {
       int left = 0, top = 0, right = 0, bottom = 0;
       heif_item_get_property_transform_crop_borders(ctx, item, props[i], w, h, &left, &top, &right, &bottom);
-      if (w <= 0 || h <= 0 || left + right >= w || top + bottom >= h) continue;
-      const double sx = (win[2] - win[0]) / w, sy = (win[3] - win[1]) / h;
-      win[0] += left * sx;
-      win[2] -= right * sx;
-      win[1] += top * sy;
-      win[3] -= bottom * sy;
+      // negative: the crop reaches past that edge
+      left = left > 0 ? left : 0;
+      top = top > 0 ? top : 0;
+      right = right > 0 ? right : 0;
+      bottom = bottom > 0 ? bottom : 0;
+      if (left + right >= w || top + bottom >= h) return -2;
+      if (img) {
+        image_crop(img, (uint32_t)left, (uint32_t)top, (uint32_t)(w - left - right), (uint32_t)(h - top - bottom));
+      }
+      if (gm) {
+        const double sx = (win[2] - win[0]) / w, sy = (win[3] - win[1]) / h;
+        win[0] += left * sx;
+        win[2] -= right * sx;
+        win[1] += top * sy;
+        win[3] -= bottom * sy;
+      }
       w -= left + right;
       h -= top + bottom;
       continue;
     }
     const int o = transform_orientation(ctx, item, props[i]);
     if (!o) continue;
-    orient_window(win, *gw, *gh, o);
-    if (gm && image_orient(gm, o) != 0) return -1;
+    if (img && image_orient(img, o) != 0) return -1;
+    if (gm) {
+      orient_window(win, gm->w, gm->h, o);
+      if (image_orient(gm, o) != 0) return -1;
+    }
     if (o == 6 || o == 8) {
       const int t = w;
       w = h;
       h = t;
-      const uint32_t g = *gw;
-      *gw = *gh;
-      *gh = g;
     }
   }
   return 0;
@@ -247,38 +256,10 @@ static int alpha_is_plain(struct heif_context *ctx, const uint8_t *buf, size_t l
   return plain;
 }
 
-// Applies the photo's transforms (crop, rotation, mirroring), in order, to
-// its decoded RGB pixels. libheif would apply them before converting to RGB,
-// which shifts the colors of a 4:2:0 photo cropped at an odd offset (Apple's
-// rendering doesn't). Returns -1 if out of memory.
-static int transform_photo(struct heif_context *ctx, struct heif_image_handle *handle, image_t *img) {
-  const heif_item_id item = heif_image_handle_get_item_id(handle);
-  heif_property_id props[16];
-  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
-  for (int i = 0; i < n; i++) {
-    if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('c', 'l', 'a', 'p')) {
-      int left = 0, top = 0, right = 0, bottom = 0;
-      heif_item_get_property_transform_crop_borders(ctx, item, props[i], (int)img->w, (int)img->h, &left, &top,
-                                                    &right, &bottom);
-      if (left < 0 || top < 0 || right < 0 || bottom < 0 || (uint32_t)(left + right) >= img->w ||
-          (uint32_t)(top + bottom) >= img->h) {
-        continue;
-      }
-      image_crop(img, (uint32_t)left, (uint32_t)top, img->w - (uint32_t)(left + right),
-                 img->h - (uint32_t)(top + bottom));
-      continue;
-    }
-    const int o = transform_orientation(ctx, item, props[i]);
-    if (o && image_orient(img, o) != 0) return -1;
-  }
-  return 0;
-}
-
 // Decodes the gain map, upright, and the part of it that covers the upright
-// photo (img_w x img_h).
-static int decode_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, struct heif_image_handle *primary,
-                           heif_item_id id, uint32_t img_w, uint32_t img_h, hdr_parts_t *parts, char *note,
-                           size_t note_len) {
+// photo.
+static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *primary, heif_item_id id,
+                           hdr_parts_t *parts, char *note, size_t note_len) {
   image_t *gm = &parts->gain_map;
   struct heif_image_handle *handle = NULL;
   struct heif_image *image = NULL;
@@ -331,22 +312,17 @@ static int decode_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   heif_nclx_color_profile_free(nclx);
   image = NULL;
   // Apple stores its gain maps like the primary image, without its
-  // transforms (ImageIO writes 'irot' 0, and a full-size gain map gets the
-  // primary's crop but not its rotation): the primary's transforms, crop
-  // included, apply. Other gain maps have their own transforms, unless their
-  // shape shows they are stored like Apple's. Either way, one set applies.
-  const int apple = heif_item_has_aux_type(buf, len, id, APPLE_GAIN_MAP);
-  uint32_t gw = gm->w, gh = gm->h;
-  double own[4] = {0, 0, gm->w, gm->h};
-  apply_transforms(ctx, handle, NULL, &gw, &gh, own);  // its shape with its own transforms
-  const int follow = !is_turned(ctx, id) && (apple || !gainmap_same_shape(own[2] - own[0], own[3] - own[1], img_w, img_h));
-  gw = gm->w;
-  gh = gm->h;
+  // transforms ('irot' 0, and a full-size gain map gets the primary's crop
+  // but not its rotation): the primary's transforms, crop included, apply.
+  // A gain map turned itself has its own. Either way, one set applies.
+  struct heif_image_handle *owner = is_turned(ctx, id) ? handle : primary;
   parts->window[0] = parts->window[1] = 0;
   parts->window[2] = gm->w;
   parts->window[3] = gm->h;
-  if (apply_transforms(ctx, follow ? primary : handle, gm, &gw, &gh, parts->window) != 0) {
-    snprintf(note, note_len, "not enough memory");
+  const int t = apply_transforms(ctx, heif_image_handle_get_item_id(owner), heif_image_handle_get_ispe_width(owner),
+                                 heif_image_handle_get_ispe_height(owner), NULL, gm, parts->window);
+  if (t != 0) {
+    snprintf(note, note_len, t == -2 ? "unsupported image layout" : "not enough memory");
     goto done;
   }
   rc = 0;
@@ -377,6 +353,15 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
     return;
   }
   if (iso < 0) return;
+  // Only Apple's gain maps, as iPhones label them (their auxiliary image
+  // type), are known to line up with the photo as below. Others aren't
+  // guessed at: the photo stays SDR, and its original may still be deleted
+  // (the owner's choice).
+  if (!heif_item_has_aux_type(buf, len, gain_map_id, APPLE_GAIN_MAP)) {
+    snprintf(hdr->note, sizeof hdr->note, "not an iPhone camera photo");
+    hdr->not_iphone = 1;
+    return;
+  }
   // Lining the gain map up with the photo needs the transforms of both, so
   // each must have only its own (e.g. not be derived from a turned image).
   if (!own_transforms || !only_own_transforms(ctx, gain_map_id, 0)) {
@@ -388,8 +373,7 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
     return;
   }
   const int primaries = hdr_check(color, &parts.meta, hdr);
-  if (!primaries ||
-      decode_gain_map(ctx, buf, len, primary, gain_map_id, img->w, img->h, &parts, hdr->note, sizeof hdr->note) != 0) {
+  if (!primaries || decode_gain_map(ctx, primary, gain_map_id, &parts, hdr->note, sizeof hdr->note) != 0) {
     return;
   }
   // Apple's HDR profile: ISO 21496-1 puts it on the 'tmap' item; it is looked
@@ -457,7 +441,7 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
     }
   }
 
-  // As stored, and transform_photo turns it upright; unless an image it is
+  // As stored, and apply_transforms turns it upright; unless an image it is
   // derived from, or its transparency image, has transforms too, which
   // libheif then applies (all of them).
   const heif_item_id photo = heif_image_handle_get_item_id(handle);
@@ -485,8 +469,9 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   img->owner = image;  // the decoded image outlives the context
   img->owner_free = release_heif_image;
   image = NULL;
-  if (own_transforms && transform_photo(ctx, handle, img) != 0) {
-    snprintf(err, err_len, "out of memory");
+  const int t = own_transforms ? apply_transforms(ctx, photo, (int)img->w, (int)img->h, img, NULL, NULL) : 0;
+  if (t != 0) {
+    snprintf(err, err_len, t == -2 ? "HEIF decoding failed (invalid crop)" : "out of memory");
     goto done;
   }
   apply_gain_map(ctx, buf, len, sdr, own_transforms, handle, img, color, hdr);

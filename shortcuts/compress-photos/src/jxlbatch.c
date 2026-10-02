@@ -405,9 +405,11 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   // 0.11.2 and 0.12.0 do; test_hdr_profile.py checks it.)
   info.uses_original_profile = lossless || hdr_icc ? JXL_TRUE : JXL_FALSE;
   info.orientation = JXL_ORIENT_IDENTITY;  // pixels are already upright
-  // How bright the photo gets, in nits (by default PQ's peak, 10,000 nits,
-  // which Apple ignores).
-  if (pq) info.intensity_target = em->intensity_target > 0 ? (float)em->intensity_target : 10000;
+  // How bright an HDR photo gets, in nits: at most PQ's peak, 10,000 nits
+  // (its brighter values are clipped there, and libjxl rejects targets above
+  // 65,504). Left at 0 otherwise: libjxl then uses the default for the color
+  // it ends up storing (10,000 nits for PQ, 255 for SDR).
+  if (pq && em->intensity_target > 0) info.intensity_target = (float)fmin(em->intensity_target, 10000);
   if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
     FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
   }
@@ -787,10 +789,11 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
   // "file|index|delete or keep|name": the shortcut saves `file` as `name`,
   // and after saving may delete the photo at position `index` of the ones it
-  // staged, unless marked "keep": the original had HDR that the JXL lacks.
+  // staged, unless marked "keep": the original had HDR that the JXL lacks
+  // (except a gain map not labeled as Apple's: the owner's choice).
   // (Older shortcuts read only the first and last fields.)
   // No trailing newline: Shortcuts' Split Text would yield an empty item.
-  const int keep = hdr.has_gain_map && !(hdr.headroom > 0);
+  const int keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
   fprintf(batch->done_file, "%s%s|%u|%s|%s.jxl", batch->done ? "\n" : "", name_out, job->index,
           keep ? "keep" : "delete", job->name);
   fflush(batch->done_file);

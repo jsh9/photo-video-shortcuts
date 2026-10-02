@@ -39,6 +39,7 @@ typedef struct {
   double headroom;   // > 0: the image is HDR, with this headroom (relative to SDR white)
   double peak;       // its brightest pixels can get this bright (relative to SDR white)
   char note[128];    // why the photo's gain map wasn't used, if it wasn't
+  int not_iphone;    // unused as not labeled as Apple's: the original may still be deleted
   char warning[128];  // about an HDR result, e.g. that Apple's HDR profile is missing
 } hdr_info_t;
 

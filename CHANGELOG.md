@@ -16,19 +16,27 @@ encoder. Every release includes the current files of all shortcuts.
     profile (iOS 18 and later), with the tone curve Apple uses to dim the photo
     on screens that can't show all of it (including SDR screens), so it looks
     like the original there too; a-Shell says so when a photo has none.
+  - Only gain maps an iPhone camera labels as Apple's are used. Other HDR HEICs
+    (e.g. saved by other apps or on a Mac) are converted as SDR, with "HDR gain
+    map not used (not an iPhone camera photo)" in a-Shell, and their originals
+    are still offered for deletion.
   - Originals whose HDR isn't in the JPEG XL are not offered for deletion: a
     photo whose gain map can't be used (converted as SDR, with a note "HDR gain
-    map not used" in a-Shell), an HDR photo sent as JPEG (with a note), and
-    `--sdr`. `jxl_done.txt` lines are now `file|index|delete or keep|name`.
-    **Update both the shortcuts and `jxlbatch.wasm`**: an older shortcut offers
-    every converted original for deletion, and the new shortcut with an older
-    `jxlbatch.wasm` offers none.
+    map not used" in a-Shell; except the photos above), an HDR photo sent as
+    JPEG (with a note), and `--sdr`. `jxl_done.txt` lines are now
+    `file|index|delete or keep|name`. **Update both the shortcuts and
+    `jxlbatch.wasm`**: an older shortcut offers every converted original for
+    deletion, and the new shortcut with an older `jxlbatch.wasm` offers none.
   - `jxlbatch --sdr` converts HDR photos as SDR (the shortcuts don't use it).
   - `jxlbatch --selftest` also checks HDR decoding and that Apple's HDR profile
     is kept.
 - Changed
   - HDR photos are computed a region at a time as the encoder reads them, so a
     48 MP HDR photo takes about as much memory as an SDR one.
+  - HEIF photos are cropped and turned after conversion to RGB, as Apple shows
+    them, so photos cropped at an odd offset come out slightly differently
+    along their edges (libheif cropped first, which shifted the colors of 4:2:0
+    photos there).
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/5
 

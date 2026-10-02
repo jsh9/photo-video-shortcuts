@@ -710,7 +710,12 @@ def build_compress(sample):
         count = save_results(b, photos)
         b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
         b.notification('JPEG XL', 'Saved ', count, ' photo(s) to Photos.')
-        b.delete_photos(variable('Converted'))
+        # Empty when every original is kept (or with an older jxlbatch).
+        b.if_has_value(
+            variable('Converted'),
+            lambda: b.delete_photos(variable('Converted')),
+            lambda: None,
+        )
 
     b.if_has_value(SHORTCUT_INPUT, from_share_sheet, from_picker)
     return b.actions

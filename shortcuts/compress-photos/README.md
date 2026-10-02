@@ -41,7 +41,8 @@ See [Installation](../../README.md#1-installation) in the main README.
     HEIF is used. When the JXL copies are saved, it **offers to delete the
     originals**, only those whose JXL was saved and has everything the JXL can
     keep. An HDR photo whose JXL lacks its HDR (see
-    [HDR photos](#31-hdr-photos)) is never offered for deletion.
+    [HDR photos](#31-hdr-photos)) is not offered for deletion, except an HDR
+    photo not taken by an iPhone camera, whose HDR isn't converted.
     - iOS asks you to confirm ("Delete N photos?"). Tap Don't Allow to keep
       them.
     - Deleted photos go to Recently Deleted for 30 days.
@@ -151,6 +152,13 @@ Both of Apple's gain map formats are converted:
 - **iOS 14 to 17** (iPhone 12 and later): Apple's older gain map, applied the
   way Apple documents it ("Applying Apple HDR effect to your photos").
 
+Only gain maps an iPhone camera labels as Apple's are used: for those, how the
+gain map lines up with a rotated or cropped photo is known. An HDR HEIC from
+elsewhere (for example saved by another app, or on a Mac) is converted as SDR,
+and a-Shell says
+`! HDR gain map not used (not an iPhone camera photo); saved as SDR`. **Its
+original is still offered for deletion**, and deleting it loses its HDR.
+
 On a screen that can't show all of that brightness (an SDR screen, a dimmer
 setting, or HDR turned off), Apple dims the photo with a tone curve it derives
 from the gain map. Since iOS 18, iPhones store that curve in the HEIC, in an
@@ -172,27 +180,29 @@ them read HDR JPEG XL yet.
 **Originals kept:** when the JXL lacks the original's HDR, the shortcut doesn't
 offer to delete that original, and a-Shell says how many were kept. That
 happens when a photo's gain map can't be used (a note in a-Shell, see
-[Troubleshooting](#4-troubleshooting)), for HDR photos sent as JPEG, and with
-`--sdr`. This needs both the shortcuts and `jxlbatch.wasm` from version 0.2.0:
-an older shortcut offers every converted original for deletion, and a newer
-shortcut with an older `jxlbatch.wasm` offers none.
+[Troubleshooting](#4-troubleshooting)), except for a photo not taken by an
+iPhone camera (see above), for HDR photos sent as JPEG, and with `--sdr`. This
+needs both the shortcuts and `jxlbatch.wasm` from version 0.2.0: an older
+shortcut offers every converted original for deletion, and a newer shortcut
+with an older `jxlbatch.wasm` offers none.
 
 Photos may list the JXL copies under **Duplicates**. Merging a duplicate pair
 keeps only one file, so check which one before you merge.
 
 ## 4. Troubleshooting
 
-| Symptom                                                                        | Fix                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a-Shell: `jxlbatch: command not found`                                         | `jxlbatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                                                                            |
-| a-Shell stops after the photos, nothing is saved                               | Run **JXL-Import** from the Shortcuts app; it saves whatever finished.                                                                                                                                                |
-| "File jxl_done.txt not found"                                                  | No photo converted. Look in a-Shell for the error on each photo. In *Compress Photos*, it also happens when started outside the Shortcuts app (see [Use](#2-use)).                                                    |
-| a-Shell: "cannot find jxl_job.txt"                                             | a-Shell ran the shortcut outside its Shortcuts folder, which version 0.1.0 does when it has to launch a-Shell. Update the shortcuts and `jxlbatch.wasm`.                                                              |
-| a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                                                                             |
-| a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                                                                      |
-| A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                         |
-| A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                  |
-| `! HDR gain map not used (...)` in a-Shell                                     | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB. Its original isn't offered for deletion. Please report it with the reason shown. |
-| `! Apple's HDR profile not found` or `not used` in a-Shell                     | The JXL is HDR, but without Apple's tone curve for dimmer screens, so it may look slightly darker than the original there. Please report `not used` with the photo.                                                   |
-| `! HDR not kept (JPEG with a gain map ...)` in a-Shell                         | Photos sent this HDR photo as JPEG. Set Send As to Current in the share sheet (see [Use](#2-use)). The original isn't offered for deletion.                                                                           |
-| `! orientation check` warning in a-Shell                                       | The converted pixels didn't match the original's orientation. Please report it with the photo's EXIF.                                                                                                                 |
+| Symptom                                                                        | Fix                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| a-Shell: `jxlbatch: command not found`                                         | `jxlbatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                                                                                                       |
+| a-Shell stops after the photos, nothing is saved                               | Run **JXL-Import** from the Shortcuts app; it saves whatever finished.                                                                                                                                                                           |
+| "File jxl_done.txt not found"                                                  | No photo converted. Look in a-Shell for the error on each photo. In *Compress Photos*, it also happens when started outside the Shortcuts app (see [Use](#2-use)).                                                                               |
+| a-Shell: "cannot find jxl_job.txt"                                             | a-Shell ran the shortcut outside its Shortcuts folder, which version 0.1.0 does when it has to launch a-Shell. Update the shortcuts and `jxlbatch.wasm`.                                                                                         |
+| a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                                                                                                        |
+| a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                                                                                                 |
+| A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                                                    |
+| A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                                             |
+| `! HDR gain map not used (...)` in a-Shell                                     | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB. Its original isn't offered for deletion. Please report it with the reason shown.                            |
+| `! HDR gain map not used (not an iPhone camera photo)` in a-Shell              | The HDR photo wasn't taken by an iPhone camera (see [HDR photos](#31-hdr-photos)), so it was converted as SDR. Its original is still offered for deletion; to keep its HDR, tap Don't Allow when asked (this keeps the whole batch's originals). |
+| `! Apple's HDR profile not found` or `not used` in a-Shell                     | The JXL is HDR, but without Apple's tone curve for dimmer screens, so it may look slightly darker than the original there. Please report `not used` with the photo.                                                                              |
+| `! HDR not kept (JPEG with a gain map ...)` in a-Shell                         | Photos sent this HDR photo as JPEG. Set Send As to Current in the share sheet (see [Use](#2-use)). The original isn't offered for deletion.                                                                                                      |
+| `! orientation check` warning in a-Shell                                       | The converted pixels didn't match the original's orientation. Please report it with the photo's EXIF.                                                                                                                                            |

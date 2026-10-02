@@ -135,23 +135,35 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   `-20 * t48 + 1.8` (`t48 <= 0.01`) or `-0.101 * t48 + 1.601` when `t33 < 1`,
   else `-70 * t48 + 3` or `-0.303 * t48 + 2.303`; the headroom is
   `2^max(stops, 0)`. Without those tags the photo stays SDR.
+- **Only Apple's gain maps are used**: those an iPhone labels with Apple's
+  auxiliary image type (`auxC` `urn:com:apple:photo:2020:aux:hdrgainmap`, on
+  ISO 21496-1 gain maps too). For those, how the gain map lines up with a
+  turned or cropped photo is known (below); for others it isn't, and `jxlbatch`
+  doesn't guess. ImageIO, for example, writes ISO gain maps without the label
+  and without transforms of their own, and a gain map's shape can't tell
+  whether a 180° turn, a mirror or a square photo's rotation applies to it. So
+  such a photo is converted as SDR with
+  `! HDR gain map not used (not an iPhone camera photo)`, and, by the owner's
+  choice, its original may still be deleted (`delete` in `jxl_done.txt`).
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
   is Apple's auxiliary image (above), half or a quarter of the photo's size,
   8-bit grey. Apple stores it like the primary image, without its transforms
-  (ImageIO writes `irot` 0 on it, and gives a full-size gain map the primary's
-  crop but not its rotation), so the primary's transforms apply to it, in
-  order: rotations and mirrors turn it, and a crop (`clap`) narrows the part of
-  it that covers the photo (the *window*). Other gain maps use their own
-  transforms, unless their shape shows they are stored like Apple's (a 90°
-  photo with an unturned gain map of the stored photo's shape). Either way, the
-  gain map is decoded as stored and exactly one set of transforms applies.
-  Monochrome values are expanded if the stream says limited range.
+  (`irot` 0 on it, and a full-size gain map gets the primary's crop but not its
+  rotation), so the primary's transforms apply to it, in order: rotations and
+  mirrors turn it, and a crop (`clap`) narrows the part of it that covers the
+  photo (the *window*). A gain map with a rotation or mirror of its own uses
+  its own transforms instead. Either way, the gain map is decoded as stored and
+  exactly one set of transforms applies. Monochrome values are expanded if the
+  stream says limited range.
 - **The photo** is decoded as stored too, then cropped and turned in RGB.
   libheif would crop and turn it before converting to RGB, which shifts the
   colors of a 4:2:0 photo cropped at an odd offset (up to 96 of 255 along the
   border of a rotated 427-row photo); Apple's rendering doesn't depend on that.
   Photos without a crop come out the same either way. The transforms apply in
-  the file's order, whatever it is (a crop may follow the rotation).
+  the file's order, whatever it is (a crop may follow the rotation). As in
+  libheif, a crop reaching past the photo's edges is cut to the photo, and one
+  that leaves nothing fails the photo (`invalid crop`); the gain map's window
+  follows the same crop.
 - **Derived photos** (e.g. an `iden` image of another image): decoding as
   stored only works when the photo's own transforms are its only ones, since
   libheif's `ignore_transformations` also skips those of the images it is
@@ -173,7 +185,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   time, as libjxl reads its chunks, so there is no 16-bit copy of the photo. It
   is encoded with libjxl's usual lossy settings, as PQ (CICP), with
   `intensity_target` set to the photo's peak (203 nits times the largest gain
-  the gain map can give), not PQ's 10,000 nits.
+  the gain map can give), not PQ's 10,000 nits; at most 10,000 nits, where PQ
+  values clip (libjxl rejects targets above 65,504). Other images leave it to
+  libjxl, which picks it by the color stored: 10,000 nits for PQ (e.g. a PNG
+  with a PQ `cICP` chunk), 255 for SDR.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an
@@ -181,11 +196,11 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   2094-50) Apple dims the HDR photo with on screens that can't show all of it,
   down to SDR. Without it, Apple assumes a 4.926× peak and dims a PQ image its
   standard way, so the JXL looks slightly darker than the original there.
-  `jxlbatch` reads the profile from the `tmap` item (or the gain map), with its
-  own small reader of the `meta` boxes because libheif gives profiles of images
-  only, and stores it instead of the CICP label when libjxl reads it as the
-  pixels' color space (same primaries, D65, PQ). The pixels don't change; the
-  profile costs about 3 KB. Otherwise a-Shell says
+  `jxlbatch` reads the profile from the `tmap` item, else the gain map, with
+  its own small reader of the `meta` boxes because libheif gives profiles of
+  images only, and stores the first one that libjxl reads as the pixels' color
+  space (same primaries, D65, PQ) instead of the CICP label. The pixels don't
+  change; the profile costs about 3 KB. Otherwise a-Shell says
   `! Apple's HDR profile not found` or `not used (unrecognized format)`. Photos
   with Apple's older gain map never have one.
 - **Keeping the profile in a lossy file** relies on libjxl's behavior: in
@@ -203,13 +218,16 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
   sRGB with the sRGB curve, a gain map in another color space, a gain map whose
   shape doesn't match, malformed metadata, other metadata versions, an older
-  gain map without its maker notes.
+  gain map without its maker notes, a gain map not labeled as Apple's (see
+  above).
 - **Kept originals.** Each `jxl_done.txt` line is
   `file|index|delete or keep|name`. `keep` means the original had HDR that the
-  JXL lacks (a gain map that wasn't used, an HDR JPEG, which `jxlbatch` only
-  detects, or `--sdr`), and the shortcut doesn't offer it for deletion. Older
-  shortcuts read only the first and last fields; a new shortcut with an older
-  `jxlbatch` sees the name as the third field and keeps every original.
+  JXL lacks (a gain map that wasn't used, except one not labeled as Apple's; an
+  HDR JPEG, which `jxlbatch` only detects; or `--sdr`), and the shortcut
+  doesn't offer it for deletion. When every original is `keep`, the shortcut
+  skips Delete Photos. Older shortcuts read only the first and last fields; a
+  new shortcut with an older `jxlbatch` sees the name as the third field and
+  keeps every original.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
