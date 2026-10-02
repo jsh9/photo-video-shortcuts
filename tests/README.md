@@ -40,6 +40,8 @@ They need:
   `build-native.sh` for the native build's tests);
 - Homebrew `wasmtime exiftool jpeg-xl` (`djxl`, `jxlinfo`), plus `sips`,
   `swiftc` and `dash`, which come with macOS and Xcode.
+- Only to regenerate the HDR test photos (`make_hdr_fixtures.py`): ffmpeg with
+  libx265 and libheif's `heif-dec` (Homebrew `ffmpeg libheif`).
 
 A test whose build or tool is missing is skipped on your Mac and fails in CI.
 
@@ -47,18 +49,19 @@ A test whose build or tool is missing is skipped on your Mac and fails in CI.
 
 `compress-photos/`:
 
-| File                    | What it checks                                                                                                                                                                                                                                     |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_shortcuts.py`     | the generated shortcuts: blocks and variables, a-Shell actions, quality presets, version in the notes, cleanup                                                                                                                                     |
-| `test_encoder_cli.py`   | `jxlbatch` (SIMD and scalar WebAssembly, native): version, self-test, arguments, batches with failed photos, the `jxl_done.txt` format                                                                                                             |
-| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, HDR, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                                                                 |
-| `test_hdr.py`           | HDR photos with an ISO 21496-1 gain map (as iPhones write since iOS 18) become 16-bit PQ JPEG XL that matches Apple's own HDR rendering, upright and in every build; photos without a gain map stay SDR                                            |
-| `test_hdr_profile.py`   | Apple's HDR color profile (with its tone curve) in an HDR photo's HEIC is kept byte for byte in the JPEG XL, with unchanged pixels, in every build; profiles that don't describe the pixels are ignored                                            |
-| `test_xmp.py`           | ordinary and extended JPEG XMP across all three builds: long descriptions, reordered fragments, namespaces, arrays, structures, duplicate/conflicting properties, invalid packets and orientation                                                  |
-| `test_orientation.py`   | all 8 EXIF orientations become upright pixels, exactly                                                                                                                                                                                             |
-| `test_memory.py`        | a 24 MP photo at low quality, and 24 MP and 48 MP HDR photos, stay well under the memory iOS allows a-Shell                                                                                                                                        |
-| `test_shortcut_flow.py` | the shortcut's a-Shell commands run as a-Shell runs them (modeled on its source), with a-Shell already open or launched by the shortcut, and the retry when its engine is still starting; then JXL-Import's reading of the results and the cleanup |
-| `test_samples.py`       | your own photos, if any (see below)                                                                                                                                                                                                                |
+| File                    | What it checks                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_shortcuts.py`     | the generated shortcuts: blocks and variables, a-Shell actions, quality presets, version in the notes, cleanup, originals marked "keep" not offered for deletion                                                                                                                                                                                                                          |
+| `test_encoder_cli.py`   | `jxlbatch` (SIMD and scalar WebAssembly, native): version, self-test (HDR included), arguments, `--sdr`, batches with failed photos, the `jxl_done.txt` format                                                                                                                                                                                                                            |
+| `test_conversion.py`    | end to end: photos written like an iPhone's (HEIC and JPEG, rotated, Display P3, 10-bit, HDR, PNG with transparency) keep their EXIF, XMP and what Photos reads, and look the same                                                                                                                                                                                                        |
+| `test_hdr.py`           | HDR photos with an ISO 21496-1 gain map (as iPhones write since iOS 18) become 16-bit PQ JPEG XL that matches Apple's own HDR rendering, upright and in every build, with their peak brightness, at most 25% larger than with `--sdr`, and looking like the original on SDR screens; `--sdr` keeps the original; photos without a gain map stay SDR                                       |
+| `test_hdr_profile.py`   | Apple's HDR color profile (with its tone curve) in an HDR photo's HEIC is kept byte for byte in the JPEG XL, with unchanged pixels, in every build; profiles that don't describe the pixels are ignored, and a missing or ignored profile is noted                                                                                                                                        |
+| `test_hdr_fixtures.py`  | the committed HDR test photos (`fixtures/hdr/`, written by `make_hdr_fixtures.py`): every orientation, crops, grids, 10-bit, RGB, multichannel and limited-range gain maps, gain maps that aren't Apple's, and Apple's older gain maps (iOS 14 to 17) match the independent NumPy math in `hdr_reference.py` to 1/65535; each gain map that can't be used says why and keeps its original |
+| `test_xmp.py`           | ordinary and extended JPEG XMP across all three builds: long descriptions, reordered fragments, namespaces, arrays, structures, duplicate/conflicting properties, invalid packets and orientation                                                                                                                                                                                         |
+| `test_orientation.py`   | all 8 EXIF orientations become upright pixels, exactly                                                                                                                                                                                                                                                                                                                                    |
+| `test_memory.py`        | a 24 MP photo at low quality, and 24 MP and 48 MP HDR photos, stay well under the memory iOS allows a-Shell; HDR takes at most 15% more than SDR                                                                                                                                                                                                                                          |
+| `test_shortcut_flow.py` | the shortcut's a-Shell commands run as a-Shell runs them (modeled on its source), with a-Shell already open or launched by the shortcut, and the retry when its engine is still starting; then JXL-Import's reading of the results and the cleanup                                                                                                                                        |
+| `test_samples.py`       | your own photos, if any (see below)                                                                                                                                                                                                                                                                                                                                                       |
 
 `scripts/`: release manifests, missing/empty/stale outputs, signed and unsigned
 ZIP contents and CRCs, encoder versions, mocked GitHub baselines, per-tool
@@ -69,9 +72,11 @@ version comparisons and changelog checks.
 Put your own test photos in `tests/samples/compress-photos/` (any subfolders).
 `test_samples.py` runs the end-to-end checks on each of them, including the
 primary photo's namespace-qualified XMP properties with structured values. A
-photo with an ISO 21496-1 gain map must become HDR and match Apple's HDR
-rendering. HEIF auxiliary images (depth, segmentation and gain maps) have their
-own metadata; those packets are not mixed into the primary photo's properties.
-Only orientation normalization and removal of `HasExtendedXMP` are allowed;
-without any samples, it is skipped. That folder is not committed: personal
-photos often contain GPS locations.
+photo with an ISO 21496-1 gain map (iOS 18 and later) or Apple's older gain map
+(iOS 14 to 17) must become HDR, match Apple's HDR rendering, keep Apple's HDR
+profile if it has one (and then look like the original on SDR screens), and be
+at most 25% larger than with `--sdr`. HEIF auxiliary images (depth,
+segmentation and gain maps) have their own metadata; those packets are not
+mixed into the primary photo's properties. Only orientation normalization and
+removal of `HasExtendedXMP` are allowed; without any samples, it is skipped.
+That folder is not committed: personal photos often contain GPS locations.

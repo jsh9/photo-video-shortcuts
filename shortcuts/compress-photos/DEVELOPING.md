@@ -39,7 +39,7 @@ then, from the share sheet:
 or, from the picker:
    a-Shell switches back to Compress Photos, which saves the JXLs,
    adds each to its original's albums, then asks to delete the
-   originals whose JXL was saved
+   originals whose JXL was saved (and has their HDR)
 ```
 
 `jxlbatch` decodes the original itself (HEIF with libheif and libde265; JPEG
@@ -53,11 +53,15 @@ can rotate a photo twice. 10-bit HEIF photos are kept at 10 bits.
 
 Encoding settings match `cjxl -q Q -e E`, with one difference: libjxl's
 streaming mode is always on, and the image is handed to it in chunks rather
-than copied. That keeps a 24 MP photo at about 0.5 GB and a 48 MP one at about
-0.7 GB, at any quality. By default, libjxl at effort 7 turns streaming off
-below quality ~70 and holds the whole image, which takes about 2.7 GB for 24
-MP, more than iOS lets a-Shell use. The cost is files about 2.5% larger at
-those qualities, with the same visual quality (SSIMULACRA2).
+than copied. libjxl reads those chunks region by region only when it also
+writes through an output processor (`JxlEncoderSetOutputProcessor`); with
+`JxlEncoderProcessOutput` it asks for the whole image at once. So `jxlbatch`
+gives it one, except for images with alpha (a packed copy, which is rare). That
+keeps a 24 MP photo at about 0.5 GB and a 48 MP one at about 0.55 GB, at any
+quality, HDR included. By default, libjxl at effort 7 turns streaming off below
+quality ~70 and holds the whole image, which takes about 2.7 GB for 24 MP, more
+than iOS lets a-Shell use. The cost is files about 2.5% larger at those
+qualities, with the same visual quality (SSIMULACRA2).
 
 ### 1.1. XMP
 
@@ -113,68 +117,102 @@ their originals. The CLI and job/result formats stay the same.
 
 ### 1.2. HDR
 
-A HEIC with an ISO 21496-1 gain map, as iPhones write since iOS 18, becomes an
-HDR JPEG XL: Photos and ImageIO show HDR stored in the pixels as PQ, but ignore
-a JPEG XL gain map (`jhgm` box). `src/heif.c` and `src/gainmap.c`:
+An HDR HEIC from an iPhone becomes an HDR JPEG XL: Photos and ImageIO show HDR
+stored in the pixels as PQ, but ignore a JPEG XL gain map (`jhgm` box).
+`src/heif.c` finds and decodes the parts; `src/hdr.c` decides whether they can
+be used (independent of the file format); `src/gainmap.c` has the math.
 
-- **Finding it.** libheif doesn't read the `tmap` item (the gain map's
-  metadata), so `jxlbatch` finds it with libheif's generic item API: a `tmap`
-  whose `dimg` inputs are the primary image and the gain map. Its data is
-  parsed per ISO 21496-1 (version 0).
+- **ISO 21496-1 gain maps** (iOS 18 and later). libheif doesn't read the `tmap`
+  item (the gain map's metadata), so `jxlbatch` finds it with libheif's generic
+  item API: a `tmap` whose `dimg` inputs are the primary image and the gain
+  map. Its data is parsed per ISO 21496-1 (version 0).
+- **Apple's older gain maps** (iOS 14 to 17, iPhone 12 and later), as Apple
+  documents them in "Applying Apple HDR effect to your photos": with no `tmap`,
+  an auxiliary image of type `urn:com:apple:photo:2020:aux:hdrgainmap`. Its
+  headroom comes from the photo's maker notes, tags 33 and 48 (exiftool's
+  `HDRHeadroom` and `HDRGain`; Apple's maker notes start with `Apple iOS`, have
+  their own byte order, and count offsets from their start): `stops` is
+  `-20 * t48 + 1.8` (`t48 <= 0.01`) or `-0.101 * t48 + 1.601` when `t33 < 1`,
+  else `-70 * t48 + 3` or `-0.303 * t48 + 2.303`; the headroom is
+  `2^max(stops, 0)`. Without those tags the photo stays SDR.
 - **The gain map** is decoded like any image, by its item ID. On an iPhone it
-  is also Apple's auxiliary image `urn:com:apple:photo:2020:aux:hdrgainmap`,
-  half the photo's size, 8-bit grey. Apple stores it like the primary image,
-  without turning it (ImageIO writes `irot` 0 on it), so unless it is rotated
-  or mirrored itself, the primary's rotation and mirroring apply to it, to line
-  up with the upright photo. A crop (`clap`, e.g. for an odd height) doesn't
-  matter: the gain map is scaled to the photo. Monochrome values are expanded
-  if the stream says limited range.
-- **The math**, at full strength (the alternate rendition): the gain map is
-  enlarged to the photo's size (bilinear); for a gain map value `g`, the gain
-  is `log2 G = min + (max - min) * g^(1/gamma)`; the SDR value, linearized with
-  the sRGB curve, becomes `(sdr + base_offset) * G - alternate_offset`, in the
-  photo's own primaries (`use_base_colour_space`).
+  is Apple's auxiliary image (above), half or a quarter of the photo's size,
+  8-bit grey. Apple stores it like the primary image, without its transforms
+  (ImageIO writes `irot` 0 on it), so the primary's transforms apply to it, in
+  order: rotations and mirrors turn it, and a crop (`clap`) narrows the part of
+  it that covers the photo (the *window*). Other gain maps use their own
+  transforms, unless their shape shows they are stored like Apple's (a 90°
+  photo with an unturned gain map of the stored photo's shape). Monochrome
+  values are expanded if the stream says limited range.
+- **The math**, at full strength (the alternate rendition): the window is
+  enlarged to the photo's size (center-aligned bilinear). For an ISO gain map
+  value `g`, the gain is `log2 G = min + (max - min) * g^(1/gamma)`, and the
+  SDR value, linearized with the sRGB curve, becomes
+  `(sdr + base_offset) * G - alternate_offset`, in the photo's own primaries
+  (`use_base_colour_space`). For Apple's older format, `g` is linearized with
+  the inverse Rec. 709 curve and `hdr = sdr * (1 + (headroom - 1) * g)`.
 - **The result** is 16-bit PQ with SDR white at 203 nits (ITU-R BT.2408), in
-  Display P3 (or sRGB) primaries, written row by row from lookup tables, with
-  no floating-point image. It is encoded with libjxl's usual lossy settings, as
-  PQ (CICP), `intensity_target` 10000.
-- **Apple's HDR profile.** An iPhone HEIC also holds an ICC profile for the HDR
-  rendition (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB)
-  with an `hdgm` tag: the tone curve (Apple's Headroom Adaptive Gain Curve,
-  SMPTE ST 2094-50) Apple dims the HDR photo with on screens that can't show
-  all of it, down to SDR. Without it, Apple assumes a 4.926× peak and dims a PQ
-  image its standard way, so the JXL looks slightly darker than the original.
+  Display P3 (or sRGB) primaries, computed from lookup tables a region at a
+  time, as libjxl reads its chunks, so there is no 16-bit copy of the photo. It
+  is encoded with libjxl's usual lossy settings, as PQ (CICP), with
+  `intensity_target` set to the photo's peak (203 nits times the largest gain
+  the gain map can give), not PQ's 10,000 nits.
+- **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
+  ICC profile for the HDR rendition
+  (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an
+  `hdgm` tag: the tone curve (Apple's Headroom Adaptive Gain Curve, SMPTE ST
+  2094-50) Apple dims the HDR photo with on screens that can't show all of it,
+  down to SDR. Without it, Apple assumes a 4.926× peak and dims a PQ image its
+  standard way, so the JXL looks slightly darker than the original there.
   `jxlbatch` reads the profile from the `tmap` item (or the gain map), with its
   own small reader of the `meta` boxes because libheif gives profiles of images
   only, and stores it instead of the CICP label when libjxl reads it as the
   pixels' color space (same primaries, D65, PQ). The pixels don't change; the
-  profile costs about 3 KB. In a lossy file libjxl replaces a profile it can
-  describe itself by that description, dropping the curve, so the header is set
-  as lossless while the profile is set, then as lossy. Decoding: libjxl gives
-  such a file (lossy, with a profile) as linear sRGB unless asked for another
-  color space, so the tests ask djxl for Display P3 PQ.
+  profile costs about 3 KB. Otherwise a-Shell says
+  `! Apple's HDR profile not found` or `not used (unrecognized format)`. Photos
+  with Apple's older gain map never have one.
+- **Keeping the profile in a lossy file** relies on libjxl's behavior: in
+  `JxlEncoderSetICCProfile`, libjxl decides (`DecideIfWantICC`, libjxl 0.11.2
+  and 0.12.0) to replace a profile it can describe itself by that description,
+  which drops the curve, unless the image is lossless at that moment. So the
+  header is set as lossless while the profile is set, then as lossy (if that is
+  rejected, the photo is encoded again without the profile).
+  `test_hdr_profile.py` runs against the native build (Homebrew's libjxl) too,
+  so a change in libjxl shows up there, and `--selftest` checks it on the
+  phone. Decoding: libjxl gives such a file (lossy, with a profile) as linear
+  sRGB unless asked for another color space, so the tests ask djxl for Display
+  P3 PQ.
 - **Not used** (the photo is converted as SDR, with
   `! HDR gain map not used (reason)`): a color profile other than Display P3 or
   sRGB with the sRGB curve, a gain map in another color space, a gain map whose
-  shape doesn't match, other metadata versions. Photos with only Apple's older
-  gain map (before iOS 18) stay SDR.
+  shape doesn't match, malformed metadata, other metadata versions, an older
+  gain map without its maker notes.
+- **Kept originals.** Each `jxl_done.txt` line is
+  `file|index|delete or keep|name`. `keep` means the original had HDR that the
+  JXL lacks (a gain map that wasn't used, an HDR JPEG, which `jxlbatch` only
+  detects, or `--sdr`), and the shortcut doesn't offer it for deletion. Older
+  shortcuts read only the first and last fields; a new shortcut with an older
+  `jxlbatch` sees the name as the third field and keeps every original.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet, not the photo's, so they aren't
   copied.
-- **Memory:** the 16-bit image adds about 0.15 GB at 24 MP and 0.3 GB at 48 MP;
-  in wasmtime, converting takes about 0.7 GB and 0.95 GB.
+- **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 37 tiny HEICs
+  covering these layouts, with expected results from an independent NumPy
+  implementation (`hdr_reference.py`). `make_hdr_fixtures.py` writes them, and
+  `src/selftest_hdr_heic.h` (the `--selftest` HDR photo); regenerating needs
+  ffmpeg with libx265, libheif's `heif-dec` and libjxl's `djxl`.
 
 ## 2. Layout
 
-| Path                         | What it is                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                        |
-| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                |
-| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `gainmap.c` (HDR from ISO gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` (tiny HEIC for `--selftest`) |
-| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                     |
-| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                       |
-| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                       |
-| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                                                                    |
+| Path                         | What it is                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                                                                                                          |
+| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                                                                                                  |
+| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
+| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                       |
+| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                         |
+| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                                                                                                         |
+| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                                      |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).
@@ -203,7 +241,8 @@ python3 scripts/build_shortcuts.py --guess
     skips its exception wrapper and its temporary files (only used when writing
     HEIF).
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
-  (a tiny built-in HEIC) and a 12 MP encode. Running it in a-Shell checks the
+  (a tiny built-in HEIC), HDR decoding and keeping Apple's HDR profile (a tiny
+  built-in HDR HEIC) and a 12 MP encode. Running it in a-Shell checks the
   phone.
 - **Tests** are in `tests/compress-photos/`: the generated shortcuts, the
   encoder, end-to-end conversions checked with Apple's ImageIO, and the
@@ -315,7 +354,10 @@ no input: Continue):
      3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.9
         with:
         1. **Get Item from List**: that item of `Photos` (the original).
-        2. **Add to Variable** `Converted`.
+        2. **Get Item from List**: Item At Index 3 of the `|` split, then
+           **Match Text** `^delete$` in it (Case Sensitive). **If** Matches has
+           any value: **Add to Variable** `Converted` (the original). **End
+           If**. (`keep` means the JXL lacks the original's HDR.)
         3. **Get Details of Images**: Album of that original.
         4. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
            Photo Media, to Repeat Item 2.
