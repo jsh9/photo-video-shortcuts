@@ -705,7 +705,7 @@ def upright_size(case):
     return (cw, ch) if case.o in (1, 2, 3, 4) else (ch, cw)
 
 
-def write_photo(case, path, profiles):
+def write_photo(case, path, profiles, transforms=True):
     """Writes the HEIC; returns (stored gain map, stored-to-upright fn)."""
     sw, sh = case.size if case.o in (1, 2, 3, 4) else case.size[::-1]
     # the upright photo, uncropped, then stored
@@ -735,12 +735,14 @@ def write_photo(case, path, profiles):
         pix_fmt = 'yuv420p'
 
     planes = [planes[0], subsample(planes[1]), subsample(planes[2])]
+    write_transforms = transforms
     transforms = TRANSFORMS[case.o]
     if case.crop:
         left, top, cw, ch = case.crop
         transforms = [clap(sw, sh, left, top, cw, ch)] + transforms
 
-    tf = [(t, True) for t in transforms]
+    # without them: the same coded photo, as stored (for expected())
+    tf = [(t, True) for t in transforms] if write_transforms else []
     primary = h.image(planes, sw, sh, pix_fmt, full, color, tf, bits=case.bits,
                       tile=case.tile)  # fmt: skip
     h.primary = primary
@@ -868,9 +870,32 @@ def decoded_base_16(heic):
         return (values >> 6).astype(np.float64) / 1023
 
 
-def expected(case, heic, gain, gplanes):
+def upright_base(case, profiles):
+    """
+    The upright SDR photo, 0..1: decoded as stored (libheif, from a copy
+    without the crop and rotation), then cropped and turned in RGB, as jxlbatch
+    does. (libheif crops and turns before converting to RGB, which shifts the
+    colors when a 4:2:0 photo is cropped at an odd offset.)
+    """
+    with tempfile.TemporaryDirectory() as d:
+        stored = Path(d) / 'stored.heic'
+        write_photo(case, stored, profiles, transforms=False)
+        base = (
+            decoded_base_16(stored)
+            if case.bits == 10
+            else decoded_base(stored)
+        )
+
+    if case.crop:
+        left, top, cw, ch = case.crop
+        base = base[top : top + ch, left : left + cw]
+
+    return UPRIGHT[case.o](base)
+
+
+def expected(case, heic, gain, gplanes, profiles):
     """(expected 16-bit PQ pixels, headroom, peak) for an HDR test photo."""
-    base = decoded_base_16(heic) if case.bits == 10 else decoded_base(heic)
+    base = upright_base(case, profiles)
     g = decoded_gain_map(case, gain, gplanes)
     gh, gw = g.shape[:2]
     if case.upright_gain_map:
@@ -914,7 +939,9 @@ def main():
         if case.note:
             info['note'] = case.note
         else:
-            pixels, headroom, peak = expected(case, heic, gain, gplanes)
+            pixels, headroom, peak = expected(
+                case, heic, gain, gplanes, profiles
+            )
             arrays[case.name] = pixels
             info.update(headroom=headroom, peak=peak)
 
@@ -934,7 +961,7 @@ def write_selftest(profiles):
     with tempfile.TemporaryDirectory() as d:
         heic = Path(d) / 'selftest.heic'
         gain, gplanes = write_photo(case, heic, profiles)
-        pixels, headroom, _ = expected(case, heic, gain, gplanes)
+        pixels, headroom, _ = expected(case, heic, gain, gplanes, profiles)
         # Apple's HDR profile: Display P3 with PQ, plus a placeholder curve
         hdr = with_tag(libjxl_profile('RGB_D65_DCI_Rel_PeQ'), 'hdgm',
                        b'hdgm' + bytes(4) + bytes(range(32)))  # fmt: skip
