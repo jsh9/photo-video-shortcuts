@@ -678,7 +678,88 @@ def icc_tags(icc):
 
 def add_icc_tag(icc, signature, data):
     """A copy of an ICC profile with one more tag."""
-    tags = {**icc_tags(icc), signature: data}
+    return _with_icc_tags(icc, {**icc_tags(icc), signature: data})
+
+
+def _identity_curves(count):
+    """``count`` identity 'curv' curves (no entries), as in 'mAB ' tags."""
+    return (b'curv' + bytes(8)) * count
+
+
+# an 'mAB '/'mBA ' matrix: 3x3, then the offsets (s15Fixed16)
+_IDENTITY_MATRIX = struct.pack(
+    '>12i', *(65536 if i in (0, 4, 8) else 0 for i in range(12))
+)
+
+
+def _identity_clut(precision):
+    """A 2x2x2 identity CLUT, 3 channels, ``precision`` bytes per value."""
+    top = (1 << (8 * precision)) - 1
+    # the first input channel varies slowest
+    values = [top * (i >> (2 - c) & 1) for i in range(8) for c in range(3)]
+    data = struct.pack(f'>{len(values)}{"BH"[precision - 1]}', *values)
+    header = bytes([2, 2, 2] + [0] * 13 + [precision, 0, 0, 0])
+    return header + data + bytes(-len(data) % 4)
+
+
+def _lut_tag(kind, elements):
+    """
+    An 'mAB ' or 'mBA ' tag with 3 inputs and 3 outputs: ``elements`` ({'A',
+    'CLUT', 'M', 'matrix' or 'B': data}) in the order given, the others absent.
+    """
+    body, offsets = b'', {}
+    for name, data in elements.items():
+        offsets[name] = 32 + len(body)
+        body += data
+
+    names = ('B', 'matrix', 'M', 'CLUT', 'A')
+    header = kind.encode('latin-1') + bytes(4) + bytes([3, 3, 0, 0])
+    return (
+        header + struct.pack('>5I', *(offsets.get(n, 0) for n in names)) + body
+    )
+
+
+def apple_shaped_hdr_profile(icc, curve):
+    """
+    A copy of PQ profile ``icc`` (with a 'cicp' tag) shaped like Apple's HDR
+    profile in iPhone photos (iOS 26): an XYZ connection space, no TRC or
+    colorant tags, an 'mAB ' A2B0 without B curves (A curves, a CLUT and a
+    matrix without M curves, which skcms, libjxl's color engine in WebAssembly,
+    rejects), a full 'mBA ' B2A0, and tone curve ``curve`` in an 'hdgm' tag.
+    The transforms are identities: libjxl takes a PQ profile's color from its
+    'cicp' tag (Apple's own profile can't be committed).
+    """
+    tags = icc_tags(icc)
+    assert tags['cicp'][8:10] == bytes([12, 16]), 'not a Display P3 PQ profile'
+    for signature in ('rTRC', 'gTRC', 'bTRC', 'rXYZ', 'gXYZ', 'bXYZ'):
+        tags.pop(signature, None)
+
+    tags['A2B0'] = _lut_tag(
+        'mAB ',
+        {
+            'A': _identity_curves(3),
+            'CLUT': _identity_clut(2),
+            'matrix': _IDENTITY_MATRIX,
+        },
+    )
+    tags['B2A0'] = _lut_tag(
+        'mBA ',
+        {
+            'B': _identity_curves(3),
+            'matrix': _IDENTITY_MATRIX,
+            'M': _identity_curves(3),
+            'CLUT': _identity_clut(1),
+            'A': _identity_curves(3),
+        },
+    )
+    tags['hdgm'] = curve
+    out = bytearray(_with_icc_tags(icc, tags))
+    out[20:24] = b'XYZ '  # the profile connection space
+    return bytes(out)
+
+
+def _with_icc_tags(icc, tags):
+    """A copy of an ICC profile's header with ``tags`` ({signature: data})."""
     table_end = 132 + 12 * len(tags)
     table, body = struct.pack('>I', len(tags)), b''
     for name, value in tags.items():

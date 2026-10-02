@@ -10,7 +10,8 @@ usable profile gets a note, since its JXL may look slightly darker.
 
 The test profiles are libjxl's own (written by djxl), with a placeholder 'hdgm'
 tag: these tests check that the profile is carried over, not how Apple uses the
-curve.
+curve. One is reshaped like Apple's (photo_helpers.apple_shaped_hdr_profile),
+whose A2B0 tag skcms, libjxl's color engine in WebAssembly, rejects.
 """
 
 import numpy as np
@@ -25,6 +26,8 @@ P3_PQ, REC2020_PQ = 'RGB_D65_DCI_Rel_PeQ', 'RGB_D65_202_Rel_PeQ'
 # kept, or the reason for the note
 VARIANTS = {
     'tmap': ('heic_hdr', [('tmap', P3_PQ, CURVE)]),
+    # with tags like Apple's (iOS 26), some of which skcms rejects
+    'apple_shaped': ('heic_hdr', [('tmap', P3_PQ, CURVE)]),
     'gain_map': ('heic_hdr', [('gain map', P3_PQ, CURVE)]),
     # the tmap's profile is in another color space; the gain map's is used
     'second_profile': (
@@ -38,7 +41,9 @@ VARIANTS = {
     'sdr': ('heic_hdr', [('tmap', 'RGB_D65_SRG_Rel_SRG', CURVE)]),
     'srgb_photo': ('heic_hdr_srgb', [('tmap', P3_PQ, CURVE)]),
 }
-KEPT = ['tmap', 'gain_map', 'second_profile']
+KEPT = ['tmap', 'apple_shaped', 'gain_map', 'second_profile']
+# reshaped like Apple's HDR profile
+APPLE_SHAPED = {'apple_shaped'}
 IGNORED = sorted(set(VARIANTS) - set(KEPT))
 
 
@@ -69,7 +74,9 @@ def variants(photos, batch, tmp_path_factory):
                 check=True,
             )
             profile = icc.read_bytes()
-            if curve:
+            if name in APPLE_SHAPED:
+                profile = ph.apple_shaped_hdr_profile(profile, curve)
+            elif curve:
                 profile = ph.add_icc_tag(profile, 'hdgm', curve)
 
             out = folder / f'{photo}_{name}_{i}.heic'
@@ -171,12 +178,14 @@ def test_photo_without_profile_says_so(batch, name):
     assert "Apple's HDR profile not found" in output
 
 
-def test_every_build(encoder, variants, photos, apple_hdr, tmp_path):
-    heic = variants['tmap'][0]
-    profile = last_profile(variants, 'tmap')
+@pytest.mark.parametrize('name', ['tmap', 'apple_shaped'])
+def test_every_build(encoder, variants, photos, apple_hdr, name, tmp_path):
+    heic = variants[name][0]
+    profile = last_profile(variants, name)
     ph.stage(tmp_path, [heic])
     result = encoder.run(['jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert '!' not in ph.photo_output(result.stdout, heic.stem)
     jxl = tmp_path / 'jxl_out_1.jxl'
     assert ph.jxl_profile(jxl, tmp_path) == profile
     ours = ph.jxl_hdr_pixels(jxl, tmp_path / 'hdr.ppm')
