@@ -228,7 +228,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   `hdgm` tag: the tone curve (Apple's Headroom Adaptive Gain Curve, SMPTE ST
   2094-50) Apple dims the HDR photo with on screens that can't show all of it,
   down to SDR. Without it, Apple assumes a 4.926× peak and dims a PQ image its
-  standard way, so the JXL looks slightly darker than the original there.
+  standard way, so the JXL doesn't look like the original there: darker for the
+  camera originals tested, brighter for a heavily edited photo whose SDR
+  rendition is much darker than its HDR one (both match at full brightness).
   `jxlbatch` reads the profile from the `tmap` item, else the gain map, with
   its own small reader of the `meta` boxes because libheif gives profiles of
   images only, and stores the first one that libjxl reads as the pixels' color

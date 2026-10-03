@@ -19,7 +19,9 @@ encoder. Every release includes the current files of all shortcuts.
   - HDR photos edited in Photos (checked with crops) are converted as HDR too.
     Photos saves them upright at their new size, without the label iPhone
     cameras put on Apple's gain maps, and without an HDR color profile, so
-    a-Shell says "Apple's HDR profile not found" for them.
+    a-Shell says "Apple's HDR profile not found" for them: on screens that
+    can't show all of their HDR, they may look darker or brighter than the
+    original.
   - Gain maps an iPhone camera labels as Apple's are used, and ISO 21496-1 gain
     maps without the label if the photo is stored upright and uncropped. Other
     HDR HEICs (e.g. saved turned or cropped by other apps or on a Mac) are

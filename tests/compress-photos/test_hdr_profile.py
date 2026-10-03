@@ -6,7 +6,7 @@ the gain map. Apple dims the HDR photo with that curve on screens that can't
 show all of it, and on SDR screens. The JPEG XL keeps the profile byte for
 byte, so Apple shows it like the original; its pixels stay the same. Profiles
 that don't describe the pixels are ignored. Either way, a photo without a
-usable profile gets a note, since its JXL may look slightly darker.
+usable profile gets a note, since its JXL may look different on dimmer screens.
 
 The test profiles are libjxl's own (written by djxl), with a placeholder 'hdgm'
 tag: these tests check that the profile is carried over, not how Apple uses the
@@ -163,7 +163,7 @@ def test_profile_costs_at_most_its_size(batch, variants, converted, name):
 def test_unsuitable_profile_is_ignored(batch, converted, name):
     jxl, output = converted[name]
     assert jxl.read_bytes() == plain(batch, name).read_bytes()
-    # said, since the JXL may look slightly darker than the original
+    # said, since the JXL may look different from the original on dimmer screens
     output = ' '.join(output.split())
     if VARIANTS[name][1][-1][2] is None:
         assert "Apple's HDR profile not found" in output

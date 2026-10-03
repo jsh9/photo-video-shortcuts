@@ -172,16 +172,16 @@ and a-Shell says
 the end of the batch how many such photos there were. **Its original is still
 offered for deletion**, and deleting it loses its HDR.
 
-**Edited photos:** checked with HDR photos cropped in Photos, from an iPhone 17
+**Edited photos:** checked with HDR photos edited in Photos, from an iPhone 17
 Pro (iOS 26) and an iPhone 13 mini (iOS 16, Apple's older gain map): they
 convert as HDR. Photos writes no HDR profile into an edited photo, so a-Shell
 says `! Apple's HDR profile not found` for those from iOS 18 and later (see
 below): on screens that can't show all of the HDR, the JXL looks a little
-darker than the edited HEIC, while a JXL converted from the unedited photo
-keeps the profile. Rotated crops convert the same way. Other edits
-(adjustments, filters) haven't been checked: if one gives
-`not an iPhone camera photo`, tap Don't Allow at the delete prompt (this keeps
-the whole batch's originals) and delete the others by hand.
+darker or brighter than the edited HEIC (at full brightness they match), while
+a JXL converted from the unedited photo keeps the profile. Checked with crops,
+rotations and adjustments (exposure, shadows, highlights, a style). If one
+gives `not an iPhone camera photo`, tap Don't Allow at the delete prompt (this
+keeps the whole batch's originals) and delete the others by hand.
 
 **Implausible brightness:** a gain map claiming to brighten the photo by more
 than 16 stops (65,536×), in either format (for Apple's older one, the headroom
@@ -196,10 +196,11 @@ setting, or HDR turned off), Apple dims the photo with a tone curve it derives
 from the gain map. Since iOS 18, iPhones store that curve in the HEIC, in an
 HDR color profile, and the JXL keeps it (about 3 KB), so it looks like the
 original there too. A photo without that profile, such as one taken before iOS
-18 or one edited in Photos, gets Apple's standard dimming instead, and may look
-slightly darker than the original there. a-Shell then says
-`! Apple's HDR profile not found` (except for photos taken before iOS 18, which
-never have one).
+18 or one edited in Photos, gets Apple's standard dimming instead, and may not
+look like the original there: darker, in tests with camera originals, or
+brighter, for a heavily edited photo (at full brightness they match). a-Shell
+then says `! Apple's HDR profile not found` (except for photos taken before iOS
+18, which never have one).
 
 Size: with a smooth gain map, like an iPhone's, an HDR JXL is about as large as
 the same photo converted as SDR (in tests, 4% smaller to 14% larger). A gain
@@ -236,6 +237,6 @@ keeps only one file, so check which one before you merge.
 | A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                                                                                                                                    |
 | `! HDR gain map not used (...)` in a-Shell                                     | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB, or claiming more than 16 stops (`malformed gain map metadata`). Its original isn't offered for deletion. Please report it with the reason shown.                                                   |
 | `! HDR gain map not used (not an iPhone camera photo)` in a-Shell              | The HDR photo's gain map isn't labeled as an iPhone camera's, and the photo is stored turned or cropped, so how they line up isn't known (see [HDR photos](#31-hdr-photos)): it was converted as SDR. Its original is still offered for deletion; to keep its HDR, tap Don't Allow when asked (this keeps the whole batch's originals). |
-| `! Apple's HDR profile not found` or `not used` in a-Shell                     | The JXL is HDR, but without Apple's tone curve for dimmer screens, so it may look slightly darker than the original there. Photos edited in Photos have no such profile. Please report `not used` with the photo.                                                                                                                       |
+| `! Apple's HDR profile not found` or `not used` in a-Shell                     | The JXL is HDR, but without Apple's tone curve for dimmer screens, so on such screens it may look darker or brighter than the original (at full brightness they match). Photos edited in Photos have no such profile. Please report `not used` with the photo.                                                                          |
 | `! HDR not kept (JPEG with a gain map ...)` in a-Shell                         | Photos sent this HDR photo as JPEG. Set Send As to Current in the share sheet (see [Use](#2-use)). The original isn't offered for deletion.                                                                                                                                                                                             |
 | `! orientation check` warning in a-Shell                                       | The converted pixels didn't match the original's orientation and size in its EXIF. Please report it with the photo's EXIF. (Photos edited in Photos keep the size from before the edit in their EXIF, so they aren't checked.)                                                                                                          |

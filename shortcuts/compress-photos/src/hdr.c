@@ -49,7 +49,8 @@ static int profile_is_pq(const uint8_t *icc, size_t size, int primaries) {
 // Apple's HDR profile: the first candidate with Apple's tone curve ('hdgm'
 // tag) that libjxl reads as the HDR pixels' color. Copied into `out`;
 // otherwise says why not in `warning`. Without the curve, Apple dims the
-// HDR on dimmer screens its standard way, a little darker than the original.
+// HDR on dimmer screens its standard way, which doesn't look like the
+// original there (darker for the photos tested; brighter after heavy edits).
 static void keep_hdr_profile(const hdr_parts_t *parts, int primaries, blob_t *out, char *warning, size_t len) {
   int with_curve = 0;
   for (int i = 0; i < 2; i++) {
@@ -64,8 +65,8 @@ static void keep_hdr_profile(const hdr_parts_t *parts, int primaries, blob_t *ou
     return;
   }
   snprintf(warning, len,
-           with_curve ? "Apple's HDR profile not used (unrecognized format); may look slightly darker"
-                      : "Apple's HDR profile not found; this JXL may look slightly darker");
+           with_curve ? "Apple's HDR profile not used (unrecognized format); may look different on dimmer screens"
+                      : "Apple's HDR profile not found; this JXL may look different on dimmer screens");
 }
 
 void hdr_apply(image_t *img, color_t *color, int primaries, hdr_parts_t *parts, hdr_info_t *hdr) {
