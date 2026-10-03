@@ -96,6 +96,15 @@ def test_hdr_original_may_be_deleted(converted, name):
     assert not kept, output
 
 
+@pytest.mark.parametrize('name', ['apple_older', 'apple_older_o6'])
+def test_gain_maps_xmp_is_not_the_photos(converted, name):
+    # Apple's older gain map has an XMP packet of its own (HDRGainMapVersion),
+    # linked to the gain map, not to the photo, which has none: the JXL
+    # mustn't get it as the photo's.
+    jxl, output, _ = converted[name]
+    assert ph.xmp_properties(jxl) == {}, output
+
+
 @pytest.mark.parametrize('name', NOT_USED)
 def test_gain_map_not_used(converted, name):
     jxl, output, kept = converted[name]
