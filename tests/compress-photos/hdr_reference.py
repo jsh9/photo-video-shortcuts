@@ -5,7 +5,9 @@ make_hdr_fixtures.py).
 
 - ISO 21496-1 gain maps, applied at full strength (the alternate rendition).
 - Apple's older gain maps (before iOS 18), as Apple documents them in
-  "Applying Apple HDR effect to your photos".
+  "Applying Apple HDR effect to your photos", except that the gain map is
+  linearized with a gamma of 2.2, as Apple renders it (see apply_apple):
+  https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
 
 Both give linear light with SDR white at 1.0, stored as 16-bit PQ with SDR
 white at 203 nits.
@@ -30,11 +32,6 @@ def pq_codes(linear):
 
 def srgb_to_linear(v):
     return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
-
-
-def rec709_to_linear(v):
-    """Inverse of the Rec.709 transfer function (Apple's older gain maps)."""
-    return np.where(v < 0.081, v / 4.5, ((v + 0.099) / 1.099) ** (1 / 0.45))
 
 
 def parse_tmap(data):
@@ -137,7 +134,10 @@ def apple_headroom(maker33, maker48):
 def apply_apple(base, gain_map, headroom):
     """
     Apple's older gain map: base as in apply_iso; gain_map enlarged, values
-    0..1 as stored (Rec.709 curve).
+    0..1 as stored, linearized with a gamma of 2.2. That is what Apple's
+    rendering does (measured pixel by pixel on iPhone photos); Apple's
+    documentation says the Rec. 709 curve, which is 8-15% brighter in the
+    midtones (jsh9/photo-video-shortcuts#6).
     """
-    g = rec709_to_linear(gain_map[..., :1])
+    g = gain_map[..., :1] ** 2.2
     return srgb_to_linear(base) * (1 + (headroom - 1) * g)
