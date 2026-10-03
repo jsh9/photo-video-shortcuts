@@ -3,6 +3,23 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.3.0] - 2026-10-03
+
+- Changed
+  - Only still photos from the photo library are converted, screenshots
+    included. Live Photos, videos and items not from Photos (e.g. images shared
+    from Files) in the selection are skipped, and a notification counts each
+    kind ("Skipped 2 Live Photo(s), 1 video(s)"). When nothing is left, the
+    shortcut says "Nothing to convert" and stops before asking for a quality.
+    Before, a Live Photo was converted as its still image and, from the
+    Shortcuts app, offered for deletion, which deleted its video too; a video
+    was copied into a-Shell, where `jxlbatch` read it whole before failing.
+  - The photo picker (when started from the Shortcuts app) no longer shows
+    videos.
+  - Update the shortcuts; `jxlbatch.wasm` is unchanged.
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/8
+
 ## [Compress Photos 0.2.1] - 2026-10-03
 
 - Fixed
