@@ -48,9 +48,11 @@ int stb_decode(const uint8_t *buf, size_t len, image_t *img, char *err, size_t e
 // HEIF/HEIC primary image, upright (its transforms applied), with its color.
 // A photo with a gain map (ISO 21496-1, or Apple's older format) becomes HDR
 // unless `sdr`: 16-bit PQ with SDR white at 203 nits, computed on request
-// (see hdr.h); `hdr` says so, or why not.
-int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
-                size_t err_len);
+// (see hdr.h); `hdr` says so, or why not. `transposed`, if given, is set
+// to 1 if the photo's own transforms turned it by a quarter turn (so its
+// stored size is the result's transposed).
+int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr,
+                int *transposed, char *err, size_t err_len);
 void heif_decoder_version(char *buf, size_t len);
 
 void image_free(image_t *img);

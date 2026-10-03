@@ -49,7 +49,7 @@ encoder. Every release includes the current files of all shortcuts.
 - Fixed
   - A false "orientation check" warning in a-Shell for photos edited in Photos,
     whose EXIF keeps the size from before the edit: the check now runs only
-    when the EXIF size is the photo's own.
+    when the EXIF size is the photo's size as stored.
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/5
 

@@ -699,9 +699,10 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   // Decode. HEIF comes out upright, and HDR if it has a gain map; JPEG and
   // PNG pixels are as stored, with their orientation in EXIF (or XMP).
   int orient = 1;
+  int transposed = 0;  // the stored pixels are turned by a quarter turn
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
-    if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, err, sizeof err) != 0) goto done;
+    if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, &transposed, err, sizeof err) != 0) goto done;
     if (hdr.note[0]) say_wrap("  ", "! HDR gain map not used (%s); saved as SDR", hdr.note);
     if (hdr.warning[0]) say_wrap("  ", "! %s", hdr.warning);
   } else {
@@ -718,6 +719,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     orient = pm->exif.size ? exif_orientation(pm->exif.data, pm->exif.size) : 0;
     if (!orient && pm->xmp.size) orient = xmp_orientation(pm->xmp.data, pm->xmp.size);
     if (!orient) orient = 1;
+    transposed = orient >= 5;
     if (pm->icc.size) {
       color.icc.data = (uint8_t *)malloc(pm->icc.size);
       if (!color.icc.data) {
@@ -741,10 +743,11 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
 
   // Cross-check against the original's own orientation (warning only), if
-  // its EXIF size is the photo's: an edited photo's EXIF keeps the size of
-  // the photo before the edit (Photos does so).
-  if (have_dims && orig_orient && orig_w && orig_h && orig_w != orig_h && img.w != img.h &&
-      ((orig_w == img.w && orig_h == img.h) || (orig_w == img.h && orig_h == img.w))) {
+  // its EXIF size is the size as stored (the EXIF describes the stored
+  // pixels): an edited photo's EXIF keeps the size of the photo before the
+  // edit (Photos does so), which can be the result's size transposed.
+  const uint32_t stored_w = transposed ? img.h : img.w, stored_h = transposed ? img.w : img.h;
+  if (have_dims && orig_orient && orig_w != orig_h && img.w != img.h && orig_w == stored_w && orig_h == stored_h) {
     const int want_portrait = (orig_orient >= 5) ? (orig_w > orig_h) : (orig_h > orig_w);
     const int is_portrait = img.h > img.w;
     if (want_portrait != is_portrait) {
@@ -1088,7 +1091,7 @@ static int selftest_heif(void) {
   hdr_info_t hdr;
   char err[256] = "";
   say("\nHEIF decoding:\n");
-  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, 0, &img, &color, &hdr, err, sizeof err) != 0) {
+  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, 0, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     return -1;
   }
@@ -1117,7 +1120,7 @@ static int selftest_hdr(const options_t *opt) {
   hdr_info_t hdr;
   char err[256] = "";
   say("\nHDR decoding:\n");
-  if (heif_decode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, 0, &img, &color, &hdr, err, sizeof err) != 0) {
+  if (heif_decode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, 0, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     return -1;
   }

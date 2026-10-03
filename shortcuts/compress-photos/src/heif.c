@@ -411,9 +411,23 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
   hdr_apply(img, color, primaries, &parts, hdr);
 }
 
-int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr, char *err,
-                size_t err_len) {
+// 1 if `item`'s own 'irot' properties turn it by a quarter turn, in all.
+static int is_transposed(struct heif_context *ctx, heif_item_id item) {
+  heif_property_id props[16];
+  const int n = heif_item_get_transformation_properties(ctx, item, props, 16);
+  int turns = 0;
+  for (int i = 0; i < n; i++) {
+    if ((uint32_t)heif_item_get_property_type(ctx, item, props[i]) == heif_fourcc('i', 'r', 'o', 't')) {
+      turns += heif_item_get_property_transform_rotation_ccw(ctx, item, props[i]) / 90;
+    }
+  }
+  return turns % 2;
+}
+
+int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr,
+                int *transposed, char *err, size_t err_len) {
   memset(img, 0, sizeof *img);
+  if (transposed) *transposed = 0;
   memset(color, 0, sizeof *color);
   memset(hdr, 0, sizeof *hdr);
   struct heif_context *ctx = heif_context_alloc();
@@ -472,6 +486,7 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   // libheif then applies (all of them).
   const heif_item_id photo = heif_image_handle_get_item_id(handle);
   const int own_transforms = only_own_transforms(ctx, photo, 0) && alpha_is_plain(ctx, buf, len, photo);
+  if (transposed) *transposed = is_transposed(ctx, photo);
   options = heif_decoding_options_alloc();
   options->ignore_transformations = own_transforms;
   e = heif_decode_image(handle, &image, heif_colorspace_RGB, chroma, options);

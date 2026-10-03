@@ -51,9 +51,10 @@ compressed (`brob`) boxes, which `cjxl` writes by default, it can't. Pixels are
 stored upright, and the EXIF/XMP orientation is reset to match, so no viewer
 can rotate a photo twice. a-Shell warns (`! orientation check`) when the result
 is portrait but the original's EXIF orientation and size say landscape, or the
-other way round; only when that EXIF size is the photo's own (in either order),
-since an edited photo's EXIF keeps the size from before the edit (Photos does
-so). 10-bit HEIF photos are kept at 10 bits.
+other way round; only when that EXIF size is the photo's size as stored (the
+result's, transposed if the HEIF transforms turned it), since an edited photo's
+EXIF keeps the size from before the edit (Photos does so, also for a photo it
+stores upright). 10-bit HEIF photos are kept at 10 bits.
 
 Encoding settings match `cjxl -q Q -e E`, with one difference: libjxl's
 streaming mode is always on, and the image is handed to it in chunks rather
