@@ -17,6 +17,8 @@ encoder. Every release includes the current files of all shortcuts.
   - The photo picker (when started from the Shortcuts app) no longer shows
     videos.
   - Update the shortcuts; `jxlbatch.wasm` is unchanged.
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/8
 
 ## [Compress Photos 0.2.1] - 2026-10-03
 
