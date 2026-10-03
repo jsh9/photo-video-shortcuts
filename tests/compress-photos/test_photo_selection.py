@@ -286,6 +286,14 @@ def test_stops_when_nothing_to_convert(compress, start):
     ]
 
 
+@STARTS
+def test_stops_when_no_items_at_all(compress, start):
+    outcome, shortcuts = run(compress, [], start)
+    assert outcome == 'stopped'
+    assert 'Stills' not in shortcuts.variables
+    assert shortcuts.notifications == ['Nothing to convert.']
+
+
 def test_filter_photos_format(compress):
     # As the Shortcuts app writes Filter Photos: Shortcuts' own names for
     # properties and values, whatever the phone's language.

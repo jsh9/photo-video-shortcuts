@@ -472,8 +472,11 @@ no input: Continue):
         `, `, then **Show Notification**
         `Skipped <Combined Text>: only still photos from Photos are converted.`
         **End If**.
-      - **Otherwise:** **Combine Text** and **Show Notification** the same way,
-        starting with `Nothing to convert. `, then **Stop This Shortcut**.
+      - **Otherwise:** **If** `Skipped` has any value: **Combine Text** and
+        **Show Notification** the same way, starting with
+        `Nothing to convert. `. **Otherwise** (there were no items at all):
+        **Show Notification** `Nothing to convert.` **End If**. Then **Stop
+        This Shortcut**.
       - **End If**.
 
    From here on, use `Stills` instead of `Photos`.

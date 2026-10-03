@@ -280,7 +280,9 @@ class Builder:
             {'WFVariableName': name, 'WFInput': attachment(ref)},
         )
 
-    def combine(self, ref, separator):
+    @staticmethod
+    def separator_params(ref, separator):
+        """Parameters shared by Combine Text and Split Text."""
         params = {'text': attachment(ref)}
         if separator == '\n':
             params['WFTextSeparator'] = 'New Lines'
@@ -290,23 +292,24 @@ class Builder:
                 'WFTextCustomSeparator': separator,
             })
 
+        return params
+
+    def combine(self, ref, separator):
         return output_of(
-            self.add('is.workflow.actions.text.combine', params),
+            self.add(
+                'is.workflow.actions.text.combine',
+                self.separator_params(ref, separator),
+            ),
             'Combined Text',
         )
 
     def split(self, ref, separator):
-        params = {'text': attachment(ref)}
-        if separator == '\n':
-            params['WFTextSeparator'] = 'New Lines'
-        else:
-            params.update({
-                'WFTextSeparator': 'Custom',
-                'WFTextCustomSeparator': separator,
-            })
-
         return output_of(
-            self.add('is.workflow.actions.text.split', params), 'Split Text'
+            self.add(
+                'is.workflow.actions.text.split',
+                self.separator_params(ref, separator),
+            ),
+            'Split Text',
         )
 
     def item_from_list(self, ref, which):
@@ -653,7 +656,12 @@ def keep_still_photos(b, photos):
         )
 
     def nothing_left():
-        say_skipped('Nothing to convert. ')
+        # Skipped is empty when there were no items at all.
+        b.if_has_value(
+            variable('Skipped'),
+            lambda: say_skipped('Nothing to convert. '),
+            lambda: b.notification('JPEG XL', 'Nothing to convert.'),
+        )
         b.stop()
 
     b.if_has_value(
