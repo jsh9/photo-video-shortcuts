@@ -26,8 +26,10 @@ ______________________________________________________________________
 ```
 Compress Photos                              (shortcut)
    photos: from the share sheet, or else picked in its own photo picker
-   asks for a quality preset, copies each original photo to a-Shell's shared
-   folder as jxl_in_N.orig, writes jxl_job.txt, then runs in a-Shell:
+   keeps the still photos from the photo library (skips Live Photos, videos
+   and other items, and says how many), asks for a quality preset, copies
+   each original photo to a-Shell's shared folder as jxl_in_N.orig, writes
+   jxl_job.txt, then runs in a-Shell:
      jxlbatch -q 83 -e 7 jxl_job.txt   (after a short wait, in a-Shell's
                                         Shortcuts folder; retried if a-Shell
                                         was still starting up)
@@ -41,6 +43,33 @@ or, from the picker:
    adds each to its original's albums, then asks to delete the
    originals whose JXL was saved (and has their HDR)
 ```
+
+Only still photos from the photo library are staged. Each item goes through
+Filter Photos on its own (the item is the filter's input), with
+`Media Type is Image` and `Photo Type is not Live Photo`. The items that pass
+go into the variable `Stills`, which replaces `Photos` from then on, so the job
+indices are positions in `Stills`. The others are counted as Live Photos,
+videos or items not from Photos (two more filters, one condition each) for a
+notification; when `Stills` is empty, the shortcut says "Nothing to convert"
+and stops before the quality list. What this relies on in Filter Photos (read
+from Apple's ContentKit, iOS 26.1):
+
+- Properties and values are stored as English names (`Media Type`, `Image`,
+  `Photo Type`, `Live Photo`), whatever the phone's language.
+- A Live Photo's media type is Image. Photo Type is a list (HDR, Panorama,
+  Burst, Live Photo): "is" holds when any entry matches, "is not" only when
+  none does, so an HDR Live Photo isn't taken for a still photo. Screenshots
+  have no Photo Type.
+- The results are new items fetched from the library, so the filter only tests
+  an item, and the item itself is kept: filtering the whole list would replace
+  the files the share sheet sent (its Send As choice). An item that isn't in
+  the library, such as an image shared from Files, never matches.
+- With Any instead of All, a condition the library can't look up directly is
+  checked against the whole library, ignoring the input. The filters use All.
+
+The photo picker (Select Photos) shows Images only, which hides videos; Live
+Photos still show, and are skipped. `test_photo_selection.py` runs this part of
+the shortcut on a model of these rules.
 
 `jxlbatch` decodes the original itself (HEIF with libheif and libde265; JPEG
 and PNG with stb_image) and encodes with libjxl 0.11.2.
@@ -412,11 +441,45 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
 no input: Continue):
 
 1. **If** Shortcut Input has any value:
+
    - **Set Variable** `Photos` to Shortcut Input.
-   - **Otherwise:** **Select Photos** (Select Multiple on), then **Set
-     Variable** `Photos` to Photos.
+   - **Otherwise:** **Select Photos** (Select Multiple on, Include: Images
+     only), then **Set Variable** `Photos` to Photos.
    - **End If**.
-2. The quality list:
+
+2. Keep the still photos:
+
+   1. **Repeat with Each** item in `Photos`:
+      1. **Filter Photos**: Repeat Item, where All of: Media Type is Image,
+         Photo Type is not Live Photo.
+      2. **If** Photos (from Filter Photos) has any value: **Add to Variable**
+         `Stills`: Repeat Item.
+      3. **Otherwise:**
+         1. **Filter Photos**: Repeat Item, where Media Type is Video.
+         2. **If** Photos has any value: **Add to Variable** `Skipped Videos`:
+            Repeat Item. **Otherwise:** **Filter Photos**: Repeat Item, where
+            Photo Type is Live Photo; **If** Photos has any value: **Add to
+            Variable** `Skipped Live Photos`: Repeat Item; **Otherwise:** **Add
+            to Variable** `Skipped Others`: Repeat Item; **End If**. **End
+            If**.
+      4. **End If**.
+   2. For each of `Skipped Live Photos` (`Live Photo(s)`), `Skipped Videos`
+      (`video(s)`) and `Skipped Others` (`item(s) not from Photos`): **If** it
+      has any value: **Count** its items, **Text** `<Count> <kind>`, **Add to
+      Variable** `Skipped`. **End If**.
+   3. **If** `Stills` has any value:
+      - **If** `Skipped` has any value: **Combine Text** `Skipped` with Custom
+        `, `, then **Show Notification**
+        `Skipped <Combined Text>: only still photos from Photos are converted.`
+        **End If**.
+      - **Otherwise:** **Combine Text** and **Show Notification** the same way,
+        starting with `Nothing to convert. `, then **Stop This Shortcut**.
+      - **End If**.
+
+   From here on, use `Stills` instead of `Photos`.
+
+3. The quality list:
+
    1. **Text**: one contact card per preset, one after another:
       ```
       BEGIN:VCARD
@@ -431,21 +494,29 @@ no input: Continue):
    4. **Choose from List**: Contacts, prompt `JPEG XL quality`.
    5. **Get Name** of Chosen Item.
    6. **Match Text**: `\d+` in Name. Its Matches is the quality.
-3. a-Shell **Execute Command**:
+
+4. a-Shell **Execute Command**:
    `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_started`, Keep Going on.
-4. **Repeat with Each** item in `Photos`:
+
+5. **Repeat with Each** item in `Stills`:
+
    1. **Get Name** of Repeat Item.
    2. **Set Name**: Repeat Item to `jxl_in_<Repeat Index>.orig`, Don't Include
       File Extension on.
    3. a-Shell **Put File**: Renamed Item, Overwrite on.
    4. **Text**: `<Repeat Index>|<Name>`.
    5. **Add to Variable**: Text to `Jobs`.
-5. **Combine Text**: `Jobs` with New Lines.
-6. **Set Name**: Combined Text to `jxl_job.txt`, Don't Include File Extension
+
+6. **Combine Text**: `Jobs` with New Lines.
+
+7. **Set Name**: Combined Text to `jxl_job.txt`, Don't Include File Extension
    on.
-7. a-Shell **Put File**: Renamed Item, Overwrite on.
-8. **If** Shortcut Input has any value:
-   1. **Repeat with Each** item in `Photos`:
+
+8. a-Shell **Put File**: Renamed Item, Overwrite on.
+
+9. **If** Shortcut Input has any value:
+
+   1. **Repeat with Each** item in `Stills`:
       1. **Get Details of Images**: Album of Repeat Item.
       2. **If** Album has any value: **Combine Text** Album with New Lines,
          **Set Name** to `jxl_albums_<Repeat Index>.txt` (Don't Include File
@@ -456,13 +527,14 @@ no input: Continue):
       - `jxlbatch -q <Matches> -e 7 jxl_job.txt`
       - `jxlbatch --retry -q <Matches> -e 7 jxl_job.txt`
       - `open shortcuts://run-shortcut?name=JXL-Import`
+
    - **Otherwise:**
      1. The same **Execute Command**, but with `open shortcuts://` as the last
         command.
      2. **Wait to Return**.
      3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.9
         with:
-        1. **Get Item from List**: that item of `Photos` (the original).
+        1. **Get Item from List**: that item of `Stills` (the original).
         2. **Get Item from List**: Item At Index 3 of the `|` split, then
            **Match Text** `^delete$` in it (Case Sensitive). **If** Matches has
            any value: **Add to Variable** `Converted` (the original). **End

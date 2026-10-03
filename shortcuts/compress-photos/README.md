@@ -5,7 +5,8 @@ Select photos in Photos → Share → **Compress Photos** → pick a quality pre
 same albums as the originals, keeping the original's metadata: capture date,
 time and time zone, GPS location, camera, lens, exposure, maker notes, and XMP.
 Started from the Shortcuts app instead, it lets you pick the photos and then
-offers to delete the originals.
+offers to delete the originals. Only still photos are converted, screenshots
+included: Live Photos and videos are skipped.
 
 iOS can display JPEG XL but has no encoder, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
@@ -37,21 +38,21 @@ See [Installation](../../README.md#1-installation) in the main README.
 
 - **Two ways to start it:**
   - **From the Shortcuts app** (tap it, or ▶ in the editor): it shows a photo
-    picker. Photos picked there come straight from the library, so the original
-    HEIF is used. When the JXL copies are saved, it **offers to delete the
-    originals**, only those whose JXL was saved and has everything the JXL can
-    keep. An HDR photo whose JXL lacks its HDR (see
+    picker, without videos. Photos picked there come straight from the library,
+    so the original HEIF is used. When the JXL copies are saved, it **offers to
+    delete the originals**, only those whose JXL was saved and has everything
+    the JXL can keep. An HDR photo whose JXL lacks its HDR (see
     [HDR photos](#31-hdr-photos)) is not offered for deletion, except an HDR
     photo from another app, stored turned or cropped, whose HDR isn't
     converted.
     - iOS asks you to confirm ("Delete N photos?"). Tap Don't Allow to keep
       them.
     - Deleted photos go to Recently Deleted for 30 days.
-    - Deleting also removes what the JXL doesn't have: the Live Photo video,
-      depth/Portrait data, the SDR version of an HDR photo (see
-      [HDR photos](#31-hdr-photos)), edit history, and Photos-only information
-      (favorites, captions, people). Albums are kept, because the JXL is added
-      to them.
+    - Deleting also removes what the JXL doesn't have: depth/Portrait data, the
+      SDR version of an HDR photo (see [HDR photos](#31-hdr-photos)), edit
+      history, and Photos-only information (favorites, captions, people).
+      Albums are kept, because the JXL is added to them. Live Photos are never
+      converted, so they are never offered for deletion.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then stops at
@@ -63,7 +64,17 @@ See [Installation](../../README.md#1-installation) in the main README.
     **Options** at the top of the share sheet and set Send As to **Current**.
     iOS offers no way to make that the default, and a shortcut can't set it.
     `jxlbatch` prints a reminder when it receives iPhone photos as JPEG.
-- Either way, pick a quality from the list (see
+- **Only still photos from your photo library are converted**, screenshots
+  included. The shortcut skips the rest of the selection, then a notification
+  counts what it skipped, for example "Skipped 2 Live Photo(s), 1 video(s)":
+  - **Live Photos**, so that their video is never lost. To convert the still
+    image of one, use Duplicate ▸ Duplicate as Still Photo in Photos and
+    convert the copy.
+  - **Videos**. The photo picker doesn't show them.
+  - **Anything not in your photo library**, such as images shared from Files or
+    other apps ("item(s) not from Photos").
+  - When nothing is left, the shortcut says "Nothing to convert" and stops.
+- Then pick a quality from the list (see
   [Quality presets](#21-quality-presets)).
 - a-Shell opens and shows progress for each photo. **Keep it in the foreground
   until it switches back to Shortcuts by itself.**
@@ -125,7 +136,8 @@ Kept:
 
 Not kept:
 
-- **Live Photo video** and depth/Portrait data. The result is the still.
+- **Depth/Portrait data**. The result is the still.
+- **Live Photos** aren't converted at all (see [Use](#2-use)).
 - **HDR of photos sent as JPEG** (Send As: Automatic): the JPEG's gain map
   isn't converted, so the result is the standard-dynamic-range (SDR) photo, and
   its original is kept. Send them as Current instead.
@@ -239,6 +251,8 @@ keeps only one file, so check which one before you merge.
 | a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                                                                                                                                                                                               |
 | a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                                                                                                                                                                                        |
 | A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                                                                                                                                           |
+| Notification "Nothing to convert"                                              | The selection had only Live Photos, videos, or items not from your photo library; only still photos from Photos are converted (see [Use](#2-use)).                                                                                                                                                                                      |
+| Notification "Skipped ... item(s) not from Photos"                             | Those images weren't shared from Photos (for example, they came from Files). Save them to Photos first, then convert them from there.                                                                                                                                                                                                   |
 | A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                                                                                                                                    |
 | `! HDR gain map not used (...)` in a-Shell                                     | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB, or claiming more than 16 stops (`malformed gain map metadata`). Its original isn't offered for deletion. Please report it with the reason shown.                                                   |
 | `! HDR gain map not used (not an iPhone camera photo)` in a-Shell              | The HDR photo's gain map isn't labeled as an iPhone camera's, and the photo is stored turned or cropped, so how they line up isn't known (see [HDR photos](#31-hdr-photos)): it was converted as SDR. Its original is still offered for deletion; to keep its HDR, tap Don't Allow when asked (this keeps the whole batch's originals). |

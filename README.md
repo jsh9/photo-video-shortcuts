@@ -7,10 +7,10 @@ On iPhone, the heavy lifting runs in
 because iOS has no JPEG XL encoder or quality-controlled video encoder of its
 own.
 
-| Shortcut                                               | What it does                                              | iPhone             | Mac     |
-| ------------------------------------------------------ | --------------------------------------------------------- | ------------------ | ------- |
-| [Compress Photos](shortcuts/compress-photos/README.md) | HEIF, JPEG and PNG photos → JPEG XL, saved back to Photos | Yes (with a-Shell) | Planned |
-| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies                      | Coming soon        | Planned |
+| Shortcut                                               | What it does                                                                                          | iPhone             | Mac     |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------ | ------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → JPEG XL, saved back to Photos; Live Photos and videos are skipped | Yes (with a-Shell) | Planned |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies                                                                  | Coming soon        | Planned |
 
 <!--TOC-->
 
