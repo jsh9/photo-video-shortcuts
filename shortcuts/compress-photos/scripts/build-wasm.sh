@@ -51,6 +51,7 @@ fi
 
 # WASI (the non-threads target) has no threads, no C++ exceptions and no
 # mkstemp. These edits make the libraries build and decode single-threaded.
+# One more lets skcms, libjxl's color engine here, read Apple's HDR profile.
 python3 - "$LIBJXL" "$LIBHEIF" <<'EOF'
 import pathlib, sys
 libjxl, libheif = map(pathlib.Path, sys.argv[1:])
@@ -69,40 +70,100 @@ for rel, lines in {
         path.write_text(new)
         print(f"patched libjxl/{rel}")
 
-def replace(rel, old, new):
-    path = libheif / rel
+def replace(root, rel, old, new):
+    path = root / rel
     text = path.read_text()
     if new in text:
         return
     if old not in text:
-        sys.exit(f"libheif/{rel}: expected code not found; check the patch for this version")
+        sys.exit(f"{root.name}/{rel}: expected code not found; check the patch for this version")
     path.write_text(text.replace(old, new, 1))
-    print(f"patched libheif/{rel}")
+    print(f"patched {root.name}/{rel}")
 
 # libheif: temp files are only used when writing HEIF; WASI has no mkstemp.
-replace("libheif/box.cc",
+replace(libheif, "libheif/box.cc",
         '#if !defined(_WIN32)\n    strcpy(m_tmp_filename, "/tmp/libheif-XXXXXX");',
         '#if defined(__wasi__)\n    m_use_tmpfile = false;  // WASI has no mkstemp; only used when writing files\n'
         '#elif !defined(_WIN32)\n    strcpy(m_tmp_filename, "/tmp/libheif-XXXXXX");')
 # libheif: without exceptions, run the API body directly (failures abort).
-replace("libheif/api_structs.h",
+replace(libheif, "libheif/api_structs.h",
         "static inline heif_error exception_guard(F&& body) noexcept\n{\n  try {",
         "static inline heif_error exception_guard(F&& body) noexcept\n{\n#if !defined(__cpp_exceptions)\n"
         "  return body();  // built with -fno-exceptions (WASI): failures abort instead\n#else\n  try {")
-replace("libheif/api_structs.h",
+replace(libheif, "libheif/api_structs.h",
         "  catch (...) {\n    return heif_error_internal_exception;\n  }\n}",
         "  catch (...) {\n    return heif_error_internal_exception;\n  }\n#endif\n}")
 # libheif: file.cc includes, but doesn't use, the C++ wrapper, which throws.
-replace("libheif/file.cc",
+replace(libheif, "libheif/file.cc",
         '#include "libheif/heif_cxx.h"\n',
         '#if defined(__cpp_exceptions)  // unused here; its wrappers throw\n#include "libheif/heif_cxx.h"\n#endif\n')
 # libheif: decode on the calling thread (libde265 supports 0 worker threads),
 # keeping deblocking and SAO, unlike the Emscripten branch.
-replace("libheif/plugins/decoder_libde265.cc",
+replace(libheif, "libheif/plugins/decoder_libde265.cc",
         "#else\n  int nThreads = (options->num_threads ? options->num_threads : 1);",
         "#elif defined(__wasi__)\n  // WASI has no threads: libde265 decodes on the calling thread (0 workers),\n"
         "  // keeping deblocking and SAO (unlike the Emscripten branch above).\n#else\n"
         "  int nThreads = (options->num_threads ? options->num_threads : 1);")
+
+# skcms (libjxl's pinned copy): Apple's HDR profile (iPhone photos, iOS 26) is
+# PQ by its 'cicp' tag, but its A2B0 tag is an 'mAB ' without B curves, which
+# skcms rejects, and with it the whole profile, before reading the 'cicp' tag.
+# libjxl takes a PQ profile's color from that tag alone and transforms with a
+# profile of its own, so the tag is read first, and a PQ profile is accepted
+# without the A2B0/B2A0 tags skcms can't read.
+SKCMS = "third_party/skcms/skcms.cc"
+replace(libjxl, SKCMS,
+        "    for (int i = 0; i < priorities; i++) {\n"
+        "        // enum { perceptual, relative_colormetric, saturation }\n"
+        "        if (priority[i] < 0 || priority[i] > 2) {\n"
+        "            return false;\n"
+        "        }\n"
+        "        uint32_t sig = skcms_Signature_A2B0",
+        "    skcms_ICCTag cicp_tag;\n"
+        "    if (skcms_GetTagBySignature(profile, skcms_Signature_CICP, &cicp_tag)) {\n"
+        "        if (!read_cicp(&cicp_tag, &profile->CICP)) {\n"
+        "            // Malformed CICP tag\n"
+        "            return false;\n"
+        "        }\n"
+        "        profile->has_CICP = true;\n"
+        "    }\n"
+        "    // jxlbatch: Apple's HDR profile is PQ by its 'cicp' tag, with A2B0/B2A0\n"
+        "    // tags skcms rejects ('mAB ' without B curves). libjxl takes a PQ\n"
+        "    // profile's color from the 'cicp' tag alone and never transforms with it.\n"
+        "    const bool hdr_by_cicp = profile->has_CICP &&\n"
+        "                             profile->CICP.transfer_characteristics == 16;\n"
+        "\n"
+        "    for (int i = 0; i < priorities; i++) {\n"
+        "        // enum { perceptual, relative_colormetric, saturation }\n"
+        "        if (priority[i] < 0 || priority[i] > 2) {\n"
+        "            return false;\n"
+        "        }\n"
+        "        uint32_t sig = skcms_Signature_A2B0")
+replace(libjxl, SKCMS,
+        "            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n"
+        "                // Malformed A2B tag\n",
+        "            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n"
+        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                // Malformed A2B tag\n")
+replace(libjxl, SKCMS,
+        "            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n"
+        "                // Malformed B2A tag\n",
+        "            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n"
+        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                // Malformed B2A tag\n")
+# the 'cicp' tag's original place (read above now)
+replace(libjxl, SKCMS,
+        "    skcms_ICCTag cicp_tag;\n"
+        "    if (skcms_GetTagBySignature(profile, skcms_Signature_CICP, &cicp_tag)) {\n"
+        "        if (!read_cicp(&cicp_tag, &profile->CICP)) {\n"
+        "            // Malformed CICP tag\n"
+        "            return false;\n"
+        "        }\n"
+        "        profile->has_CICP = true;\n"
+        "    }\n"
+        "\n"
+        "    return usable_as_src(profile);\n",
+        "    return usable_as_src(profile) || hdr_by_cicp;\n")
 EOF
 
 build_variant() {
@@ -182,7 +243,7 @@ build_variant() {
   cc="$WASI_SDK/bin/clang --target=wasm32-wasip1 --sysroot=$WASI_SDK/share/wasi-sysroot"
   objdir="$bdir/jxlbatch-obj"
   mkdir -p "$objdir"
-  for src in jxlbatch meta pixels heif; do
+  for src in jxlbatch meta pixels heif gainmap hdr; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
   done

@@ -3,10 +3,12 @@
 //
 // For each job line "i|Name" in JOBFILE it reads jxl_in_i.orig (the original
 // photo: HEIF, JPEG or PNG), writes jxl_out_i.jxl, and appends
-// "jxl_out_i.jxl|i|Name.jxl" to jxl_done.txt. A jxl_in_i.png converted by
-// Shortcuts is used only for other formats (older versions of the shortcut).
+// "jxl_out_i.jxl|i|delete|Name.jxl" to jxl_done.txt ("keep" instead of
+// "delete" when the JXL lacks the original's HDR). A jxl_in_i.png converted
+// by Shortcuts is used only for other formats (older versions of the shortcut).
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,13 +19,16 @@
 #include <unistd.h>
 
 #include <jxl/color_encoding.h>
+#include <jxl/decode.h>
 #include <jxl/encode.h>
 #ifdef JXLBATCH_THREADS
 #include <jxl/thread_parallel_runner.h>
 #endif
 
+#include "gainmap.h"
 #include "meta.h"
 #include "pixels.h"
+#include "selftest_hdr_heic.h"
 #include "selftest_heic.h"
 
 // The build scripts set this from ../VERSION, shared with the shortcuts.
@@ -50,6 +55,7 @@ typedef struct {
   int effort;
   const char *dir;
   int retry;  // --retry: skip a batch that a run already started
+  int sdr;    // --sdr: HDR photos as SDR
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -206,6 +212,7 @@ typedef struct {
   size_t exif_len;
   const uint8_t *xmp;
   size_t xmp_len;
+  double intensity_target;  // HDR (PQ): the brightest pixels, in nits; 0 = PQ's peak
 } encode_meta_t;
 
 static const char *jxl_error_name(JxlEncoderError e) {
@@ -249,7 +256,8 @@ static int color_from_cicp(const uint8_t cicp[4], JxlColorEncoding *c) {
 }
 
 // Chunked input: libjxl reads the pixels in place, a region at a time,
-// instead of first copying the whole image (matters for 48 MP photos).
+// instead of first copying the whole image (matters for 48 MP photos). An
+// HDR image is computed a region at a time, as libjxl asks for it.
 typedef struct {
   const image_t *img;
   JxlPixelFormat format;
@@ -261,9 +269,18 @@ static void chunk_color_format(void *opaque, JxlPixelFormat *format) {
 
 static const void *chunk_color_data(void *opaque, size_t xpos, size_t ypos, size_t xsize, size_t ysize,
                                     size_t *row_offset) {
-  (void)xsize;
-  (void)ysize;
   const image_t *img = ((const chunk_source_t *)opaque)->img;
+  if (img->render) {
+    const size_t row = xsize * pixel_size(img);
+    uint8_t *buf = (uint8_t *)malloc(row * ysize);
+    if (buf && img->render(img->owner, (uint32_t)xpos, (uint32_t)ypos, (uint32_t)xsize, (uint32_t)ysize, buf,
+                           row) != 0) {
+      free(buf);
+      buf = NULL;
+    }
+    *row_offset = row;
+    return buf;  // NULL makes libjxl fail the photo
+  }
   *row_offset = img->stride;
   return img->data + ypos * img->stride + xpos * pixel_size(img);
 }
@@ -287,18 +304,54 @@ static const void *chunk_extra_data(void *opaque, size_t index, size_t xpos, siz
 }
 
 static void chunk_release(void *opaque, const void *buf) {
+  if (((const chunk_source_t *)opaque)->img->render) free((void *)buf);
+}
+
+// Output written as libjxl encodes. With it, libjxl reads the input a region
+// at a time; with JxlEncoderProcessOutput, it copies the whole image first.
+// A growable buffer that libjxl can seek in (to fill in sizes).
+typedef struct {
+  uint8_t *data;
+  size_t size, cap, pos;
+} out_buffer_t;
+
+static void *out_get_buffer(void *opaque, size_t *size) {
+  out_buffer_t *o = (out_buffer_t *)opaque;
+  const size_t want = *size ? *size : (size_t)1 << 16;
+  if (want > SIZE_MAX - o->pos) return *size = 0, NULL;
+  if (o->pos + want > o->cap) {
+    size_t cap = o->cap ? o->cap : (size_t)1 << 20;
+    while (cap < o->pos + want) cap *= 2;
+    uint8_t *grown = (uint8_t *)realloc(o->data, cap);
+    if (!grown) return *size = 0, NULL;  // libjxl then fails
+    o->data = grown;
+    o->cap = cap;
+  }
+  *size = want;
+  return o->data + o->pos;
+}
+
+static void out_release_buffer(void *opaque, size_t written) {
+  out_buffer_t *o = (out_buffer_t *)opaque;
+  o->pos += written;
+  if (o->pos > o->size) o->size = o->pos;
+}
+
+static void out_seek(void *opaque, uint64_t position) { ((out_buffer_t *)opaque)->pos = (size_t)position; }
+
+static void out_set_finalized_position(void *opaque, uint64_t position) {
   (void)opaque;
-  (void)buf;
+  (void)position;
 }
 
 enum { ENC_OK = 0, ENC_FAIL = -1, ENC_BAD_ICC = -2 };
 
 // Encodes img; the caller frees it afterwards.
-static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t *opt,
-                          int use_icc, uint8_t **out, size_t *out_len,
-                          const char **color_desc, char *err, size_t err_len) {
+static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t *opt, int use_icc, uint8_t **out,
+                          size_t *out_len, char *err, size_t err_len) {
   int rc = ENC_FAIL;
   uint8_t *exif_box = NULL, *buf = NULL;
+  out_buffer_t output = {NULL, 0, 0, 0};
   JxlEncoder *enc = JxlEncoderCreate(NULL);
   if (!enc) {
     snprintf(err, err_len, "out of memory creating the encoder");
@@ -313,6 +366,10 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   const uint32_t container_bits = (uint32_t)img->bytes_per_sample * 8;
   const uint32_t bits = (uint32_t)img->bits;  // e.g. 10 for 10-bit HEIF in 16-bit samples
   const color_t *color = em->color;
+  // HDR photos are PQ (see hdr.h), coded by CICP, or by Apple's profile for
+  // them (which describes the same color space).
+  const int pq = color && !(use_icc && color->icc.size) && color->cicp_present && color->cicp[1] == 16;
+  const int hdr_icc = pq && use_icc && color->hdr_icc.size;
 
 #define FAIL(...)                              \
   do {                                         \
@@ -323,6 +380,11 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   if (JxlEncoderUseContainer(enc, JXL_TRUE) != JXL_ENC_SUCCESS ||
       JxlEncoderUseBoxes(enc) != JXL_ENC_SUCCESS) {
     FAIL("cannot enable the JPEG XL container");
+  }
+  if (!alpha) {
+    const struct JxlEncoderOutputProcessor processor = {&output, out_get_buffer, out_release_buffer, out_seek,
+                                                       out_set_finalized_position};
+    if (JxlEncoderSetOutputProcessor(enc, processor) != JXL_ENC_SUCCESS) FAIL("cannot set the output");
   }
 
   JxlBasicInfo info;
@@ -335,27 +397,47 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   info.num_extra_channels = alpha ? 1 : 0;
   info.alpha_bits = alpha ? bits : 0;
   info.alpha_exponent_bits = 0;
-  info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
+  // In lossy files, libjxl replaces a profile it can describe itself (as it
+  // can Apple's HDR profile) by that description, which would drop Apple's
+  // tone-mapping curve. It keeps the profile if the image is lossless when the
+  // profile is set, so it is set that way first. (This relies on libjxl's
+  // JxlEncoderSetICCProfile deciding then, in DecideIfWantICC, as libjxl
+  // 0.11.2 and 0.12.0 do; test_hdr_profile.py checks it.)
+  info.uses_original_profile = lossless || hdr_icc ? JXL_TRUE : JXL_FALSE;
   info.orientation = JXL_ORIENT_IDENTITY;  // pixels are already upright
+  // How bright an HDR photo gets, in nits: at most PQ's peak, 10,000 nits
+  // (its brighter values are clipped there, and libjxl rejects targets above
+  // 65,504). Left at 0 otherwise: libjxl then uses the default for the color
+  // it ends up storing (10,000 nits for PQ, 255 for SDR).
+  if (pq && em->intensity_target > 0) info.intensity_target = (float)fmin(em->intensity_target, 10000);
   if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
     FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
   }
 
-  *color_desc = "sRGB";
   int color_set = 0;
-  if (use_icc && color && color->icc.size) {
+  if (hdr_icc) {
+    if (JxlEncoderSetICCProfile(enc, color->hdr_icc.data, color->hdr_icc.size) != JXL_ENC_SUCCESS) {
+      rc = ENC_BAD_ICC;
+      FAIL("ICC profile rejected");
+    }
+    info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
+    if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
+      rc = ENC_BAD_ICC;  // tried again without the profile
+      FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
+    }
+    color_set = 1;
+  }
+  if (!color_set && use_icc && color && color->icc.size) {
     if (JxlEncoderSetICCProfile(enc, color->icc.data, color->icc.size) != JXL_ENC_SUCCESS) {
       rc = ENC_BAD_ICC;
       FAIL("ICC profile rejected");
     }
     color_set = 1;
-    *color_desc = "ICC profile";
   }
   if (!color_set && color && color->cicp_present && !gray) {
     JxlColorEncoding ce;
     if (color_from_cicp(color->cicp, &ce) && JxlEncoderSetColorEncoding(enc, &ce) == JXL_ENC_SUCCESS) {
       color_set = 1;
-      *color_desc = ce.primaries == JXL_PRIMARIES_P3 ? "Display P3 (CICP)" : "CICP";
     }
   }
   if (!color_set) {
@@ -416,10 +498,17 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
     chunk_source_t source = {img, pf};
     const struct JxlChunkedFrameInputSource input = {&source,           chunk_color_format, chunk_color_data,
                                               chunk_extra_format, chunk_extra_data,  chunk_release};
-    // As the last frame, this also closes the input.
-    if (JxlEncoderAddChunkedFrame(fs, JXL_TRUE, input) != JXL_ENC_SUCCESS) {
-      FAIL("encoder rejected the image (%s)", jxl_error_name(JxlEncoderGetError(enc)));
+    // As the last frame, this also closes the input; the output processor
+    // gets the whole file.
+    if (JxlEncoderAddChunkedFrame(fs, JXL_TRUE, input) != JXL_ENC_SUCCESS ||
+        JxlEncoderFlushInput(enc) != JXL_ENC_SUCCESS) {
+      FAIL("encoding failed (%s)", jxl_error_name(JxlEncoderGetError(enc)));
     }
+    *out = output.data;
+    *out_len = output.size;
+    output.data = NULL;
+    rc = ENC_OK;
+    goto done;
   }
 
   size_t cap = 1 << 20;
@@ -445,17 +534,22 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
 #undef FAIL
 done:
   free(buf);
+  free(output.data);
   free(exif_box);
   JxlEncoderDestroy(enc);
   return rc;
 }
 
 static int encode_jxl(image_t *img, const encode_meta_t *em, const options_t *opt, uint8_t **out,
-                      size_t *out_len, const char **color_desc, char *err, size_t err_len) {
-  int rc = encode_attempt(img, em, opt, 1, out, out_len, color_desc, err, err_len);
+                      size_t *out_len, char *err, size_t err_len) {
+  int rc = encode_attempt(img, em, opt, 1, out, out_len, err, err_len);
   if (rc == ENC_BAD_ICC) {
-    say_wrap("  ", "! color profile rejected by libjxl; saved as sRGB");
-    rc = encode_attempt(img, em, opt, 0, out, out_len, color_desc, err, err_len);
+    // An HDR photo's only profile is Apple's HDR one; without it, the PQ
+    // pixels are still labeled by CICP.
+    const int hdr = em->color && em->color->hdr_icc.size && !em->color->icc.size;
+    say_wrap("  ", hdr ? "! Apple's HDR color profile rejected by libjxl; saved without it"
+                       : "! color profile rejected by libjxl; saved as sRGB");
+    rc = encode_attempt(img, em, opt, 0, out, out_len, err, err_len);
   }
   return rc == ENC_OK ? 0 : -1;
 }
@@ -536,6 +630,8 @@ static int parse_jobs(const uint8_t *data, size_t len, job_t **jobs_out, size_t 
 typedef struct {
   size_t done;
   size_t apple_jpegs;  // originals that Photos sent as JPEG (see run_batch)
+  size_t kept;         // originals marked "keep": their HDR isn't in the JXL
+  size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -557,6 +653,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   memset(&img, 0, sizeof img);
   color_t color;
   memset(&color, 0, sizeof color);
+  hdr_info_t hdr;
+  memset(&hdr, 0, sizeof hdr);
   char err[256] = "";
   int ok = 0;
   const double t0 = now_seconds();
@@ -598,13 +696,22 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   uint32_t orig_w = 0, orig_h = 0;
   const int have_dims = src_exif->size && exif_pixel_dims(src_exif->data, src_exif->size, &orig_w, &orig_h);
 
-  // Decode. HEIF comes out upright; JPEG and PNG pixels are as stored, with
-  // their orientation in EXIF (or XMP).
+  // Decode. HEIF comes out upright, and HDR if it has a gain map; JPEG and
+  // PNG pixels are as stored, with their orientation in EXIF (or XMP).
   int orient = 1;
+  int transposed = 0;  // the stored pixels are turned by a quarter turn
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
-    if (heif_decode(orig, orig_len, &img, &color, err, sizeof err) != 0) goto done;
+    if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, &transposed, err, sizeof err) != 0) goto done;
+    if (hdr.note[0]) say_wrap("  ", "! HDR gain map not used (%s); saved as SDR", hdr.note);
+    if (hdr.warning[0]) say_wrap("  ", "! %s", hdr.warning);
   } else {
+    // HDR JPEGs (as Photos sends HDR photos with "Send As: Automatic"): the
+    // gain map isn't converted.
+    if (orig_format == FMT_JPEG && jpeg_has_gain_map(orig, orig_len)) {
+      hdr.has_gain_map = 1;
+      if (!opt->sdr) say_wrap("  ", "! HDR not kept (JPEG with a gain map; send as Current to keep it)");
+    }
     const meta_t *pm = decode_orig ? &mo : &mp;
     if (stb_decode(decode_orig ? orig : png, decode_orig ? orig_len : png_len, &img, err, sizeof err) != 0) {
       goto done;
@@ -612,6 +719,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     orient = pm->exif.size ? exif_orientation(pm->exif.data, pm->exif.size) : 0;
     if (!orient && pm->xmp.size) orient = xmp_orientation(pm->xmp.data, pm->xmp.size);
     if (!orient) orient = 1;
+    transposed = orient >= 5;
     if (pm->icc.size) {
       color.icc.data = (uint8_t *)malloc(pm->icc.size);
       if (!color.icc.data) {
@@ -634,8 +742,12 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     goto done;
   }
 
-  // Cross-check against the original's own orientation (warning only).
-  if (have_dims && orig_orient && orig_w && orig_h && orig_w != orig_h && img.w != img.h) {
+  // Cross-check against the original's own orientation (warning only), if
+  // its EXIF size is the size as stored (the EXIF describes the stored
+  // pixels): an edited photo's EXIF keeps the size of the photo before the
+  // edit (Photos does so), which can be the result's size transposed.
+  const uint32_t stored_w = transposed ? img.h : img.w, stored_h = transposed ? img.w : img.h;
+  if (have_dims && orig_orient && orig_w != orig_h && img.w != img.h && orig_w == stored_w && orig_h == stored_h) {
     const int want_portrait = (orig_orient >= 5) ? (orig_w > orig_h) : (orig_h > orig_w);
     const int is_portrait = img.h > img.w;
     if (want_portrait != is_portrait) {
@@ -669,9 +781,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
   }
 
-  encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len};
-  const char *color_desc = "sRGB";
-  if (encode_jxl(&img, &em, opt, &jxl, &jxl_len, &color_desc, err, sizeof err) != 0) goto done;
+  encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len, hdr.peak * GAINMAP_SDR_WHITE_NITS};
+  if (encode_jxl(&img, &em, opt, &jxl, &jxl_len, err, sizeof err) != 0) goto done;
   if (write_file(p_out, jxl, jxl_len) != 0) {
     snprintf(err, sizeof err, "cannot write %s (%s)", name_out, strerror(errno));
     goto done;
@@ -683,24 +794,36 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
       goto done;
     }
   }
-  // "file|index|name": the shortcut saves `file` as `name`, and after saving
-  // may delete the photo at position `index` of the ones it staged.
+  // "file|index|delete or keep|name": the shortcut saves `file` as `name`,
+  // and after saving may delete the photo at position `index` of the ones it
+  // staged, unless marked "keep": the original had HDR that the JXL lacks
+  // (except a gain map not labeled as Apple's: the owner's choice).
+  // (Older shortcuts read only the first and last fields.)
   // No trailing newline: Shortcuts' Split Text would yield an empty item.
-  fprintf(batch->done_file, "%s%s|%u|%s.jxl", batch->done ? "\n" : "", name_out, job->index, job->name);
+  const int keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
+  fprintf(batch->done_file, "%s%s|%u|%s|%s.jxl", batch->done ? "\n" : "", name_out, job->index,
+          keep ? "keep" : "delete", job->name);
   fflush(batch->done_file);
   batch->done++;
+  batch->kept += keep;
   batch->apple_jpegs += apple_jpeg;
+  batch->not_iphone += hdr.not_iphone;
   batch->bytes_in += orig_size;
   batch->bytes_out += (double)jxl_len;
   ok = 1;
 
   {
-    // e.g. "HEIF 3024x4032" and "2.4 MB -> 1.2 MB (50%), 4.1 s"
-    char in_s[32], out_s[32];
+    // e.g. "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s"
+    char in_s[32], out_s[32], depth[32] = "";
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
+    if (hdr.headroom > 0) {
+      snprintf(depth, sizeof depth, ", HDR %.1f\u00d7", hdr.headroom);
+    } else if (img.bits > 8) {
+      snprintf(depth, sizeof depth, ", 10-bit");
+    }
     say_wrap("  ", "%s %ux%u%s%s%s", format_name(orig_format == FMT_UNKNOWN ? pixel_format : orig_format), img.w,
-             img.h, img.bits > 8 ? ", 10-bit" : "", img.channels == 2 || img.channels == 4 ? ", alpha" : "",
+             img.h, depth, img.channels == 2 || img.channels == 4 ? ", alpha" : "",
              exif_len || xmp_len ? "" : ", no metadata");
     say_wrap("  ", "%s -> %s (%.0f%%), %.1f s", in_s, out_s, orig_size > 0 ? 100.0 * jxl_len / orig_size : 0.0,
              now_seconds() - t0);
@@ -737,6 +860,35 @@ static void say_not_found(const options_t *opt, const char *job) {
   say("  the current folder\n");
   say("  $PWD (%s)\n", pwd && *pwd ? pwd : "not set");
   say("  $SHORTCUTS (%s)\n", shortcuts && *shortcuts ? shortcuts : "not set");
+}
+
+// 1 if a JPEG XL file stores ICC profile `icc` (not libjxl's own
+// description of the color).
+static int jxl_has_profile(const uint8_t *jxl, size_t len, const blob_t *icc) {
+  JxlDecoder *dec = JxlDecoderCreate(NULL);
+  int found = 0;
+  if (dec && JxlDecoderSubscribeEvents(dec, JXL_DEC_COLOR_ENCODING) == JXL_DEC_SUCCESS &&
+      JxlDecoderSetInput(dec, jxl, len) == JXL_DEC_SUCCESS) {
+    JxlDecoderCloseInput(dec);
+    JxlDecoderStatus st;
+    while ((st = JxlDecoderProcessInput(dec)) != JXL_DEC_COLOR_ENCODING && st != JXL_DEC_ERROR &&
+           st != JXL_DEC_SUCCESS && st != JXL_DEC_NEED_MORE_INPUT) {
+    }
+    JxlColorEncoding ce;
+    size_t size = 0;
+    uint8_t *got = NULL;
+    // A stored profile has no description as a color encoding.
+    if (st == JXL_DEC_COLOR_ENCODING &&
+        JxlDecoderGetColorAsEncodedProfile(dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL, &ce) != JXL_DEC_SUCCESS &&
+        JxlDecoderGetICCProfileSize(dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL, &size) == JXL_DEC_SUCCESS &&
+        size == icc->size && (got = (uint8_t *)malloc(size)) != NULL &&
+        JxlDecoderGetColorAsICCProfile(dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL, got, size) == JXL_DEC_SUCCESS) {
+      found = memcmp(got, icc->data, size) == 0;
+    }
+    free(got);
+  }
+  if (dec) JxlDecoderDestroy(dec);
+  return found;
 }
 
 static int file_exists(const char *dir, const char *name) {
@@ -839,6 +991,15 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   if (batch.done < count) {
     say_wrap("", "%zu failed; see the messages above.", count - batch.done);
   }
+  if (batch.kept) {
+    const int one = batch.kept == 1;
+    say_wrap("", "%zu original%s kept: %s HDR isn't in the JXL.", batch.kept, one ? "" : "s", one ? "its" : "their");
+  }
+  if (batch.not_iphone) {
+    const int one = batch.not_iphone == 1;
+    say_wrap("", "%zu HDR photo%s saved as SDR (not an iPhone camera photo); %s offered for deletion.",
+             batch.not_iphone, one ? "" : "s", one ? "its original is" : "their originals are");
+  }
   if (batch.apple_jpegs) {
     const int one = batch.apple_jpegs == 1;
     say("\n");
@@ -927,9 +1088,10 @@ static int selftest_large_io(const char *dir) {
 static int selftest_heif(void) {
   image_t img;
   color_t color;
+  hdr_info_t hdr;
   char err[256] = "";
   say("\nHEIF decoding:\n");
-  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, &img, &color, err, sizeof err) != 0) {
+  if (heif_decode(kSelftestHeic, sizeof kSelftestHeic, 0, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     return -1;
   }
@@ -950,6 +1112,67 @@ static int selftest_heif(void) {
   return bad ? -1 : 0;
 }
 
+// Decodes the embedded HDR HEIC (with a gain map and Apple's HDR profile) and
+// checks its HDR pixels, then that the profile is kept in a JPEG XL.
+static int selftest_hdr(const options_t *opt) {
+  image_t img;
+  color_t color;
+  hdr_info_t hdr;
+  char err[256] = "";
+  say("\nHDR decoding:\n");
+  if (heif_decode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, 0, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
+    say("  FAILED: %s\n", err);
+    return -1;
+  }
+  int bad = 0;
+  if (hdr.note[0] || fabs(hdr.headroom - kSelftestHdrHeadroom) > 0.01 || img.w != 64 || img.h != 48) {
+    say_wrap("  ", "FAILED: not decoded as HDR (%ux%u, headroom %.3f; %s)", img.w, img.h, hdr.headroom,
+             hdr.note[0] ? hdr.note : "no note");
+    bad = 1;
+  }
+  for (size_t i = 0; !bad && i < sizeof kSelftestHdrPixels / sizeof kSelftestHdrPixels[0]; i++) {
+    const unsigned *want = kSelftestHdrPixels[i];
+    uint16_t px[4];
+    if (img.render(img.owner, want[0], want[1], 1, 1, (uint8_t *)px, sizeof px) != 0) {
+      say("  FAILED: out of memory\n");
+      bad = 1;
+      break;
+    }
+    for (int c = 0; c < 3; c++) {
+      if (abs((int)px[c] - (int)want[2 + c]) > 2) {
+        say_wrap("  ", "FAILED: HDR pixel (%u, %u) is %u/%u/%u, expected %u/%u/%u", want[0], want[1], px[0], px[1],
+                 px[2], want[2], want[3], want[4]);
+        bad = 1;
+        break;
+      }
+    }
+  }
+  if (!bad) say_wrap("  ", "ok: HDR %.1f\u00d7, %u nits peak", hdr.headroom, (unsigned)(hdr.peak * GAINMAP_SDR_WHITE_NITS + 0.5));
+  if (!bad && color.hdr_icc.size != kSelftestHdrProfileSize) {
+    say("  FAILED: Apple's HDR profile not found\n");
+    bad = 1;
+  }
+  if (!bad) {
+    encode_meta_t em = {&color, NULL, 0, NULL, 0, hdr.peak * GAINMAP_SDR_WHITE_NITS};
+    uint8_t *out = NULL;
+    size_t out_len = 0;
+    if (encode_jxl(&img, &em, opt, &out, &out_len, err, sizeof err) != 0) {
+      say("  FAILED: %s\n", err);
+      bad = 1;
+    } else if (!jxl_has_profile(out, out_len, &color.hdr_icc)) {
+      // libjxl stored its own description of the color instead
+      say("  FAILED: Apple's HDR profile not kept in the JPEG XL\n");
+      bad = 1;
+    } else {
+      say("  ok: Apple's HDR profile kept\n");
+    }
+    free(out);
+  }
+  image_free(&img);
+  color_free(&color);
+  return bad ? -1 : 0;
+}
+
 static int selftest(const options_t *opt) {
   print_header(opt);
   say("\nEnvironment:\n  PWD=%s\n  SHORTCUTS=%s\n  HOME=%s\n", getenv("PWD") ? getenv("PWD") : "(unset)",
@@ -961,6 +1184,7 @@ static int selftest(const options_t *opt) {
   selftest_io("$SHORTCUTS", getenv("SHORTCUTS"));
   if (selftest_large_io(opt->dir ? opt->dir : ".") != 0) return 1;
   if (selftest_heif() != 0) return 1;
+  if (selftest_hdr(opt) != 0) return 1;
 
   // Synthetic 12 MP photo-like image: smooth gradients plus sensor-like noise.
   const uint32_t w = 4032, h = 3024;
@@ -994,10 +1218,9 @@ static int selftest(const options_t *opt) {
   memset(&em, 0, sizeof em);
   uint8_t *out = NULL;
   size_t out_len = 0;
-  const char *color_desc = "sRGB";
   char err[256] = "";
   const double t0 = now_seconds();
-  if (encode_jxl(&img, &em, opt, &out, &out_len, &color_desc, err, sizeof err) != 0) {
+  if (encode_jxl(&img, &em, opt, &out, &out_len, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     image_free(&img);
     return 1;
@@ -1030,17 +1253,18 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [--retry] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
+  say("usage: jxlbatch [--retry] [--sdr] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
       "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
       "  -C  folder holding JOBFILE and the jxl_in_* files\n"
-      "  --retry  do nothing if a run already started this batch\n");
+      "  --retry  do nothing if a run already started this batch\n"
+      "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n");
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0};
+  options_t opt = {83.0f, 7, NULL, 0, 0};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
@@ -1071,6 +1295,8 @@ int main(int argc, char **argv) {
       }
     } else if (!strcmp(a, "--retry")) {
       opt.retry = 1;
+    } else if (!strcmp(a, "--sdr")) {
+      opt.sdr = 1;
     } else if (!strcmp(a, "--selftest")) {
       mode = 1;
     } else if (!strcmp(a, "--memtest")) {

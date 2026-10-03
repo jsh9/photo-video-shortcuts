@@ -3,6 +3,58 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.2.0] - 2026-10-02
+
+- Added
+  - HDR photos: an HDR HEIC from an iPhone becomes an HDR JPEG XL that lights
+    up in Photos like the original. Both of Apple's gain maps are converted:
+    ISO 21496-1 (iOS 18 and later) and Apple's older format (iOS 14 to 17).
+    `jxlbatch` applies the gain map and stores the HDR result as 16-bit PQ in
+    Display P3, with SDR white at 203 nits and the photo's peak brightness,
+    because Photos ignores JPEG XL gain maps. a-Shell shows such a photo as,
+    for example, "HDR 3.5×". The JPEG XL also keeps the HEIC's HDR color
+    profile (iOS 18 and later), with the tone curve Apple uses to dim the photo
+    on screens that can't show all of it (including SDR screens), so it looks
+    like the original there too; a-Shell says so when a photo has none.
+  - HDR photos edited in Photos (checked with crops) are converted as HDR too.
+    Photos saves them upright at their new size, without the label iPhone
+    cameras put on Apple's gain maps, and without an HDR color profile, so
+    a-Shell says "Apple's HDR profile not found" for them: on screens that
+    can't show all of their HDR, they may look darker or brighter than the
+    original.
+  - Gain maps an iPhone camera labels as Apple's are used, and ISO 21496-1 gain
+    maps without the label if the photo is stored upright and uncropped. Other
+    HDR HEICs (e.g. saved turned or cropped by other apps or on a Mac) are
+    converted as SDR, with "HDR gain map not used (not an iPhone camera photo)"
+    in a-Shell (and a count at the end of the batch), and their originals are
+    still offered for deletion.
+  - A gain map claiming more than 16 stops (65,536×), in either format (for
+    Apple's older one, the headroom its maker notes give), is treated as
+    malformed: the photo is converted as SDR and its original is kept.
+  - Originals whose HDR isn't in the JPEG XL are not offered for deletion: a
+    photo whose gain map can't be used (converted as SDR, with a note "HDR gain
+    map not used" in a-Shell; except the photos above), an HDR photo sent as
+    JPEG (with a note), and `--sdr`. `jxl_done.txt` lines are now
+    `file|index|delete or keep|name`. **Update both the shortcuts and
+    `jxlbatch.wasm`**: an older shortcut offers every converted original for
+    deletion, and the new shortcut with an older `jxlbatch.wasm` offers none.
+  - `jxlbatch --sdr` converts HDR photos as SDR (the shortcuts don't use it).
+  - `jxlbatch --selftest` also checks HDR decoding and that Apple's HDR profile
+    is kept.
+- Changed
+  - HDR photos are computed a region at a time as the encoder reads them, so a
+    48 MP HDR photo takes about as much memory as an SDR one.
+  - HEIF photos are cropped and turned after conversion to RGB, as Apple shows
+    them, so photos cropped at an odd offset come out slightly differently
+    along their edges (libheif cropped first, which shifted the colors of 4:2:0
+    photos there).
+- Fixed
+  - A false "orientation check" warning in a-Shell for photos edited in Photos,
+    whose EXIF keeps the size from before the edit: the check now runs only
+    when the EXIF size is the photo's size as stored.
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/5
+
 ## [Compress Photos 0.1.1] - 2026-10-01
 
 - Fixed

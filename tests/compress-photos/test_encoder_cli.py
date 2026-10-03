@@ -3,6 +3,8 @@ jxlbatch's command line and batch behavior, for every build (SIMD and scalar
 WebAssembly, native).
 """
 
+import zlib
+
 import photo_helpers as ph
 import pytest
 from PIL import Image
@@ -24,6 +26,9 @@ def test_selftest_passes(encoder, tmp_path):
     result = encoder.run(['--selftest'], tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'Self-test passed' in result.stdout
+    # including the HDR code: a gain map photo with Apple's HDR profile
+    assert 'HDR decoding:' in result.stdout
+    assert "Apple's HDR profile kept" in result.stdout
 
 
 @pytest.mark.parametrize('quality', ['abc', '0', '101', '-5'])
@@ -84,9 +89,10 @@ def test_batch_continues_after_failed_photos(encoder, tmp_path):
     assert 'cannot read jxl_in_3.orig' in result.stdout
     assert 'Done: 2 of 4 converted' in result.stdout
     assert (tmp_path / 'jxl_started').exists()
-    # The format JXL-Import reads: "file|index|name", one per line.
+    # The format the shortcuts read: "file|index|delete or keep|name", one
+    # per line ("keep": the JXL lacks the original's HDR).
     assert (tmp_path / 'jxl_done.txt').read_text() == (
-        'jxl_out_1.jxl|1|a.jxl\njxl_out_4.jxl|4|d.jxl'
+        'jxl_out_1.jxl|1|delete|a.jxl\njxl_out_4.jxl|4|delete|d.jxl'
     )
 
 
@@ -109,5 +115,46 @@ def test_saved_names_are_safe(encoder, tmp_path):
     result = encoder.run(['jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout
     assert (tmp_path / 'jxl_done.txt').read_text() == (
-        'jxl_out_1.jxl|1|My_Photo_ 1_2.jxl'
+        'jxl_out_1.jxl|1|delete|My_Photo_ 1_2.jxl'
     )
+
+
+def test_sdr_option(encoder, tmp_path):
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    result = encoder.run(['--sdr', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'Done: 1 of 1 converted' in result.stdout
+
+
+def with_cicp(png, primaries, transfer):
+    """Adds a cICP chunk (CICP color: primaries, transfer, RGB, full range)."""
+    data = png.read_bytes()
+    chunk = b'cICP' + bytes([primaries, transfer, 0, 1])
+    crc = zlib.crc32(chunk).to_bytes(4, 'big')
+    png.write_bytes(
+        data[:33] + (4).to_bytes(4, 'big') + chunk + crc + data[33:]
+    )
+
+
+@pytest.mark.parametrize(
+    ('mode', 'primaries', 'pq'),
+    [
+        ('RGB', 9, True),  # Rec. 2100 PQ: stored as PQ
+        ('RGB', 5, False),  # primaries jxlbatch doesn't map: stored as sRGB
+        ('L', 9, False),  # gray: stored as sRGB
+    ],
+)
+def test_pq_png_brightness(encoder, tmp_path, mode, primaries, pq):
+    # A PQ image's intensity target is PQ's peak, 10,000 nits; one stored as
+    # sRGB keeps the default, like any SDR image.
+    Image.new(mode, (16, 16), 128).save(tmp_path / 'pq.png')
+    with_cicp(tmp_path / 'pq.png', primaries, 16)
+    ph.stage(tmp_path, [tmp_path / 'pq.png'])
+    result = encoder.run(['jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    jxl = tmp_path / 'jxl_out_1.jxl'
+    info = ph.run(['jxlinfo', '-v', jxl], check=True).stdout.lower()
+    assert (
+        'pq transfer function' in info or 'transfer function: pq' in info
+    ) == pq
+    assert ph.jxl_intensity_target(jxl) == (10000 if pq else None)

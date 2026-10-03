@@ -585,11 +585,13 @@ def save_results(b, originals=None):
     Saves the JPEG XL files listed in jxl_done.txt to Photos, each also to the
     albums its original is in.
 
-    Each line is "file|index|name". With ``originals`` (the staged photos), the
-    albums are read from the original at the line's index, and that original is
-    added to the variable Converted. Without, they are read from
-    jxl_albums_<index>.txt, one album name per line, if that file exists.
-    Returns the number of photos saved.
+    Each line is "file|index|delete or keep|name". With ``originals`` (the
+    staged photos), the albums are read from the original at the line's index,
+    and that original is added to the variable Converted (offered for deletion)
+    if the line says "delete"; "keep" means the JPEG XL lacks the original's
+    HDR. (A line from an older jxlbatch, "file|index|name", keeps it.) Without
+    ``originals``, the albums are read from jxl_albums_<index>.txt, one album
+    name per line, if that file exists. Returns the number of photos saved.
     """
     lines = b.split(b.text_from_input(b.ashell_get_file('jxl_done.txt')), '\n')
 
@@ -609,7 +611,12 @@ def save_results(b, originals=None):
 
         if originals:
             original = b.item_at_index(originals, index)
-            b.append_variable('Converted', original)
+            delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
+            b.if_has_value(
+                delete,
+                lambda: b.append_variable('Converted', original),
+                lambda: None,
+            )
             add_to_albums(b.photo_albums(original))
         else:
             albums_file = b.ashell_get_file(
@@ -703,7 +710,12 @@ def build_compress(sample):
         count = save_results(b, photos)
         b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
         b.notification('JPEG XL', 'Saved ', count, ' photo(s) to Photos.')
-        b.delete_photos(variable('Converted'))
+        # Empty when every original is kept (or with an older jxlbatch).
+        b.if_has_value(
+            variable('Converted'),
+            lambda: b.delete_photos(variable('Converted')),
+            lambda: None,
+        )
 
     b.if_has_value(SHORTCUT_INPUT, from_share_sheet, from_picker)
     return b.actions

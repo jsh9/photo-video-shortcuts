@@ -154,3 +154,63 @@ def test_written_file_is_valid(gen, shortcuts, tmp_path, monkeypatch):
         wf = gen.workflow(sample, name, actions, name == gen.NAME_A)
         gen.write(name, wf, sign=False)
         assert (tmp_path / f'{name}.unsigned.wflow').exists()
+
+
+def test_kept_originals_not_offered_for_deletion(shortcuts):
+    # Each jxl_done.txt line is "file|index|delete or keep|name". An original
+    # joins Converted (offered for deletion at the end) only inside "If
+    # (item 3 matches ^delete$) has any value": "keep" (the JXL lacks its
+    # HDR) and older jxlbatch lines (item 3 is then the name) keep it.
+    actions = shortcuts['Compress Photos']
+    matches = [
+        ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == '^delete$'
+    ]
+    assert len(matches) == 1
+    groups, inside = set(), []
+    appended = 0
+    for action in actions:
+        p = ph.params(action)
+        if ph.ident(action) == 'is.workflow.actions.conditional':
+            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
+            if mode == 0 and matches[0] in repr(p.get('WFInput')):
+                groups.add(group)
+                inside.append(group)
+            elif group in groups and mode in (1, 2) and group in inside:
+                inside.remove(group)
+
+        if ph.ident(action) == 'is.workflow.actions.appendvariable' and (
+            p['WFVariableName'] == 'Converted'
+        ):
+            assert inside, 'an original joins Converted unconditionally'
+            appended += 1
+
+    assert appended == 1
+
+
+def test_delete_prompt_only_with_originals_to_delete(shortcuts):
+    # When every original is "keep", Converted is empty: Delete Photos runs
+    # only inside "If Converted has any value".
+    actions = shortcuts['Compress Photos']
+    deletes, open_groups = 0, []
+    for action in actions:
+        p = ph.params(action)
+        if ph.ident(action) == 'is.workflow.actions.conditional':
+            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
+            if mode == 0:
+                open_groups.append((
+                    group,
+                    "'Converted'" in repr(p['WFInput']),
+                ))
+            elif mode == 1:
+                open_groups[-1] = (group, False)  # the Otherwise branch
+            else:
+                open_groups.pop()
+
+        if ph.ident(action) == 'is.workflow.actions.deletephotos':
+            assert any(converted for _, converted in open_groups)
+            deletes += 1
+
+    assert deletes == 1

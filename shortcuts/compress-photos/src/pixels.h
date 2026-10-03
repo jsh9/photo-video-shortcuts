@@ -17,6 +17,10 @@ typedef struct {
   int bits;              // significant bits per sample: 8, 10, 12 or 16
   void *owner;           // decoder object owning `data`, or NULL if malloc'ed
   void (*owner_free)(void *owner);
+  // Pixels computed on request instead of stored (`data` is NULL): writes
+  // the w x h region at (x, y) to `out`, rows `stride` bytes apart. `owner`
+  // is its state. Returns 0, or -1 if out of memory.
+  int (*render)(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t *out, size_t stride);
 } image_t;
 
 // Color of the decoded pixels: an ICC profile, else CICP code points, else sRGB.
@@ -24,20 +28,42 @@ typedef struct {
   blob_t icc;
   int cicp_present;
   uint8_t cicp[4];  // primaries, transfer, matrix (0 = RGB), full-range flag
+  // HDR photos (PQ, by CICP): Apple's profile for the same color space, if the
+  // photo has one, with the curve Apple tone-maps the HDR with on dimmer screens.
+  blob_t hdr_icc;
 } color_t;
+
+// What heif_decode did with an HDR gain map.
+typedef struct {
+  int has_gain_map;  // the photo is HDR (its HDR is lost unless headroom > 0)
+  double headroom;   // > 0: the image is HDR, with this headroom (relative to SDR white)
+  double peak;       // its brightest pixels can get this bright (relative to SDR white)
+  char note[128];    // why the photo's gain map wasn't used, if it wasn't
+  int not_iphone;    // the gain map isn't labeled as Apple's, so it wasn't used; the original may still be deleted
+  char warning[128];  // about an HDR result, e.g. that Apple's HDR profile is missing
+} hdr_info_t;
 
 // JPEG or PNG. Pixels are as stored (EXIF orientation not applied).
 int stb_decode(const uint8_t *buf, size_t len, image_t *img, char *err, size_t err_len);
-// HEIF/HEIC primary image, upright (irot/imir applied), with its color.
-int heif_decode(const uint8_t *buf, size_t len, image_t *img, color_t *color, char *err, size_t err_len);
+// HEIF/HEIC primary image, upright (its transforms applied), with its color.
+// A photo with a gain map (ISO 21496-1, or Apple's older format) becomes HDR
+// unless `sdr`: 16-bit PQ with SDR white at 203 nits, computed on request
+// (see hdr.h); `hdr` says so, or why not. `transposed`, if given, is set
+// to 1 if the photo's own transforms turned it by a quarter turn (so its
+// stored size is the result's transposed).
+int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *color, hdr_info_t *hdr,
+                int *transposed, char *err, size_t err_len);
 void heif_decoder_version(char *buf, size_t len);
 
 void image_free(image_t *img);
 void color_free(color_t *color);
 size_t pixel_size(const image_t *img);  // bytes per pixel
 
-// Turns a decoder-owned or padded image into a packed, malloc'ed one.
+// Turns a decoder-owned, padded or rendered image into a packed, malloc'ed
+// one. Returns 0, or -1 if out of memory.
 int image_make_packed(image_t *img);
+// Crops a stored image to w x h at (left, top); the region must lie inside it.
+void image_crop(image_t *img, uint32_t left, uint32_t top, uint32_t w, uint32_t h);
 // Removes the alpha channel when every pixel is fully opaque. Returns 1 if removed.
 int image_drop_opaque_alpha(image_t *img);
 // Applies EXIF orientation `o` (2..8) so the pixels become upright.
