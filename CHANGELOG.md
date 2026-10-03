@@ -13,6 +13,8 @@ encoder. Every release includes the current files of all shortcuts.
     rendering within about 1%. Only the pixels of those photos change; ISO
     21496-1 gain maps (iOS 18 and later) and the headroom shown in a-Shell are
     unaffected. Update `jxlbatch.wasm` (fixes #6).
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/7
 
 ## [Compress Photos 0.2.0] - 2026-10-02
 
