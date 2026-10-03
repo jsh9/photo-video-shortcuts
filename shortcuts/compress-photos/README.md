@@ -174,14 +174,16 @@ offered for deletion**, and deleting it loses its HDR.
 
 **Edited photos:** checked with HDR photos edited in Photos, from an iPhone 17
 Pro (iOS 26) and an iPhone 13 mini (iOS 16, Apple's older gain map): they
-convert as HDR. Photos writes no HDR profile into an edited photo, so a-Shell
-says `! Apple's HDR profile not found` for those from iOS 18 and later (see
-below): on screens that can't show all of the HDR, the JXL looks a little
-darker or brighter than the edited HEIC (at full brightness they match), while
-a JXL converted from the unedited photo keeps the profile. Checked with crops,
-rotations and adjustments (exposure, shadows, highlights, a style). If one
-gives `not an iPhone camera photo`, tap Don't Allow at the delete prompt (this
-keeps the whole batch's originals) and delete the others by hand.
+convert as HDR. When Photos saves an edit it writes a new gain map (the
+headroom can change) and drops the original's HDR profile with Apple's tone
+curve, so a-Shell says `! Apple's HDR profile not found` for those from iOS 18
+and later (see below): on screens that can't show all of the HDR, the JXL looks
+a little darker or brighter than the edited HEIC (at full brightness they
+match), while a JXL converted from the unedited photo keeps the profile.
+Checked with crops, rotations and adjustments (exposure, shadows, highlights, a
+style). If one gives `not an iPhone camera photo`, tap Don't Allow at the
+delete prompt (this keeps the whole batch's originals) and delete the others by
+hand.
 
 **Implausible brightness:** a gain map claiming to brighten the photo by more
 than 16 stops (65,536×), in either format (for Apple's older one, the headroom

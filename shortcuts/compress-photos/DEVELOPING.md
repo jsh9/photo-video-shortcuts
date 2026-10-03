@@ -150,12 +150,14 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   size (`irot` 0, no `clap`, EXIF orientation 1), a half-size gain map without
   the label (no `auxC`, no `auxl` reference), sometimes with a `clap` of its
   own, and a `tmap` item with an nclx `colr` (12/16/6, no ICC profile, so no
-  `hdgm` curve) and `use_base_colour_space` 0. An edited photo with Apple's
-  older gain map keeps the label. For other unlabeled gain maps `jxlbatch`
-  doesn't guess. ImageIO, for example, writes ISO gain maps without the label
-  and without transforms of their own, and a gain map's shape can't tell
-  whether a 180° turn, a mirror or a square photo's rotation applies to it. So
-  such a photo, if turned or cropped, is converted as SDR with
+  `hdgm` curve) and `use_base_colour_space` 0. So the edit drops the curve the
+  camera original had, and the gain map is a new one (an exposure edit raised a
+  photo's headroom from 3.5× to 8×). An edited photo with Apple's older gain
+  map keeps the label. For other unlabeled gain maps `jxlbatch` doesn't guess.
+  ImageIO, for example, writes ISO gain maps without the label and without
+  transforms of their own, and a gain map's shape can't tell whether a 180°
+  turn, a mirror or a square photo's rotation applies to it. So such a photo,
+  if turned or cropped, is converted as SDR with
   `! HDR gain map not used (not an iPhone camera photo)`, and, by the owner's
   choice, its original may still be deleted (`delete` in `jxl_done.txt`), on
   every path (also with `--sdr` or malformed metadata). The batch ends with how
