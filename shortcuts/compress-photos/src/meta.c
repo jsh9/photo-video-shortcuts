@@ -358,8 +358,18 @@ static int heif_describes_primary(const heif_t *h, uint32_t item_id) {
   return 0;
 }
 
+// 1 if the item describes ('cdsc') some item other than the primary image,
+// e.g. a gain map's own XMP packet (Apple's HDRGainMapVersion).
+static int heif_describes_other(const heif_t *h, uint32_t item_id) {
+  for (size_t i = 0; i < h->num_cdsc; i++) {
+    if (h->cdsc[2 * i] == item_id && (!h->has_primary || h->cdsc[2 * i + 1] != h->primary)) return 1;
+  }
+  return 0;
+}
+
 // Picks the best item of the given type (preferring one linked to the
-// primary image) and returns its id, or 0.
+// primary image; one linked only to other images isn't the photo's) and
+// returns its id, or 0.
 static uint32_t heif_pick_item(const heif_t *h, uint32_t type, const char *content_type) {
   uint32_t best = 0;
   int best_score = -1;
@@ -367,7 +377,9 @@ static uint32_t heif_pick_item(const heif_t *h, uint32_t type, const char *conte
     const heif_item_t *it = &h->items[i];
     if (it->type != type) continue;
     if (content_type && strcmp(it->content_type, content_type) != 0) continue;
-    int score = heif_describes_primary(h, it->id) ? 1 : 0;
+    const int primary = heif_describes_primary(h, it->id);
+    if (!primary && heif_describes_other(h, it->id)) continue;
+    int score = primary ? 1 : 0;
     if (score > best_score) {
       best = it->id;
       best_score = score;

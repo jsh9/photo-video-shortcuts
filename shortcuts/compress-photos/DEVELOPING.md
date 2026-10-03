@@ -286,8 +286,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   and last fields; a new shortcut with an older `jxlbatch` sees the name as the
   third field and keeps every original.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
-  belong to the gain map's own XMP packet, not the photo's, so they aren't
-  copied.
+  belong to the gain map's own XMP packet (linked to the gain map by `cdsc`),
+  not the photo's, so they aren't copied: an EXIF or XMP item linked only to
+  other images is never taken as the photo's, even when the photo has none (an
+  iPhone 13 photo from iOS 15 has XMP on its gain map only).
 - **Test photos:** `tests/compress-photos/fixtures/hdr/` holds 52 tiny HEICs
   covering these layouts (`edited_in_photos` is laid out as Photos saves an
   edit), with expected results from an independent NumPy implementation

@@ -14,6 +14,10 @@ encoder. Every release includes the current files of all shortcuts.
     within about 1%. Only the pixels of those photos change; ISO 21496-1 gain
     maps (iOS 18 and later) and the headroom shown in a-Shell are unaffected.
     Update `jxlbatch.wasm` (fixes #6).
+  - A photo with Apple's older gain map and no XMP of its own (an iPhone 13
+    photo from iOS 15, for example) got its gain map's XMP packet
+    (`HDRGainMapVersion`) in the JPEG XL. Metadata linked only to other images
+    in the HEIC is no longer taken as the photo's.
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/7
 
