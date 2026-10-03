@@ -6,7 +6,8 @@ make_hdr_fixtures.py).
 - ISO 21496-1 gain maps, applied at full strength (the alternate rendition).
 - Apple's older gain maps (before iOS 18), as Apple documents them in
   "Applying Apple HDR effect to your photos", except that the gain map is
-  linearized with a gamma of 2.2, as Apple renders it (see apply_apple).
+  linearized with a gamma of 2.2, as Apple renders it (see apply_apple):
+  https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
 
 Both give linear light with SDR white at 1.0, stored as 16-bit PQ with SDR
 white at 203 nits.

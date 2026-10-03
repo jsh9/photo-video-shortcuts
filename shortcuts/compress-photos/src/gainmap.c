@@ -68,6 +68,7 @@ int gainmap_parse(const uint8_t *p, size_t len, gainmap_meta_t *m, char *err, si
 
 void gainmap_apple_meta(double maker33, double maker48, gainmap_meta_t *m) {
   // Apple's formula, from "Applying Apple HDR effect to your photos"
+  // (https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos)
   double stops;
   if (maker33 < 1.0) {
     stops = maker48 <= 0.01 ? -20.0 * maker48 + 1.8 : -0.101 * maker48 + 1.601;
@@ -436,8 +437,8 @@ int gainmap_prepare(image_t *base, image_t *gm, const double window[4], int gm_f
       if (m->apple_headroom > 0) {
         // Apple's older gain map: 1 + (headroom - 1) * value, linearized
         // with a gamma of 2.2, which is what Apple's rendering does (its
-        // documentation says Rec. 709, which is 8-15% brighter in the
-        // midtones; see issue #6).
+        // documentation, linked at gainmap_apple_meta, says Rec. 709, which
+        // is 8-15% brighter in the midtones; see issue #6).
         gain = 1 + (m->apple_headroom - 1) * pow(v, 2.2);
       } else {
         // ISO 21496-1: gain (log2) = min + (max - min) * value^(1/gamma), here

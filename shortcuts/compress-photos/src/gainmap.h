@@ -2,7 +2,8 @@
 // image, stored as PQ. ISO 21496-1 gain maps (iPhones since iOS 18), and
 // Apple's older gain maps (iPhones on iOS 14 to 17), as Apple documents them
 // in "Applying Apple HDR effect to your photos" (but with the curve Apple
-// renders them with).
+// renders them with):
+// https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
 #ifndef JXLBATCH_GAINMAP_H
 #define JXLBATCH_GAINMAP_H
 

@@ -159,9 +159,10 @@ Both of Apple's gain map formats are converted:
 
 - **iOS 18 and later**: the ISO 21496-1 gain map.
 - **iOS 14 to 17** (iPhone 12 and later): Apple's older gain map, applied the
-  way Apple renders it. That differs from Apple's documentation ("Applying
-  Apple HDR effect to your photos") in one point: the gain map's curve is a
-  gamma of 2.2, not Rec. 709, which would come out brighter.
+  way Apple renders it. That differs from Apple's documentation
+  (["Applying Apple HDR effect to your photos"](https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos))
+  in one point: the gain map's curve is a gamma of 2.2, not Rec. 709, which
+  would come out brighter.
 
 Gain maps an iPhone camera labels as Apple's are used: for those, how the gain
 map lines up with a rotated or cropped photo is known. An ISO 21496-1 gain map
