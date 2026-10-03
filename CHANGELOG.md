@@ -3,7 +3,7 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
-## [Compress Photos 0.2.1] - 2026-10-02
+## [Compress Photos 0.2.1] - 2026-10-03
 
 - Fixed
   - HDR photos with Apple's older gain map (iOS 14 to 17) came out 8-15%
