@@ -132,14 +132,15 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   item API: a `tmap` whose `dimg` inputs are the primary image and the gain
   map. Its data is parsed per ISO 21496-1 (version 0).
 - **Apple's older gain maps** (iOS 14 to 17, iPhone 12 and later), as Apple
-  documents them in "Applying Apple HDR effect to your photos": with no `tmap`,
-  an auxiliary image of type `urn:com:apple:photo:2020:aux:hdrgainmap`. Its
-  headroom comes from the photo's maker notes, tags 33 and 48 (exiftool's
-  `HDRHeadroom` and `HDRGain`; Apple's maker notes start with `Apple iOS`, have
-  their own byte order, and count offsets from their start): `stops` is
-  `-20 * t48 + 1.8` (`t48 <= 0.01`) or `-0.101 * t48 + 1.601` when `t33 < 1`,
-  else `-70 * t48 + 3` or `-0.303 * t48 + 2.303`; the headroom is
-  `2^max(stops, 0)`. Without those tags the photo stays SDR.
+  documents them in "Applying Apple HDR effect to your photos" (except the gain
+  map's curve; see "The math" below): with no `tmap`, an auxiliary image of
+  type `urn:com:apple:photo:2020:aux:hdrgainmap`. Its headroom comes from the
+  photo's maker notes, tags 33 and 48 (exiftool's `HDRHeadroom` and `HDRGain`;
+  Apple's maker notes start with `Apple iOS`, have their own byte order, and
+  count offsets from their start): `stops` is `-20 * t48 + 1.8` (`t48 <= 0.01`)
+  or `-0.101 * t48 + 1.601` when `t33 < 1`, else `-70 * t48 + 3` or
+  `-0.303 * t48 + 2.303`; the headroom is `2^max(stops, 0)`. Without those tags
+  the photo stays SDR.
 - **Which gain maps are used**: those an iPhone camera labels with Apple's
   auxiliary image type (`auxC` `urn:com:apple:photo:2020:aux:hdrgainmap`, on
   ISO 21496-1 gain maps too). For those, how the gain map lines up with a
@@ -208,8 +209,14 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   as Photos writes for an edited photo), which is the same when they have the
   photo's primaries. Those come from the `tmap` item's color: its ICC profile's
   `cicp` tag, or else its nclx `colr`; other or unknown primaries aren't used.
-  For Apple's older format, `g` is linearized with the inverse Rec. 709 curve
-  and `hdr = sdr * (1 + (headroom - 1) * g)`.
+  For Apple's older format, `hdr = sdr * (1 + (headroom - 1) * g^2.2)`. Apple's
+  documentation says `g` is encoded with the Rec. 709 curve, but Apple's
+  renderer uses a gamma of 2.2: fitted pixel by pixel against Core Image's HDR
+  and SDR renderings of three iPhone 13 and 13 mini photos (macOS 27,
+  `tests/compress-photos/hdr_pixels.swift`), gamma 2.2 is off by 0.001 or less
+  (rms, in `(gain - 1) / (headroom - 1)`), the sRGB curve by 0.004 and Rec. 709
+  by 0.028, which is 8-15% too bright in the midtones (issue #6). The gain at
+  values near 1 matches the headroom from the maker notes.
 - **The result** is 16-bit PQ with SDR white at 203 nits (ITU-R BT.2408), in
   Display P3 (or sRGB) primaries, computed from lookup tables a region at a
   time, as libjxl reads its chunks, so there is no 16-bit copy of the photo. It

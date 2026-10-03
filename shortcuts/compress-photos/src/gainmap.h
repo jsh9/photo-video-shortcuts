@@ -1,7 +1,8 @@
 // HDR photos with a gain map: the SDR image plus the gain map make one HDR
 // image, stored as PQ. ISO 21496-1 gain maps (iPhones since iOS 18), and
 // Apple's older gain maps (iPhones on iOS 14 to 17), as Apple documents them
-// in "Applying Apple HDR effect to your photos".
+// in "Applying Apple HDR effect to your photos" (but with the curve Apple
+// renders them with).
 #ifndef JXLBATCH_GAINMAP_H
 #define JXLBATCH_GAINMAP_H
 
@@ -29,7 +30,7 @@ typedef struct {
   // gamma, and offsets added before and removed after applying the gain.
   double min[3], max[3], gamma[3], base_offset[3], alternate_offset[3];
   // > 0: Apple's older gain map, with this headroom (the gain is 1 +
-  // (headroom - 1) * value, the value linearized with the Rec. 709 curve);
+  // (headroom - 1) * value, the value linearized with a gamma of 2.2);
   // the fields above are then unused, except the two headrooms.
   double apple_headroom;
 } gainmap_meta_t;

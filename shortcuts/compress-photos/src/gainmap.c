@@ -100,7 +100,6 @@ int gainmap_same_shape(double w1, double h1, double w2, double h2) {
 // Color of the SDR image
 
 static double srgb_to_linear(double v) { return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
-static double rec709_to_linear(double v) { return v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1 / 0.45); }
 
 // An ICC tag's data, or NULL.
 static const uint8_t *icc_tag(const blob_t *icc, const char sig[4], size_t *size) {
@@ -436,8 +435,10 @@ int gainmap_prepare(image_t *base, image_t *gm, const double window[4], int gm_f
       double gain;
       if (m->apple_headroom > 0) {
         // Apple's older gain map: 1 + (headroom - 1) * value, linearized
-        // with the inverse Rec. 709 curve.
-        gain = 1 + (m->apple_headroom - 1) * rec709_to_linear(v);
+        // with a gamma of 2.2, which is what Apple's rendering does (its
+        // documentation says Rec. 709, which is 8-15% brighter in the
+        // midtones; see issue #6).
+        gain = 1 + (m->apple_headroom - 1) * pow(v, 2.2);
       } else {
         // ISO 21496-1: gain (log2) = min + (max - min) * value^(1/gamma), here
         // at full weight (the display's headroom reaching the alternate one).
