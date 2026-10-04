@@ -27,10 +27,9 @@ ______________________________________________________________________
 ```
 Compress Photos                              (shortcut)
    photos: from the share sheet, or else picked in its own photo picker
-   keeps the still photos from the photo library (skips Live Photos, videos
-   and other items, and says how many), asks for a quality preset, copies
-   each original photo to a-Shell's shared folder as jxl_in_N.orig, writes
-   jxl_job.txt, then runs in a-Shell:
+   keeps the still photos (skips Live Photos and videos, and says how many),
+   asks for a quality preset, copies each original photo to a-Shell's shared
+   folder as jxl_in_N.orig, writes jxl_job.txt, then runs in a-Shell:
      jxlbatch -q 83 -e 7 jxl_job.txt   (after a short wait, in a-Shell's
                                         Shortcuts folder; retried if a-Shell
                                         was still starting up)
@@ -45,28 +44,41 @@ or, from the picker:
    originals whose JXL was saved (and has their HDR)
 ```
 
-Only still photos from the photo library are staged. Each item goes through
-Filter Photos on its own (the item is the filter's input), with
-`Media Type is Image` and `Photo Type is not Live Photo`. The items that pass
-go into the variable `Stills`, which replaces `Photos` from then on, so the job
-indices are positions in `Stills`. The others are counted as Live Photos,
-videos or items not from Photos (two more filters, one condition each) for a
-notification; when `Stills` is empty, the shortcut says "Nothing to convert"
-and stops before the quality list. What this relies on in Filter Photos (read
-from Apple's ContentKit, iOS 26.1):
+Only still photos are staged. Each item is sorted by its own details, which Get
+Details of Images reads in memory from the item, with no photo library query:
+`Media Type` (Image, Video or Audio) and, for an image, `Photo Type` (a list:
+HDR, Panorama, Burst, Live Photo; empty for a plain still photo or a
+screenshot, so it is only read when it has a value). Live Photos (HDR ones too)
+and videos go into the variables `Skipped Live Photos` and `Skipped Videos`,
+counted for a notification. The rest, the items themselves (not copies, so the
+share sheet's Send As choice is kept), go into `Stills`, which replaces
+`Photos` from then on, so the job indices are positions in `Stills`; when it is
+empty, the shortcut says "Nothing to convert" and stops before the quality
+list. What this relies on (ContentKit's `WFImageContentItem` and
+`WFPhotoMediaContentItem`, read from iOS 18.2):
 
-- Properties and values are stored as English names (`Media Type`, `Image`,
-  `Photo Type`, `Live Photo`), whatever the phone's language.
-- A Live Photo's media type is Image. Photo Type is a list (HDR, Panorama,
-  Burst, Live Photo): "is" holds when any entry matches, "is not" only when
-  none does, so an HDR Live Photo isn't taken for a still photo. Screenshots
-  have no Photo Type.
-- The results are new items fetched from the library, so the filter only tests
-  an item, and the item itself is kept: filtering the whole list would replace
-  the files the share sheet sent (its Send As choice). An item that isn't in
-  the library, such as an image shared from Files, never matches.
-- With Any instead of All, a condition the library can't look up directly is
-  checked against the whole library, ignoring the input. The filters use All.
+- Property names and values are stored as English names (`Media Type`, `Image`,
+  `Photo Type`, `Live Photo`), whatever the phone's language, and each Get
+  Details output is named after its property.
+- A photo from the library answers with its asset's media type and subtypes. An
+  image that isn't in the library, such as one shared from Files, answers
+  `Image` with no Photo Type, so it is converted like a photo, as before 0.3.0
+  (JXL-Import saves the result to Photos; nothing is deleted from the share
+  sheet). An item with no Media Type at all is converted too.
+- A list put into a text field is one entry per line, so Match Text
+  `Live Photo` finds it in an HDR Live Photo's `HDR`, `Live Photo`. Match Text
+  is only run on a value that exists (an If "has any value" first).
+
+Filter Photos can't do this, and 0.3.0, which used it, failed on every photo.
+With photos from the library as its input, Shortcuts turns a `Photo Type`
+condition into a Photos-framework predicate on the key `mediaSubtype`, which
+`PHAsset` objects don't answer, and evaluates it on the input items in memory
+(`-[NSArray filteredArrayUsingPredicate:]`), so the action throws
+`NSUnknownKeyException` and the shortcut dies: nothing visible from the share
+sheet, "There was a problem running the shortcut" from the Shortcuts app. (A
+`Media Type` condition alone would work: `mediaType` is a real key.) And with
+an item that isn't in the library, it doesn't test the item at all but searches
+the whole library.
 
 The photo picker (Select Photos) shows Images only, which hides videos; Live
 Photos still show, and are skipped. `test_photo_selection.py` runs this part of
@@ -450,29 +462,29 @@ no input: Continue):
 
 2. Keep the still photos:
 
-   1. **Repeat with Each** item in `Photos`:
-      1. **Filter Photos**: Repeat Item, where All of: Media Type is Image,
-         Photo Type is not Live Photo.
-      2. **If** Photos (from Filter Photos) has any value: **Add to Variable**
-         `Stills`: Repeat Item.
-      3. **Otherwise:**
-         1. **Filter Photos**: Repeat Item, where Media Type is Video.
-         2. **If** Photos has any value: **Add to Variable** `Skipped Videos`:
-            Repeat Item. **Otherwise:** **Filter Photos**: Repeat Item, where
-            Photo Type is Live Photo; **If** Photos has any value: **Add to
-            Variable** `Skipped Live Photos`: Repeat Item; **Otherwise:** **Add
-            to Variable** `Skipped Others`: Repeat Item; **End If**. **End
-            If**.
-      4. **End If**.
-   2. For each of `Skipped Live Photos` (`Live Photo(s)`), `Skipped Videos`
-      (`video(s)`) and `Skipped Others` (`item(s) not from Photos`): **If** it
-      has any value: **Count** its items, **Text** `<Count> <kind>`, **Add to
-      Variable** `Skipped`. **End If**.
+   1. **Repeat with Each** item in `Photos` (never Filter Photos; see
+      [How it works](#1-how-it-works)):
+      1. **Get Details of Images**: Media Type of Repeat Item.
+      2. **If** Media Type has any value:
+         1. **Match Text**: `^Image$` in Media Type, Case Sensitive on.
+         2. **If** Matches has any value:
+            1. **Get Details of Images**: Photo Type of Repeat Item.
+            2. **If** Photo Type has any value: **Match Text** `Live Photo` in
+               Photo Type (Case Sensitive on); **If** Matches has any value:
+               **Add to Variable** `Skipped Live Photos`: Repeat Item;
+               **Otherwise:** **Add to Variable** `Stills`: Repeat Item; **End
+               If**. **Otherwise:** **Add to Variable** `Stills`: Repeat Item.
+               **End If**.
+         3. **Otherwise:** **Add to Variable** `Skipped Videos`: Repeat Item.
+            **End If**.
+      3. **Otherwise:** **Add to Variable** `Stills`: Repeat Item. **End If**.
+   2. For each of `Skipped Live Photos` (`Live Photo(s)`) and `Skipped Videos`
+      (`video(s)`): **If** it has any value: **Count** its items, **Text**
+      `<Count> <kind>`, **Add to Variable** `Skipped`. **End If**.
    3. **If** `Stills` has any value:
       - **If** `Skipped` has any value: **Combine Text** `Skipped` with Custom
         `, `, then **Show Notification**
-        `Skipped <Combined Text>: only still photos from Photos are converted.`
-        **End If**.
+        `Skipped <Combined Text>: only still photos are converted.` **End If**.
       - **Otherwise:** **If** `Skipped` has any value: **Combine Text** and
         **Show Notification** the same way, starting with
         `Nothing to convert. `. **Otherwise** (there were no items at all):
@@ -528,8 +540,10 @@ no input: Continue):
    2. a-Shell **Execute Command**, Keep Going off, with these commands:
       - `sleep 2`
       - `cd ~shortcuts`
+      - `<Skipped Echo>` (the variable; an empty line when nothing was skipped)
       - `jxlbatch -q <Matches> -e 7 jxl_job.txt`
       - `jxlbatch --retry -q <Matches> -e 7 jxl_job.txt`
+      - `<Skipped Echo>`
       - `open shortcuts://run-shortcut?name=JXL-Import`
 
    - **Otherwise:**

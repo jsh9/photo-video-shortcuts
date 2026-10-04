@@ -3,6 +3,29 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.3.1] - 2026-10-04
+
+- Fixed
+  - Version 0.3.0 failed on every photo: from the share sheet the shortcut
+    ended at once with nothing in a-Shell, and from the Shortcuts app it said
+    "There was a problem running the shortcut". Its Filter Photos step, which
+    sorted out Live Photos and videos, crashes Shortcuts when its input is a
+    photo from the library: Shortcuts turns a "Photo Type" condition into a
+    Photos-framework predicate on a key (`mediaSubtype`) that photo objects
+    don't answer, then evaluates it in memory on the input. The shortcut now
+    sorts each item by Get Details of Images (Media Type, then Photo Type),
+    which Shortcuts reads in memory. Update the shortcuts; `jxlbatch.wasm` is
+    unchanged.
+- Changed
+  - Images that aren't in the photo library (e.g. shared from Files) are
+    converted again, as before 0.3.0, instead of being skipped: without a
+    library lookup the shortcut can't tell them apart, and converting them is
+    harmless (the result is saved to Photos; nothing is deleted from the share
+    sheet). The notification no longer counts "item(s) not from Photos".
+  - What the shortcut skipped ("Skipped 2 Live Photo(s), 1 video(s)") is also
+    printed in a-Shell, before and after the batch: the notification is gone as
+    soon as a-Shell comes to the front.
+
 ## [Compress Photos 0.3.0] - 2026-10-03
 
 - Changed

@@ -1,34 +1,38 @@
 """
-Which items Compress Photos converts: only the still photos from the photo
-library (screenshots included). Live Photos, videos and items that aren't in
-the library (e.g. images shared from Files) are skipped, with a count of each
-kind, and when nothing is left the shortcut stops before asking for a quality.
+Which items Compress Photos converts: still photos (screenshots included). Live
+Photos and videos are skipped, with a count of each kind, and when nothing is
+left the shortcut stops before asking for a quality.
 
 The shortcut runs here, up to its quality list, on a small model of Shortcuts.
-Filter Photos follows Apple's ContentKit (WFPhotoMediaContentItem,
-WFContentComparisonPredicate and WFPhotoLibraryFiltering, iOS 26.1):
+Each item is sorted by Get Details of Images, which Shortcuts reads in memory
+from the item (ContentKit's WFImageContentItem and WFPhotoMediaContentItem, iOS
+18.2):
 
-- Media Type is one value: Image (also for a Live Photo), Video or Audio.
-- Photo Type is a list (HDR, Panorama, Burst, Live Photo): "is" holds when any
-  entry is the value, "is not" only when none is.
-- The results are new items fetched from the library, not the input items,
-  and an item that isn't in the library never matches.
+- Media Type is one value: Image (also for a Live Photo), Video or Audio. An
+  image that isn't in the photo library (e.g. shared from Files) says Image
+  too.
+- Photo Type is a list (HDR, Panorama, Burst, Live Photo); a still photo's, a
+  screenshot's and a Files image's is empty.
+- A list put into a text field (Match Text) becomes one entry per line.
+
+Filter Photos isn't used, and must not come back: see keep_still_photos in
+build_shortcuts.py.
 """
 
+import re
 from dataclasses import dataclass, field
 
 import photo_helpers as ph
 import pytest
 
-STILLS_ONLY = 'only still photos from Photos are converted.'
+STILLS_ONLY = 'only still photos are converted.'
 
 
 @dataclass(eq=False)  # compared by identity: the shortcut must keep the item
 class Item:
     name: str
-    media_type: str = 'Image'
+    media_type: str | None = 'Image'
     photo_types: list = field(default_factory=list)
-    in_library: bool = True
 
 
 STILL = Item('IMG_0001')
@@ -39,7 +43,8 @@ BURST = Item('IMG_0005', photo_types=['Burst'])
 LIVE = Item('IMG_0006', photo_types=['Live Photo'])
 HDR_LIVE = Item('IMG_0007', photo_types=['HDR', 'Live Photo'])
 VIDEO = Item('IMG_0008', media_type='Video')
-FROM_FILES = Item('scan', in_library=False)
+FROM_FILES = Item('scan')  # not in the library: Image, no Photo Type
+UNKNOWN = Item('odd', media_type=None)  # no details at all: converted
 
 
 class Stopped(Exception):
@@ -121,11 +126,14 @@ class Shortcuts:
             )
         elif kind == 'selectphoto':
             result = list(self.picked)
-        elif kind == 'filter.photos':
-            items = as_list(
-                self.value(p['WFContentItemInputParameter'], repeats)
+        elif kind == 'properties.images':
+            item = self.value(p['WFInput'], repeats)
+            result = photo_details(item, p['WFContentItemPropertyName'])
+        elif kind == 'text.match':
+            flags = 0 if p['WFMatchTextCaseSensitive'] else re.IGNORECASE
+            result = re.findall(
+                p['WFMatchTextPattern'], self.text(p['text'], repeats), flags
             )
-            result = filter_photos(items, p['WFContentItemFilter'])
         elif kind == 'count':
             result = len(as_list(self.value(p['Input'], repeats)))
         elif kind == 'gettext':
@@ -169,6 +177,7 @@ class Shortcuts:
         return self.variables.get(name)
 
     def text(self, field, repeats):
+        """A text field's value; a list variable is one item per line."""
         if isinstance(field, str):
             return field
 
@@ -179,7 +188,8 @@ class Shortcuts:
             key=lambda kv: int(kv[0].strip('{}').split(',')[0]),
         )
         for _, ref in attachments:
-            text = text.replace(ph.OBJ, str(self.value(ref, repeats)), 1)
+            items = as_list(self.value(ref, repeats))
+            text = text.replace(ph.OBJ, '\n'.join(map(str, items)), 1)
 
         return text
 
@@ -195,28 +205,13 @@ def as_list(value):
     return list(value) if isinstance(value, list) else [value]
 
 
-def filter_photos(items, predicate):
-    table = predicate['Value']
-    assert table['WFActionParameterFilterPrefix'] == 1  # All
-    found = []
-    for item in items:
-        if item.in_library and all(
-            matches(item, t) for t in table['WFActionParameterFilterTemplates']
-        ):
-            found.append(Item(item.name, item.media_type, item.photo_types))
+def photo_details(item, name):
+    """Get Details of Images: the item's own value, read in memory."""
+    if name == 'Media Type':
+        return item.media_type
 
-    return found
-
-
-def matches(item, template):
-    value = template['Values']['Enumeration']['Value']
-    if template['Property'] == 'Media Type':
-        found = item.media_type == value
-    else:
-        assert template['Property'] == 'Photo Type'
-        found = value in item.photo_types  # any entry
-
-    return found if template['Operator'] == 4 else not found
+    assert name == 'Photo Type'
+    return list(item.photo_types)
 
 
 @pytest.fixture(scope='module')
@@ -240,26 +235,28 @@ STARTS = pytest.mark.parametrize('start', ['share sheet', 'Shortcuts app'])
 @STARTS
 def test_converts_only_still_photos(compress, start):
     items = [LIVE, STILL, VIDEO, HDR, FROM_FILES, SCREENSHOT, HDR_LIVE]
-    items += [PANORAMA, BURST]
+    items += [PANORAMA, BURST, UNKNOWN]
     outcome, shortcuts = run(compress, items, start)
     assert outcome == 'quality asked'
     # The items themselves, in order: the share sheet's files are converted.
     stills = shortcuts.variables['Stills']
     assert [id(i) for i in stills] == [
-        id(i) for i in (STILL, HDR, SCREENSHOT, PANORAMA, BURST)
+        id(i)
+        for i in (STILL, HDR, FROM_FILES, SCREENSHOT, PANORAMA, BURST, UNKNOWN)
     ]
-    assert shortcuts.notifications == [
-        'Skipped 2 Live Photo(s), 1 video(s), 1 item(s) not from Photos: '
-        + STILLS_ONLY
-    ]
+    note = f'Skipped 2 Live Photo(s), 1 video(s): {STILLS_ONLY}'
+    assert shortcuts.notifications == [note]
+    # a-Shell prints the note too (the notification is gone when it opens).
+    assert shortcuts.variables['Skipped Echo'] == [f'echo "{note}"']
 
 
 @STARTS
 def test_no_notification_when_nothing_skipped(compress, start):
-    outcome, shortcuts = run(compress, [STILL, SCREENSHOT], start)
+    outcome, shortcuts = run(compress, [STILL, SCREENSHOT, FROM_FILES], start)
     assert outcome == 'quality asked'
-    assert shortcuts.variables['Stills'] == [STILL, SCREENSHOT]
+    assert shortcuts.variables['Stills'] == [STILL, SCREENSHOT, FROM_FILES]
     assert shortcuts.notifications == []
+    assert 'Skipped Echo' not in shortcuts.variables
 
 
 @pytest.mark.parametrize(
@@ -267,7 +264,6 @@ def test_no_notification_when_nothing_skipped(compress, start):
     [
         ([STILL, VIDEO, VIDEO], '2 video(s)'),
         ([HDR_LIVE, STILL], '1 Live Photo(s)'),
-        ([FROM_FILES, STILL], '1 item(s) not from Photos'),
     ],
 )
 def test_counts_only_the_kinds_skipped(compress, items, skipped):
@@ -284,6 +280,7 @@ def test_stops_when_nothing_to_convert(compress, start):
     assert shortcuts.notifications == [
         f'Nothing to convert. Skipped 2 Live Photo(s), 1 video(s): {STILLS_ONLY}'
     ]
+    assert 'Skipped Echo' not in shortcuts.variables  # a-Shell never runs
 
 
 @STARTS
@@ -294,45 +291,44 @@ def test_stops_when_no_items_at_all(compress, start):
     assert shortcuts.notifications == ['Nothing to convert.']
 
 
-def test_filter_photos_format(compress):
-    # As the Shortcuts app writes Filter Photos: Shortcuts' own names for
-    # properties and values, whatever the phone's language.
-    conditions = []
+def test_sorting_reads_each_item_in_memory(compress):
+    # Get Details of Images on the item (Shortcuts' own English property
+    # names, whatever the phone's language), then Match Text on the value.
+    # Never Filter Photos: on photos from the library it turns a Photo Type
+    # condition into a Photos-framework predicate on a key PHAsset objects
+    # don't answer (mediaSubtype) and evaluates it in memory, which throws and
+    # killed 0.3.0 on every photo; on an item not in the library it searches
+    # the whole library instead.
+    before_quality = []
     for action in compress:
-        if ph.ident(action) != 'is.workflow.actions.filter.photos':
-            continue
+        if ph.ident(action) == 'is.workflow.actions.choosefromlist':
+            break
 
-        p = ph.params(action)
-        assert p['WFContentItemInputParameter'] == {
-            'Value': {'Type': 'Variable', 'VariableName': 'Repeat Item'},
-            'WFSerializationType': 'WFTextTokenAttachment',
-        }
-        predicate = p['WFContentItemFilter']
-        assert (
-            predicate['WFSerializationType']
-            == 'WFContentPredicateTableTemplate'
-        )
-        table = predicate['Value']
-        assert table['WFActionParameterFilterPrefix'] == 1  # All, never Any
-        assert table['WFContentPredicateBoundedDate'] is False
-        found = []
-        for t in table['WFActionParameterFilterTemplates']:
-            assert t['Removable'] is True
-            assert t['Values']['Unit'] == 4
-            enumeration = t['Values']['Enumeration']
-            assert (
-                enumeration['WFSerializationType']
-                == 'WFStringSubstitutableState'
-            )
-            found.append((t['Property'], t['Operator'], enumeration['Value']))
+        before_quality.append(action)
 
-        conditions.append(found)
-
-    assert conditions == [
-        [('Media Type', 4, 'Image'), ('Photo Type', 5, 'Live Photo')],
-        [('Media Type', 4, 'Video')],
-        [('Photo Type', 4, 'Live Photo')],
+    assert not any(
+        ph.ident(a) == 'is.workflow.actions.filter.photos' for a in compress
+    )
+    repeat_item = {
+        'Value': {'Type': 'Variable', 'VariableName': 'Repeat Item'},
+        'WFSerializationType': 'WFTextTokenAttachment',
+    }
+    details = [
+        ph.params(a)['WFContentItemPropertyName']
+        for a in before_quality
+        if ph.ident(a) == 'is.workflow.actions.properties.images'
+        and ph.params(a)['WFInput'] == repeat_item
     ]
+    assert details == ['Media Type', 'Photo Type']
+    matches = [
+        (
+            ph.params(a)['WFMatchTextPattern'],
+            ph.params(a)['WFMatchTextCaseSensitive'],
+        )
+        for a in before_quality
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+    ]
+    assert matches == [('^Image$', True), ('Live Photo', True)]
 
 
 def test_picker_shows_images_only(compress):

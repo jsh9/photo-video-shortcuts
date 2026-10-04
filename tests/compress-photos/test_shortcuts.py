@@ -114,7 +114,9 @@ def test_notes_show_version(gen, shortcuts):
 def test_import_shortcut_started_by_name(gen, shortcuts):
     # a-Shell opens JXL-Import by URL, so its name must not change.
     assert gen.NAME_B == 'JXL-Import'
-    commands = ph.ashell_commands(shortcuts[gen.NAME_A], {'Matches': 83})
+    commands = ph.ashell_commands(
+        shortcuts[gen.NAME_A], {'Matches': 83, 'Skipped Echo': ''}
+    )
     assert any(
         c.endswith('open shortcuts://run-shortcut?name=JXL-Import')
         for c in commands
