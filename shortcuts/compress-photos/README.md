@@ -64,16 +64,16 @@ See [Installation](../../README.md#1-installation) in the main README.
     **Options** at the top of the share sheet and set Send As to **Current**.
     iOS offers no way to make that the default, and a shortcut can't set it.
     `jxlbatch` prints a reminder when it receives iPhone photos as JPEG.
-- **Only still photos from your photo library are converted**, screenshots
-  included. The shortcut skips the rest of the selection, then a notification
-  counts what it skipped, for example "Skipped 2 Live Photo(s), 1 video(s)":
+- **Only still photos are converted**, screenshots included. The shortcut skips
+  the rest of the selection, then a notification counts what it skipped, for
+  example "Skipped 2 Live Photo(s), 1 video(s)":
   - **Live Photos**, so that their video is never lost. To convert the still
     image of one, use Duplicate ▸ Duplicate as Still Photo in Photos and
     convert the copy.
   - **Videos**. The photo picker doesn't show them.
-  - **Anything not in your photo library**, such as images shared from Files or
-    other apps ("item(s) not from Photos").
   - When nothing is left, the shortcut says "Nothing to convert" and stops.
+  - Images shared from other apps, such as Files, are converted like photos;
+    the result is saved to Photos.
 - Then pick a quality from the list (see
   [Quality presets](#21-quality-presets)).
 - a-Shell opens and shows progress for each photo. **Keep it in the foreground
@@ -251,8 +251,7 @@ keeps only one file, so check which one before you merge.
 | a-Shell: "The WebAssembly interpreter is not running" before any photo         | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                                                                                                                                                                                               |
 | a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                                                                                                                                                                                        |
 | A photo fails with an out-of-memory error                                      | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                                                                                                                                           |
-| Notification "Nothing to convert"                                              | The selection had only Live Photos, videos, or items not from your photo library; only still photos from Photos are converted (see [Use](#2-use)).                                                                                                                                                                                      |
-| Notification "Skipped ... item(s) not from Photos"                             | Those images weren't shared from Photos (for example, they came from Files). Save them to Photos first, then convert them from there.                                                                                                                                                                                                   |
+| Notification "Nothing to convert"                                              | The selection had only Live Photos or videos; only still photos are converted (see [Use](#2-use)).                                                                                                                                                                                                                                      |
 | A photo fails with "unsupported format"                                        | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                                                                                                                                    |
 | `! HDR gain map not used (...)` in a-Shell                                     | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB, or claiming more than 16 stops (`malformed gain map metadata`). Its original isn't offered for deletion. Please report it with the reason shown.                                                   |
 | `! HDR gain map not used (not an iPhone camera photo)` in a-Shell              | The HDR photo's gain map isn't labeled as an iPhone camera's, and the photo is stored turned or cropped, so how they line up isn't known (see [HDR photos](#31-hdr-photos)): it was converted as SDR. Its original is still offered for deletion; to keep its HDR, tap Don't Allow when asked (this keeps the whole batch's originals). |

@@ -2,9 +2,9 @@
 """
 Generates the two iPhone shortcuts as signed .shortcut files.
 
-- "Compress Photos": share-sheet shortcut that stages the still photos from
-  the photo library in a-Shell (Live Photos and videos are skipped) and runs
-  jxlbatch (see ../README.md).
+- "Compress Photos": share-sheet shortcut that stages the still photos in
+  a-Shell (Live Photos and videos are skipped) and runs jxlbatch (see
+  ../README.md).
 - "JXL-Import": started by a-Shell when encoding is done; saves the JXL files
   to Photos and cleans up.
 
@@ -44,7 +44,6 @@ NAME_B = (
 )
 EFFORT = 7
 OBJ = '￼'  # placeholder for a variable inside a text field
-IS, IS_NOT = 4, 5  # Filter Photos operators (NSPredicate's == and !=)
 
 # The quality choices offered, as (quality, description). Shortcuts can't
 # preselect a choice, so the default is marked in its title.
@@ -408,48 +407,6 @@ class Builder:
         )
         return output_of(a, 'Photos')
 
-    def filter_photos(self, ref, *conditions):
-        """
-        Filter Photos: the items of ``ref`` that match every condition, each
-        (property, IS or IS_NOT, value).
-
-        Properties and values are stored as Shortcuts' own English names,
-        whatever the phone's language. Format as the Shortcuts app writes it
-        (unchanged in shared shortcuts from iOS 13 to recent versions). The
-        results are new items fetched from the photo library, not the items of
-        ``ref``, and an item that isn't in the library never matches.
-        """
-        templates = [
-            {
-                'Operator': operator,
-                'Property': prop,
-                'Removable': True,
-                'Values': {
-                    'Enumeration': {
-                        'Value': value,
-                        'WFSerializationType': 'WFStringSubstitutableState',
-                    },
-                    'Unit': 4,
-                },
-            }
-            for prop, operator, value in conditions
-        ]
-        a = self.add(
-            'is.workflow.actions.filter.photos',
-            {
-                'WFContentItemInputParameter': attachment(ref),
-                'WFContentItemFilter': {
-                    'Value': {
-                        'WFActionParameterFilterPrefix': 1,  # All, not Any
-                        'WFActionParameterFilterTemplates': templates,
-                        'WFContentPredicateBoundedDate': False,
-                    },
-                    'WFSerializationType': 'WFContentPredicateTableTemplate',
-                },
-            },
-        )
-        return output_of(a, 'Photos')
-
     def stop(self):
         self.add('is.workflow.actions.exit', {})
 
@@ -475,15 +432,26 @@ class Builder:
             'is.workflow.actions.deletephotos', {'photos': attachment(ref)}
         )
 
-    # Albums: format from a shortcut built on the iPhone that saves converted
-    # photos to their original's albums. Saving an already saved photo (Saved
-    # Photo Media) to an album adds it there; it doesn't make another copy.
-    def photo_albums(self, ref):
+    def photo_details(self, ref, name):
+        """
+        Get Details of Images: the property ``name`` of ``ref``.
+
+        Shortcuts reads it in memory from the item itself (a photo from the
+        library answers with its asset's details); nothing is looked up in the
+        photo library. Format from a shortcut built on the iPhone (Album). The
+        property names are Shortcuts' own English names, whatever the phone's
+        language, and the output is named after the property.
+        """
         a = self.add(
             'is.workflow.actions.properties.images',
-            {'WFContentItemPropertyName': 'Album', 'WFInput': attachment(ref)},
+            {'WFContentItemPropertyName': name, 'WFInput': attachment(ref)},
         )
-        return output_of(a, 'Album')
+        return output_of(a, name)
+
+    # Albums: saving an already saved photo (Saved Photo Media) to an album
+    # adds it there; it doesn't make another copy.
+    def photo_albums(self, ref):
+        return self.photo_details(ref, 'Album')
 
     def contacts_from_input(self, ref):
         a = self.add(
@@ -588,53 +556,58 @@ class Builder:
 SKIPPED = [
     ('Skipped Live Photos', 'Live Photo(s)'),
     ('Skipped Videos', 'video(s)'),
-    ('Skipped Others', 'item(s) not from Photos'),
 ]
 
 
 def keep_still_photos(b, photos):
     """
-    Returns the variable Stills: the still photos from the photo library
-    (screenshots included) among ``photos``, as they are, to convert.
+    Returns the variable Stills: the still photos (screenshots included) among
+    ``photos``, as they are, to convert.
 
-    Live Photos, videos and items that aren't in the library (e.g. images
-    shared from Files) are skipped, and a notification counts each kind. If
+    Live Photos and videos are skipped, and a notification counts each kind. If
     nothing is left, the shortcut stops there, before asking for a quality.
 
-    Each item is tested on its own, and the item itself is kept: Filter Photos
-    returns new items fetched from the library, so filtering the whole list
-    would replace the files the share sheet sent (its Send As choice). A Live
-    Photo's Media Type is Image. Photo Type is a list (an HDR Live Photo is
-    both HDR and Live Photo): "is Live Photo" holds when any entry is, "is not
-    Live Photo" only when none is. Conditions are combined with All, never Any:
-    with Any, Shortcuts checks a condition the library can't look up directly
-    against the whole library, ignoring the input.
+    Each item is sorted by its own details, which Get Details of Images reads
+    in memory from the item, and the item itself is kept (the share sheet's
+    files, so its Send As choice): Media Type is Image (for a Live Photo too),
+    Video or Audio; Photo Type is a list (HDR, Panorama, Burst, Live Photo),
+    empty for a plain still photo or a screenshot, so it is only read when it
+    has a value, and a list put into Match Text's text is one entry per line.
+    An item whose Media Type is unknown is converted, as before 0.3.0. An image
+    that isn't in the photo library (shared from Files, say) says Image with no
+    Photo Type, so it is converted too.
+
+    Not Filter Photos, which 0.3.0 used and which failed on every photo: with
+    photos from the library as input, Shortcuts turns a Photo Type condition
+    into a Photos-framework predicate on the key ``mediaSubtype``, which
+    PHAsset objects don't answer, and evaluates it on the input in memory, so
+    the action throws (NSUnknownKeyException) and the shortcut dies; and with
+    an item that isn't in the library, it searches the whole library instead of
+    testing the item.
     """
 
     def add_to(name):
         return lambda: b.append_variable(name, REPEAT_ITEM)
 
     def per_item():
-        def why_skipped():
-            def not_a_video():
-                live = b.filter_photos(
-                    REPEAT_ITEM, ('Photo Type', IS, 'Live Photo')
-                )
+        media = b.photo_details(REPEAT_ITEM, 'Media Type')
+
+        def by_media_type():
+            image = b.match_text(media, '^Image$')
+            b.if_has_value(image, by_photo_type, add_to('Skipped Videos'))
+
+        def by_photo_type():
+            types = b.photo_details(REPEAT_ITEM, 'Photo Type')
+
+            def by_live_photo():
+                live = b.match_text(types, 'Live Photo')
                 b.if_has_value(
-                    live,
-                    add_to('Skipped Live Photos'),
-                    add_to('Skipped Others'),
+                    live, add_to('Skipped Live Photos'), add_to('Stills')
                 )
 
-            video = b.filter_photos(REPEAT_ITEM, ('Media Type', IS, 'Video'))
-            b.if_has_value(video, add_to('Skipped Videos'), not_a_video)
+            b.if_has_value(types, by_live_photo, add_to('Stills'))
 
-        still = b.filter_photos(
-            REPEAT_ITEM,
-            ('Media Type', IS, 'Image'),
-            ('Photo Type', IS_NOT, 'Live Photo'),
-        )
-        b.if_has_value(still, add_to('Stills'), why_skipped)
+        b.if_has_value(media, by_media_type, add_to('Stills'))
 
     b.repeat_each(photos, per_item)
 
@@ -652,7 +625,7 @@ def keep_still_photos(b, photos):
             'JPEG XL',
             f'{prefix}Skipped ',
             b.combine(variable('Skipped'), ', '),
-            ': only still photos from Photos are converted.',
+            ': only still photos are converted.',
         )
 
     def nothing_left():
@@ -793,8 +766,7 @@ def build_compress(sample):
     b.comment(
         f'{NAME_A} {VERSION}. '
         'Converts photos to JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
-        'Only still photos from the photo library are converted: Live Photos, videos '
-        'and other items are skipped. '
+        'Only still photos are converted: Live Photos and videos are skipped. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
         'saves the results itself, and offers to delete the originals. Either way, '
