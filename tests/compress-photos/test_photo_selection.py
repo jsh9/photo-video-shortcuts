@@ -244,9 +244,10 @@ def test_converts_only_still_photos(compress, start):
         id(i)
         for i in (STILL, HDR, FROM_FILES, SCREENSHOT, PANORAMA, BURST, UNKNOWN)
     ]
-    assert shortcuts.notifications == [
-        f'Skipped 2 Live Photo(s), 1 video(s): {STILLS_ONLY}'
-    ]
+    note = f'Skipped 2 Live Photo(s), 1 video(s): {STILLS_ONLY}'
+    assert shortcuts.notifications == [note]
+    # a-Shell prints the note too (the notification is gone when it opens).
+    assert shortcuts.variables['Skipped Echo'] == [f'echo "{note}"']
 
 
 @STARTS
@@ -255,6 +256,7 @@ def test_no_notification_when_nothing_skipped(compress, start):
     assert outcome == 'quality asked'
     assert shortcuts.variables['Stills'] == [STILL, SCREENSHOT, FROM_FILES]
     assert shortcuts.notifications == []
+    assert 'Skipped Echo' not in shortcuts.variables
 
 
 @pytest.mark.parametrize(
@@ -278,6 +280,7 @@ def test_stops_when_nothing_to_convert(compress, start):
     assert shortcuts.notifications == [
         f'Nothing to convert. Skipped 2 Live Photo(s), 1 video(s): {STILLS_ONLY}'
     ]
+    assert 'Skipped Echo' not in shortcuts.variables  # a-Shell never runs
 
 
 @STARTS

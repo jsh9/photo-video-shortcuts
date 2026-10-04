@@ -76,8 +76,10 @@ See [Installation](../../README.md#1-installation) in the main README.
     the result is saved to Photos.
 - Then pick a quality from the list (see
   [Quality presets](#21-quality-presets)).
-- a-Shell opens and shows progress for each photo. **Keep it in the foreground
-  until it switches back to Shortcuts by itself.**
+- a-Shell opens and shows progress for each photo, with what the shortcut
+  skipped repeated at the top and at the end, since the notification is gone as
+  soon as a-Shell comes to the front. **Keep it in the foreground until it
+  switches back to Shortcuts by itself.**
   - iOS pauses a-Shell in the background.
   - When started from the Shortcuts app, switching back early makes the
     shortcut continue before the conversion is done. It then saves nothing and

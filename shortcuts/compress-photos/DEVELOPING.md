@@ -540,8 +540,10 @@ no input: Continue):
    2. a-Shell **Execute Command**, Keep Going off, with these commands:
       - `sleep 2`
       - `cd ~shortcuts`
+      - `<Skipped Echo>` (the variable; an empty line when nothing was skipped)
       - `jxlbatch -q <Matches> -e 7 jxl_job.txt`
       - `jxlbatch --retry -q <Matches> -e 7 jxl_job.txt`
+      - `<Skipped Echo>`
       - `open shortcuts://run-shortcut?name=JXL-Import`
 
    - **Otherwise:**

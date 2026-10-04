@@ -156,9 +156,19 @@ def ashell(tmp_path, wasm):
     )
 
 
-def batch_command(actions, url):
-    """The Execute Command that runs jxlbatch and then opens ``url``."""
-    commands = ph.ashell_commands(actions['compress'], {'Matches': QUALITY})
+SKIPPED_NOTE = 'Skipped 1 Live Photo(s): only still photos are converted.'
+
+
+def batch_command(actions, url, skipped=True):
+    """
+    The Execute Command that runs jxlbatch and then opens ``url``. With
+    ``skipped``, the shortcut skipped a Live Photo and set Skipped Echo.
+    """
+    values = {
+        'Matches': QUALITY,
+        'Skipped Echo': f'echo "{SKIPPED_NOTE}"' if skipped else '',
+    }
+    commands = ph.ashell_commands(actions['compress'], values)
     return next(
         c
         for c in commands
@@ -220,11 +230,22 @@ def test_convert_and_return(actions, ashell, photos, launched, start, url):
     stage_like_shortcut(actions, shell.shortcuts, originals)
     shell.run(batch_command(actions, url))
     assert shell.opened == [url]
+    # What was skipped is printed before and after the batch.
+    assert shell.output.count(SKIPPED_NOTE) == 2
     results = import_results(shell.shortcuts)
     assert [index for _, _, index in results] == [1, 2]
     for jxl, name, index in results:
         assert jxl.exists()
         assert name == f'{originals[index - 1].stem}.jxl'
+
+
+def test_nothing_skipped_prints_nothing(actions, ashell, photos):
+    # Skipped Echo unset: its lines are empty, which a-Shell ignores.
+    shell = ashell(False)
+    stage_like_shortcut(actions, shell.shortcuts, [photos['jpeg']])
+    shell.run(batch_command(actions, 'shortcuts://', skipped=False))
+    assert 'Skipped' not in shell.output
+    assert len(import_results(shell.shortcuts)) == 1
 
 
 @LAUNCHED

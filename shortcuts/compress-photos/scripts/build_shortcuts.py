@@ -621,12 +621,16 @@ def keep_still_photos(b, photos):
         b.if_has_value(variable(name), count(name, kind), lambda: None)
 
     def say_skipped(prefix=''):
-        b.notification(
-            'JPEG XL',
+        note = b.text(
             f'{prefix}Skipped ',
             b.combine(variable('Skipped'), ', '),
             ': only still photos are converted.',
         )
+        b.notification('JPEG XL', note)
+        if not prefix:
+            # The notification is gone as soon as a-Shell comes to the front,
+            # so a-Shell prints the note too (see run_jxlbatch).
+            b.set_variable('Skipped Echo', b.text('echo "', note, '"'))
 
     def nothing_left():
         # Skipped is empty when there were no items at all.
@@ -690,13 +694,22 @@ def run_jxlbatch(b, quality, then):
     run it with --retry, which does nothing if the first run started (it
     created jxl_started). Not through dash: a-Shell adds ".wasm" to a command's
     name, dash doesn't, so it can't find jxlbatch.
+
+    The variable Skipped Echo (an echo of what the shortcut skipped, set by
+    keep_still_photos only when something was) is printed before and after the
+    batch; unset, it leaves an empty line, which a-Shell ignores.
     """
+    echo = variable('Skipped Echo')
     b.ashell_execute(
-        'sleep 2\ncd ~shortcuts\njxlbatch -q ',
+        'sleep 2\ncd ~shortcuts\n',
+        echo,
+        '\njxlbatch -q ',
         quality,
         f' -e {EFFORT} jxl_job.txt\njxlbatch --retry -q ',
         quality,
-        f' -e {EFFORT} jxl_job.txt\n' + then,
+        f' -e {EFFORT} jxl_job.txt\n',
+        echo,
+        '\n' + then,
         keep_going=False,
         open_app='open',
     )

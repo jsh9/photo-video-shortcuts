@@ -22,6 +22,9 @@ encoder. Every release includes the current files of all shortcuts.
     library lookup the shortcut can't tell them apart, and converting them is
     harmless (the result is saved to Photos; nothing is deleted from the share
     sheet). The notification no longer counts "item(s) not from Photos".
+  - What the shortcut skipped ("Skipped 2 Live Photo(s), 1 video(s)") is also
+    printed in a-Shell, before and after the batch: the notification is gone as
+    soon as a-Shell comes to the front.
 
 ## [Compress Photos 0.3.0] - 2026-10-03
 
