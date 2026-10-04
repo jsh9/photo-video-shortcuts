@@ -43,6 +43,11 @@ CHANGELOG = ROOT / 'CHANGELOG.md'
 OUT = ROOT / 'dist' / 'release'
 BRANCH = 'main'
 SEMVER = re.compile(r'\d+\.\d+\.\d+')
+FENCE = re.compile(r'\s*(?P<marker>`{3,}|~{3,})')
+LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])(?:\s|$)')
+OTHER_BLOCK = re.compile(
+    r'\s*(?:#{1,6}(?:\s|$)|>|\|)'
+)  # heading, quote, table
 
 
 class ReleaseError(Exception):
@@ -443,6 +448,49 @@ def require_updated(tool, states):
         )
 
 
+def unwrap(text):
+    """
+    Joins the lines of each paragraph or list item into one line.
+
+    CHANGELOG.md is wrapped at 79 columns (by mdformat), which is fine in a
+    file, but GitHub shows every newline in a release's notes as a line break.
+    Fenced code, headings, quotes, table rows and hard line breaks (a trailing
+    backslash or two spaces) are left as they are.
+    """
+    lines = []
+    joinable = False  # the last line is paragraph or list item text
+    fence = None  # the marker of the code fence we are inside
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if fence:
+            lines.append(line)
+            if stripped.startswith(fence) and set(stripped) == {fence[0]}:
+                fence = None
+
+            continue
+
+        opening = FENCE.match(line)
+        if opening:
+            fence = opening.group('marker')
+            lines.append(line)
+            joinable = False
+        elif not stripped:
+            lines.append(line)
+            joinable = False
+        elif joinable and not (
+            LIST_ITEM.match(line) or OTHER_BLOCK.match(line)
+        ):
+            if lines[-1].endswith(('\\', '  ')):
+                lines.append(line)
+            else:
+                lines[-1] += ' ' + stripped
+        else:
+            lines.append(line)
+            joinable = not OTHER_BLOCK.match(line)
+
+    return '\n'.join(lines)
+
+
 def release_notes(tool, tools, baseline, entries):
     states = tool_states(tools, baseline)
     if baseline is None:
@@ -463,7 +511,12 @@ def release_notes(tool, tools, baseline, entries):
         if states[t.name] in ('new', 'updated') or (
             baseline is None and t is tool
         ):
-            lines += [f'## {t.title} {t.version}', '', entries[t.name], '']
+            lines += [
+                f'## {t.title} {t.version}',
+                '',
+                unwrap(entries[t.name]),
+                '',
+            ]
 
     lines += ['## Files in this release', '']
     for t in tools:

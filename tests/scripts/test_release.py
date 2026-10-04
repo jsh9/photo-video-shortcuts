@@ -500,3 +500,106 @@ def test_bad_baseline_version_is_not_a_new_tool(tmp_path, monkeypatch):
     )
     with pytest.raises(release.ReleaseError, match='not X.Y.Z'):
         release.published_baseline([t])
+
+
+WRAPPED = """\
+- Changed
+  - Only still photos from the photo library are converted, screenshots
+    included. Live Photos, videos and items not from Photos (e.g. images shared
+    from Files) in the selection are skipped.
+  - The photo picker (when started from the Shortcuts app) no longer shows
+    videos.
+  - Update the shortcuts; `jxlbatch.wasm` is unchanged.
+- Full diff
+  - https://github.com/jsh9/photo-video-shortcuts/pull/8"""
+
+
+def test_unwrap_joins_wrapped_list_items():
+    assert release.unwrap(WRAPPED) == (
+        '- Changed\n'
+        '  - Only still photos from the photo library are converted, '
+        'screenshots included. Live Photos, videos and items not from Photos '
+        '(e.g. images shared from Files) in the selection are skipped.\n'
+        '  - The photo picker (when started from the Shortcuts app) no longer '
+        'shows videos.\n'
+        '  - Update the shortcuts; `jxlbatch.wasm` is unchanged.\n'
+        '- Full diff\n'
+        '  - https://github.com/jsh9/photo-video-shortcuts/pull/8'
+    )
+
+
+def test_unwrap_joins_paragraphs_and_lazy_continuations():
+    text = 'First line\nsecond line.\n\n1. one\ntwo\n2) three\n   four\n'
+    assert release.unwrap(text) == (
+        'First line second line.\n\n1. one two\n2) three four\n'
+    )
+
+
+def test_unwrap_is_idempotent_and_keeps_blank_lines():
+    once = release.unwrap(WRAPPED + '\n\n- Fixed\n  - a\n    b\n')
+    assert release.unwrap(once) == once
+    assert once.endswith('\n\n- Fixed\n  - a b\n')
+
+
+def test_unwrap_leaves_other_blocks_alone():
+    text = (
+        '- Intro text\n'
+        '  continues\n'
+        '\n'
+        '  ```\n'
+        '  not wrapped\n'
+        '  - kept as is\n'
+        '  ```\n'
+        '\n'
+        '| a | b |\n'
+        '| - | - |\n'
+        '| 1 | 2 |\n'
+        '\n'
+        '> quoted\n'
+        '> lines\n'
+        '\n'
+        '## Heading\n'
+        'after the heading\n'
+        'and more\n'
+    )
+    assert release.unwrap(text) == text.replace(
+        'Intro text\n  continues', 'Intro text continues'
+    ).replace('after the heading\nand more', 'after the heading and more')
+
+
+@pytest.mark.parametrize('end', ['\\', '  '])
+def test_unwrap_keeps_hard_line_breaks(end):
+    text = f'- first{end}\n  second\n  third\n'
+    assert release.unwrap(text) == f'- first{end}\n  second third\n'
+
+
+def test_unwrap_does_not_take_a_fence_close_for_a_new_fence():
+    text = '~~~\n```\n~~~\nplain\ntext\n'
+    assert release.unwrap(text) == '~~~\n```\n~~~\nplain text\n'
+
+
+def test_release_notes_have_no_wrapped_lines(tmp_path):
+    photos = tool(tmp_path)
+    notes = release.release_notes(
+        photos,
+        [photos],
+        baseline({photos.name: '0.0.9'}),
+        {photos.name: WRAPPED},
+    )
+    assert WRAPPED not in notes
+    assert release.unwrap(WRAPPED) in notes
+    assert 'screenshots included.' in notes
+
+
+def test_every_changelog_entry_unwraps_to_one_line_per_item():
+    """No line of the real changelog is left as a continuation line."""
+    text = release.CHANGELOG.read_text(encoding='utf-8')
+    found = list(release.check_changelog.entries(text))
+    assert found
+    for name, version, _, body in found:
+        previous = ''
+        for line in release.unwrap(body).split('\n'):
+            if previous.strip() and line.strip():
+                assert release.LIST_ITEM.match(line), (name, version, line)
+
+            previous = line

@@ -62,9 +62,12 @@ one selected for the release title and tag.
 
 The notes mark a tool **new** when it had no version at that tag, **updated**
 when its version differs, or **unchanged** when it matches. Notes include the
-current changelog entry for every new or updated tool. An unchanged selected
-tool cannot be published; bump its version first. A successful lookup that
-finds no published stable releases marks every included tool new.
+current changelog entry for every new or updated tool, with the lines of each
+paragraph or list item joined into one: `CHANGELOG.md` is wrapped at 79
+columns, but GitHub shows every newline in a release's notes as a line break.
+An unchanged selected tool cannot be published; bump its version first. A
+successful lookup that finds no published stable releases marks every included
+tool new.
 
 Publishing stops if the baseline lookup fails. An offline dry run may continue,
 but both the console output and generated notes explicitly say comparisons are
