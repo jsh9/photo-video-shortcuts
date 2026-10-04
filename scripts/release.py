@@ -173,7 +173,9 @@ def check_git(tool):
     branch = git('rev-parse', '--abbrev-ref', 'HEAD')
     if branch != BRANCH:
         raise ReleaseError(
-            f'on branch "{branch}"; releases come from {BRANCH}'
+            f'on branch "{branch}", but releases are published from {BRANCH}: '
+            f'merge your changes into {BRANCH}, then run '
+            f'"git checkout {BRANCH} && git pull" and try again'
         )
 
     git('fetch', '--quiet', '--tags', 'origin', BRANCH)
