@@ -34,20 +34,31 @@ declares:
 
 ```json
 {
-  "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm"],
-  "shortcuts": ["Compress Photos.shortcut", "JXL-Import.shortcut"]
+  "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm", "jxlbatch-macos"],
+  "shortcuts": {
+    "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
+    "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]
+  }
 }
 ```
+
+`shortcuts` is a list (iPhone shortcuts) or a dictionary with the platforms
+`iphone` and `mac`. An encoder is a `.wasm` file (run with `wasmtime`) or a
+native Mac executable, a name without an extension (run directly; releases are
+built on a Mac).
 
 Encoder files and signed shortcuts come from that tool's `dist/`. Every
 declared file must exist, contain data, and have been regenerated during its
 current build. Extra files in `dist/` are ignored. The script runs each
 encoder's `--version` and checks it against the tool's `VERSION`.
 
-Each ZIP contains exactly the declared shortcuts under its versioned folder.
-After writing it, the script reopens it, checks every member and CRC, and
-compares its contents with the source bytes. Missing `JXL-Import` or the scalar
-encoder fails the check, including CI's dry run.
+Each platform gets its own ZIP, `<name>-shortcuts-v<version>.zip` for the
+iPhone (the name from before there were Mac shortcuts, so existing links keep
+working) and `<name>-mac-shortcuts-v<version>.zip` for the Mac, with exactly
+the declared shortcuts under a folder of the ZIP's name. After writing a ZIP,
+the script reopens it, checks every member and CRC, and compares its contents
+with the source bytes. A missing shortcut or encoder fails the check, including
+CI's dry run.
 
 With `--no-sign`, each declared `Name.shortcut` maps to
 `build/shortcuts/Name.unsigned.wflow`. The ZIP still uses the `.shortcut`
@@ -93,12 +104,14 @@ The script:
   has a dated entry for the version;
 - builds every shortcut, not only the one being released, because every release
   carries the current files of all shortcuts, so the README's "latest" download
-  links keep working;
+  links keep working (for Compress Photos: `build-wasm.sh`, `build-macos.sh`,
+  `build_shortcuts.py` and `build_mac_shortcuts.py`);
 - checks the complete `release.json` file lists, freshness, nonempty outputs,
   encoder versions and ZIP integrity;
-- zips each shortcut's `.shortcut` files into `<name>-shortcuts-v<version>.zip`
-  (inside, the files keep their names with spaces, which GitHub would turn into
-  dots in a release file's own name);
+- zips each platform's `.shortcut` files into `<name>-shortcuts-v<version>.zip`
+  (iPhone) and `<name>-mac-shortcuts-v<version>.zip` (Mac); inside, the files
+  keep their names with spaces and parentheses, which GitHub would alter in a
+  release file's own name;
 - shows the files and release notes (every changed tool's changelog entry, plus
   the version comparison for all tools) and asks before publishing with
   `gh release create`.

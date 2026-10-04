@@ -3,6 +3,29 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.4.0] - 2026-10-04
+
+- Added
+  - Mac shortcuts. *Compress Photos (macOS)* converts photos from the Photos
+    library (the Share menu in Photos, or a photo picker), saves the JPEG XL
+    copies to Photos in the same albums, and offers to delete the originals,
+    from the Share menu too. *Compress Photo Files (macOS)* converts image
+    files and folders from Finder's Quick Actions, writing each `.jxl` next to
+    its original. Both run `jxlbatch` through Shortcuts' Run Shell Script
+    action, with no a-Shell, no helper shortcut and no handoff, and show the
+    encoder's log in Quick Look when it notes anything. See
+    `shortcuts/compress-photos/README-mac.md`.
+  - `jxlbatch-macos`: a native, statically linked build of the encoder for
+    Apple silicon Macs running macOS 14 or later, with the same libraries and
+    settings as `jxlbatch.wasm`, so its files are byte for byte the same, and
+    with threads. Installed as `~/.local/bin/jxlbatch`.
+- Changed
+  - Releases now have two shortcut ZIPs: `compress-photos-shortcuts-v<v>.zip`
+    (iPhone, as before) and `compress-photos-mac-shortcuts-v<v>.zip` (Mac). New
+    files for Mac users: the Mac ZIP and `jxlbatch-macos`. The iPhone shortcuts
+    and `jxlbatch.wasm` only carry the new version number; iPhone users don't
+    need to update.
+
 ## [Compress Photos 0.3.1] - 2026-10-04
 
 - Fixed
