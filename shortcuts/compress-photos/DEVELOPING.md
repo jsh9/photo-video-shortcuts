@@ -16,6 +16,7 @@ ______________________________________________________________________
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
 - [5. Building the shortcuts by hand (fallback)](#5-building-the-shortcuts-by-hand-fallback)
+- [6. Releasing a new version](#6-releasing-a-new-version)
 
 ______________________________________________________________________
 
@@ -556,3 +557,69 @@ first `jxlbatch` before it runs. After the wait, `cd ~shortcuts` changes to the
 Shortcuts folder, where Put File saves. `jxlbatch` creates `jxl_started` when
 it runs, and `--retry` does nothing when that file exists. The retry can't go
 through `dash`: a-Shell adds `.wasm` to a command's name, dash doesn't.
+
+## 6. Releasing a new version
+
+A release is built, signed and published from a Mac by `scripts/release.py` (at
+the repository root), not by CI: signing the shortcuts needs macOS and an Apple
+ID. The script's checks and the release notes it writes are described in
+[docs/releasing.md](../../docs/releasing.md). The steps for Compress Photos:
+
+1. **Bump the version, in a PR.** Set `VERSION` (shared by the shortcuts and
+   `jxlbatch`) and add the entry at the top of
+   [CHANGELOG.md](../../CHANGELOG.md), with the release date:
+   `## [Compress Photos 0.3.0] - 2026-10-03`. Say which files to update (for
+   example "Update the shortcuts; `jxlbatch.wasm` is unchanged"), because the
+   README tells users to download only those. Past releases did this in the PR
+   that made the change. Merge it to `main`.
+
+2. **Set up the Mac** (once):
+
+   - signed in to an Apple ID, for `shortcuts sign`;
+   - the Homebrew packages from [Building](#3-building-mac), plus `wasmtime`,
+     which runs each encoder's `--version`;
+   - `gh` logged in with access to the repository (`gh auth status`), since
+     `gh release create` publishes.
+
+3. **Try the build on an iPhone (recommended).** The tests run the shortcut on
+   a model of Shortcuts, not on a phone. From the repository root,
+   `python3 scripts/release.py compress-photos --dry-run` builds and signs
+   everything without creating a tag or release. Copy the files from
+   `shortcuts/compress-photos/dist/` to the phone, add the two shortcuts, put
+   `jxlbatch.wasm` in a-Shell, run `jxlbatch --selftest`, then convert a few
+   photos from the share sheet and from the Shortcuts app. The PR that changed
+   the shortcuts may list what to look at.
+
+4. **Update `main`.** A real run refuses to publish unless the checkout is on
+   `main`, clean, and the same as `origin/main`:
+
+   ```bash
+   git checkout main
+   git pull
+   git status
+   ```
+
+5. **Publish.** From the repository root:
+
+   ```bash
+   python3 scripts/release.py compress-photos
+   ```
+
+   It rebuilds every shortcut (the first WebAssembly build downloads its
+   dependencies into `.deps/`), checks the files and the ZIP, then prints the
+   files and the release notes and asks you to confirm (`[y/N]`). Check that
+   the list has `jxlbatch.wasm`, `jxlbatch-scalar.wasm` and
+   `compress-photos-shortcuts-v<version>.zip`, and that the notes have the
+   changelog entry; answer `y` to create the tag and the release. Any other
+   answer publishes nothing.
+
+6. **Check the result.** The
+   [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases)
+   should show `Compress Photos <version>` as Latest with those three files.
+   The README's "latest" download links point at it.
+
+A real run (not `--dry-run`) stops when the working tree isn't clean, the
+branch isn't `main`, `main` differs from `origin/main`, the tag already exists,
+the changelog has no dated entry for the version, or the version is the same as
+in the last stable release. A published version can't be released again: fix a
+bad release with a new version.

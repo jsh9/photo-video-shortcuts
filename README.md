@@ -26,7 +26,8 @@ ______________________________________________________________________
   - [1.2. On Mac](#12-on-mac)
 - [2. Updating](#2-updating)
 - [3. Repository layout](#3-repository-layout)
-- [4. License](#4-license)
+- [4. Developing](#4-developing)
+- [5. License](#5-license)
 
 ______________________________________________________________________
 
@@ -109,7 +110,15 @@ which files each release changed; download only those, the same way as above.
 | `tests/`            | tests (see [tests/README.md](tests/README.md)); `tests/samples/` holds your own test photos and videos and is not committed |
 | `licenses/`         | licenses of the third-party libraries built into the release files                                                          |
 
-## 4. License
+## 4. Developing
+
+How each shortcut works, how to build and test it, and how to release it is in
+its developer notes:
+
+- [Compress Photos](shortcuts/compress-photos/DEVELOPING.md), including
+  [releasing a new version](shortcuts/compress-photos/DEVELOPING.md#6-releasing-a-new-version).
+
+## 5. License
 
 GPL-3.0-or-later; see [LICENSE](LICENSE). The release files include third-party
 libraries under their own licenses; see [licenses](licenses/README.md).
