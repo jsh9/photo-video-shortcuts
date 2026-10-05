@@ -173,9 +173,16 @@ What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
 changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
 of Run Shell Script (`Script`, `Shell`, `Input`, `InputMode` with
 `as arguments`; confirmed on macOS 26) and Get File (`WFGetFilePath`,
-`WFFileStorageService` iCloud Drive; confirmed), that Save to Photo Album
-accepts a `.jxl` File, and that the Share menu in Photos passes the photos as
-images with their library details (Album, Media Type, Photo Type).
+`WFFileStorageService` iCloud Drive; confirmed), and that Save to Photo Album
+accepts a `.jxl` File and adds it to albums by name (confirmed). What the Mac
+doesn't do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the
+shortcut an `NSItemProvider` with a file URL of a JPEG export that Shortcuts'
+extension can't represent
+(`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
+`public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
+picker; and Delete Photos isn't registered in the share extension at all, and
+in the app it needs the Shortcuts window for its prompt
+(`Presenter connection failed` otherwise).
 
 ### 1.2. XMP
 

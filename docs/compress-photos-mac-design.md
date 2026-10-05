@@ -46,9 +46,15 @@ the Photos shortcut's work folder is `compress-photos-macos/` in that folder
 (fallback 2 of section 4.3). S8 passed (the Run Shell Script keys work as
 written). The shell runs unsandboxed in `com.apple.shortcuts.mac-helper` with
 its own `$TMPDIR`. S6, S7 and S10 are done (static arm64 build, Gatekeeper via
-`curl`, byte-identical output; see `test_mac_script.py`). Still to confirm: S1,
-S3, S4, S5 (a first Share-menu run passed no input at all; to be repeated), and
-that Save to Photo Album accepts a `.jxl` file on the Mac. Written 2026-10-04
+`curl`, byte-identical output; see `test_mac_script.py`). S1: Shortcuts passes
+the picker's photos as files whose names the shortcut supplies (the script
+takes the names it is given). S3: albums come through for picker photos (two
+album additions in one run). S4: Delete Photos works from the app when its
+prompt can be shown, and is not registered in the share extension. S5: Photos'
+Share menu and right-click ▸ Shortcuts hand over a JPEG export as a file URL
+that Shortcuts' extension cannot represent, so the input is empty and the
+picker opens; the Share menu is therefore only an entry point on the Mac. Save
+to Photo Album accepts a `.jxl` file and Photos shows it. Written 2026-10-04
 against Compress Photos 0.3.1 on macOS 27.0 (Shortcuts 8); decisions settled
 the same day (section 7).
 
