@@ -49,23 +49,29 @@ on run {input, parameters}
 			end if
 		end repeat
 	end if
-	-- Albums: one pass over every album, nested ones included. Each new item
-	-- joins every album its original is in.
+	-- Albums: every album, nested ones included, with the ids of its items,
+	-- read one level at a time (scanAlbums): one call per folder for all of
+	-- its albums' ids, where a call per album costs about 17 ms, 12 s for a
+	-- library of 689 albums. Each new item joins every album its original is
+	-- in.
 	if (count of pairs) > 0 then
 		with timeout of 3600 seconds
 		tell application "Photos"
-			set allAlbums to my collectAlbums(albums, folders)
-			repeat with a in allAlbums
-				try
-					set ids to id of media items of a
-					set members to {}
-					repeat with pair in pairs
-						if ids contains (item 1 of pair) then set end of members to item 2 of pair
-					end repeat
-					if (count of members) > 0 then add members to a
-				on error e number errNum
-					set problems to problems & "! album " & (name of a) & ": " & e & linefeed
-				end try
+			set scanned to my scanAlbums(albums, (id of media items of albums), folders)
+			repeat with entry in scanned
+				set a to item 1 of entry
+				set ids to item 2 of entry
+				set members to {}
+				repeat with pair in pairs
+					if ids contains (item 1 of pair) then set end of members to item 2 of pair
+				end repeat
+				if (count of members) > 0 then
+					try
+						add members to a
+					on error e number errNum
+						set problems to problems & "! album " & (name of a) & ": " & e & linefeed
+					end try
+				end if
 			end repeat
 		end tell
 		end timeout
@@ -80,10 +86,14 @@ on run {input, parameters}
 				else
 					set target to make new album named "@ORIGINALS_ALBUM@"
 				end if
+				-- By reference (media item id X), not a "whose id is" filter: the
+				-- filter scans the whole library, about 1.6 s per photo in a
+				-- library of 58,000 items; the reference is immediate.
 				set originals to {}
 				repeat with oid in toCollect
-					set hits to (media items whose id is (oid as text))
-					if (count of hits) > 0 then set end of originals to item 1 of hits
+					try
+						set end of originals to media item id (oid as text)
+					end try
 				end repeat
 				if (count of originals) > 0 then
 					add originals to target
@@ -97,15 +107,18 @@ on run {input, parameters}
 	return "imported=" & imported & linefeed & "collected=" & collected & linefeed & problems
 end run
 
-on collectAlbums(albumList, folderList)
+-- {album, ids of its items} for each album of albumList and, recursively, of
+-- the folders in folderList. albumIds is "id of media items of" the same
+-- albums, which the caller fetches in one call (one list per album).
+on scanAlbums(albumList, albumIds, folderList)
 	set found to {}
-	repeat with a in albumList
-		set end of found to a
+	repeat with i from 1 to count of albumList
+		set end of found to {item i of albumList, item i of albumIds}
 	end repeat
 	repeat with f in folderList
 		tell application "Photos"
-			set found to found & (my collectAlbums(albums of f, folders of f))
+			set found to found & (my scanAlbums(albums of f, (id of media items of (albums of f)), folders of f))
 		end tell
 	end repeat
 	return found
-end collectAlbums
+end scanAlbums

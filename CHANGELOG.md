@@ -20,6 +20,13 @@ encoder. Every release includes the current files of all shortcuts.
     and converts one photo at a time, as before. The default is unchanged: one
     photo at a time with all the cores.
 - Fixed
+  - *Compress Photos (macOS)* from Photos spent longer after the conversion
+    than on it with a large library: collecting the originals looked each one
+    up with a `whose id is` filter, which scans the whole library (about 1.6 s
+    per photo in a library of 58,000 items), and the album pass asked Photos
+    for each album separately (about 17 ms each, 12 s for 689 albums). The
+    originals are now referenced by id directly, and the albums' contents are
+    read one folder at a time: for 37 photos in that library, about 65 s less.
   - With several HEIF photos decoding at a time, libheif's memory accounting
     could fail one of them with "Security limit exceeded" (it counts a
     context's images in a table keyed by the context's address, and `jxlbatch`

@@ -131,8 +131,9 @@ Compress Photos (macOS)                      (shortcut)
    alone: skipped), runs jxlbatch, renames each result to out/Name.jxl and
    prints "path|id|delete or keep|Name.jxl"; Run AppleScript
    (mac/import.applescript, input: those lines) has Photos import each file,
-   add it to every album its original is in (one pass over all albums,
-   nested ones too), and add the "delete" originals to the album
+   add it to every album its original is in (the albums' contents read one
+   folder at a time, nested ones too), and add the "delete" originals (by
+   id reference) to the album
    "Compressed to JXL" (a script can't delete photos); returns
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
@@ -246,15 +247,19 @@ of Run Shell Script (`Script`, `Shell`, `Input`, `InputMode` with
 accepts a `.jxl` File and adds it to albums by name (confirmed), and Photos'
 AppleScript interface (`selection`, `export ... with using originals`,
 `import ... skip check duplicates`, `albums`, `folders`, `add`; confirmed: the
-originals export in well under a second, an import keeps the file name, and one
-album scan of 151 albums takes about 3 s). Run AppleScript's text must be
-plain: with a Shortcuts variable in it the script doesn't compile and the
-action silently returns nothing, so values go in through the action's input
-(`item 1 of input`), and `item 1 of selection` must be read from a variable
-(`set sel to selection`), not from `selection` directly. What the Mac doesn't
-do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the shortcut
-an `NSItemProvider` with a file URL of a JPEG export that Shortcuts' extension
-can't represent
+originals export in well under a second, an import keeps the file name). Two
+things cost time in a large library (58,000 items, 689 albums, measured on
+macOS 26): every call into Photos takes about 17 ms, so the album pass asks for
+`id of media items of albums` once per folder (5 s in all) rather than once per
+album (12 s), and a `media items whose id is X` filter scans the whole library
+(1.6 s each), so an original is referenced as `media item id X` instead (no
+measurable cost). Run AppleScript's text must be plain: with a Shortcuts
+variable in it the script doesn't compile and the action silently returns
+nothing, so values go in through the action's input (`item 1 of input`), and
+`item 1 of selection` must be read from a variable (`set sel to selection`),
+not from `selection` directly. What the Mac doesn't do (macOS 26): Photos'
+Share menu and right-click ▸ Shortcuts hand the shortcut an `NSItemProvider`
+with a file URL of a JPEG export that Shortcuts' extension can't represent
 (`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
 `public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
 picker; and Delete Photos isn't registered in the share extension at all, and
