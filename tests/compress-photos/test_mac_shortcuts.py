@@ -12,6 +12,7 @@ PHOTOS = 'Compress Photos (macOS)'
 FILES = 'Compress Photo Files (macOS)'
 RUN_SHELL = 'is.workflow.actions.runshellscript'
 RUN_APPLESCRIPT = 'is.workflow.actions.runapplescript'
+GET_FILE = 'is.workflow.actions.documentpicker.open'
 
 
 @pytest.fixture(scope='module')
@@ -113,24 +114,38 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert 'jxl_in_$' in text and 'jxl_done.txt' in text
 
 
-def test_photos_results_saved_through_applescript_files(shortcuts):
-    # Each output line is "path|index|delete or keep|Name.jxl": the path
-    # becomes a File through Run AppleScript, renamed to Name.jxl and saved.
+def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
+        gen, shortcuts
+):
+    # Each output line is "file|index|delete or keep|Name.jxl": the file is
+    # read from the work folder inside Shortcuts' iCloud Drive folder with Get
+    # File (the one bridge from a script to Shortcuts on the Mac: AppleScript
+    # file results come back empty, absolute paths are refused), renamed to
+    # Name.jxl and saved.
     actions = shortcuts[PHOTOS]
-    scripts = [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
-    assert len(scripts) == 1
-    text = ph.render(ph.params(scripts[0])['Script'], {'Item from List': 'P'})
-    assert (
-        text == 'on run {input, parameters}\n\treturn POSIX file "P"\nend run'
-    )
+    gets = [a for a in actions if ph.ident(a) == GET_FILE]
+    assert len(gets) == 1
+    p = ph.params(gets[0])
+    assert p['WFFileStorageService'] == 'iCloud Drive'
+    assert p['WFShowFilePicker'] is False
+    assert ph.render(
+        p['WFGetFilePath'], {'Item from List': 'jxl_out_1.jxl'}
+    ) == (f'{gen.WORK_NAME}/jxl_out_1.jxl')
+    assert not [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
     idents = [ph.ident(a) for a in actions]
     assert (
-        idents.index(RUN_APPLESCRIPT)
+        idents.index(GET_FILE)
         < idents.index(
-            'is.workflow.actions.setitemname', idents.index(RUN_APPLESCRIPT)
+            'is.workflow.actions.setitemname', idents.index(GET_FILE)
         )
         < idents.index('is.workflow.actions.savetocameraroll')
     )
+    # the script's work folder is that folder, and the follow-up scripts use it
+    for text in ph.shell_scripts(
+        actions, {'Matches': '', 'Combined Text': '', 'Skipped Echo': ''}
+    ):
+        assert 'iCloud~is~workflow~my~workflows/Documents' in text
+        assert gen.WORK_NAME in text
 
 
 def test_photos_kept_originals_not_offered_for_deletion(shortcuts):
@@ -292,3 +307,41 @@ def test_iphone_shortcuts_unchanged_by_refactor():
         'write',
     ):
         assert hasattr(ios, name), name
+
+
+def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
+    # Set Name and Save to Photo Album output nothing when Run AppleScript
+    # gave no file (seen on a Mac: the original was then deleted with no
+    # copy saved). So the album additions, the Converted entry and the saved
+    # count all sit inside "If (Saved Photo Media) has any value".
+    actions = shortcuts[PHOTOS]
+    saves = [
+        ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.savetocameraroll'
+        and 'WFCameraRollSelectedGroup' not in ph.params(a)
+    ]
+    assert len(saves) == 1
+    guarded = {'Converted': 0, 'Saved Photos': 0, 'albums': 0}
+    for action, inside in ph.inside_if_on(actions, saves[0]):
+        p = ph.params(action)
+        if ph.ident(action) == 'is.workflow.actions.appendvariable' and (
+            p['WFVariableName'] in ('Converted', 'Saved Photos')
+        ):
+            assert inside, p['WFVariableName']
+            guarded[p['WFVariableName']] += 1
+        elif ph.ident(action) == 'is.workflow.actions.savetocameraroll' and (
+            'WFCameraRollSelectedGroup' in p
+        ):
+            assert inside, 'album addition outside the saved check'
+            guarded['albums'] += 1
+
+    assert guarded == {'Converted': 1, 'Saved Photos': 1, 'albums': 1}
+    # The count in the notification is of the photos actually saved.
+    counts = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.count'
+        and "'Saved Photos'" in repr(ph.params(a)['Input'])
+    ]
+    assert len(counts) == 1

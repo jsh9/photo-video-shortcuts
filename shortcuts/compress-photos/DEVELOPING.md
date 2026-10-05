@@ -122,13 +122,16 @@ Compress Photos (macOS)                      (shortcut)
    passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
      /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
-     writes jxl_job.txt in $TMPDIR/compress-photos-macos, runs
+     writes jxl_job.txt in compress-photos-macos/ inside Shortcuts' iCloud
+     Drive folder (~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/
+     Documents), runs
        jxlbatch -q 83 -e 7 -C "$WORK" jxl_job.txt   (log in jxl_log.txt)
-     and prints jxl_done.txt's lines with full paths:
-       /…/compress-photos-macos/jxl_out_N.jxl|N|delete or keep|Name.jxl
-   then, for each line: Run AppleScript (return POSIX file "…") turns the path
-   into a File, which is renamed and saved to Photos and added to the
-   original's albums; "delete" lines add the original to Converted
+     and prints jxl_done.txt's lines:
+       jxl_out_N.jxl|N|delete or keep|Name.jxl
+   then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
+   to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
+   and saved to Photos and added to the original's albums; only when the
+   save produced a photo is a "delete" line's original added to Converted
    the log is shown in Quick Look if it has a "!" note, an error or a failed
    photo; the work folder is removed; a notification counts the saved photos;
    Delete Photos asks about Converted (from the Share menu too)
@@ -143,7 +146,16 @@ Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
 ```
 
 Run Shell Script waits for the script, so there is no handoff, no helper
-shortcut, no marker files and no retry. The script is assembled by
+shortcut, no marker files and no retry. The work folder of the Photos shortcut
+is inside Shortcuts' iCloud Drive folder because that is the one place a file
+written by a script gets back into Shortcuts on the Mac: Get File with a path
+relative to that folder works, while Run AppleScript's file results
+(`POSIX file`, `alias`, file URL) come back as nothing and Get File refuses
+absolute paths (checked on macOS 26 with a diagnostic shortcut; see
+`docs/compress-photos-mac-design.md`, section 5). The Finder shortcut needs no
+bridge and works in `$TMPDIR`. A save that produces nothing (for example with
+iCloud Drive off for Shortcuts) leaves the original alone and is listed in the
+log as `! not saved to Photos`. The script is assembled by
 `build_mac_shortcuts.py` from `scripts/mac/*.zsh` with the quality, the lines
 of names or paths, and the Skipped Echo as Shortcuts variables; `jxlbatch`
 itself and the job and result files are the iPhone's. The encoder is the static
@@ -160,10 +172,10 @@ use it). The script never exits nonzero for a conversion problem: it writes
 What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
 changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
 of Run Shell Script (`Script`, `Shell`, `Input`, `InputMode` with
-`as arguments`) and Run AppleScript (`Script`), its output names
-(`Shell Script Result`, `AppleScript Result`), that Run AppleScript's file
-result becomes a File item, and that the Share menu in Photos passes the photos
-as images with their library details (Album, Media Type, Photo Type).
+`as arguments`; confirmed on macOS 26) and Get File (`WFGetFilePath`,
+`WFFileStorageService` iCloud Drive; confirmed), that Save to Photo Album
+accepts a `.jxl` File, and that the Share menu in Photos passes the photos as
+images with their library details (Album, Media Type, Photo Type).
 
 ### 1.2. XMP
 

@@ -8,12 +8,14 @@ for f in "$@"; do
   printf '%d|%s\n' "$i" "${names[$i]:-${f:t}}" >> "$WORK/jxl_job.txt"
 done
 @RUN@
-# One line per converted photo, jxl_done.txt's "file|index|delete or keep|Name.jxl"
-# with the file as a full path, for the shortcut to save; nothing when nothing
-# was converted. The work folder stays for the shortcut, which removes it at
-# the end (and the next run starts by removing what's left).
+# One line per converted photo, jxl_done.txt's "file|index|delete or keep|Name.jxl";
+# the shortcut reads each file from the work folder with Get File (the only
+# way a file gets from a script into Shortcuts on the Mac; see the shortcut).
+# Nothing when nothing was converted. The work folder stays for the shortcut,
+# which removes it at the end (and the next run starts by removing what's
+# left).
 if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$line" ] && printf '%s/%s\n' "$WORK" "$line"
+    [ -n "$line" ] && printf '%s\n' "$line"
   done < "$WORK/jxl_done.txt"
 fi

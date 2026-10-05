@@ -46,6 +46,12 @@ ______________________________________________________________________
 - A Mac with Apple silicon (M1 or later) running macOS 14 (Sonoma) or later,
   which is when Photos started reading JPEG XL. Intel Macs aren't supported.
 - Shortcuts' *Allow Running Scripts* setting (below).
+- For *Compress Photos (macOS)*: iCloud Drive turned on for Shortcuts (System
+  Settings ▸ Apple Account ▸ iCloud ▸ Drive ▸ Shortcuts, on by default). The
+  converted files pass through Shortcuts' own folder in iCloud Drive on their
+  way into Photos, since that is the only place Shortcuts reads a file a script
+  wrote; they are removed as soon as they are saved. *Compress Photo Files
+  (macOS)* doesn't need it.
 
 ## 2. Installation
 
@@ -149,14 +155,15 @@ check the encoder's version and note a mismatch in the log.
 
 ## 6. Troubleshooting
 
-| Symptom                                                                 | Fix                                                                                                                                                               |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The shortcut stops at Run Shell Script with an error about scripts      | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                  |
-| Quick Look shows `ERROR: jxlbatch is not installed`                     | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.            |
-| `"jxlbatch" cannot be opened because the developer cannot be verified`  | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch`, or install it with the `curl` command instead. |
-| `! … is not jxlbatch <version>` in the log                              | The encoder and the shortcuts are from different releases. Update the older one (see [Updating](#5-updating)).                                                    |
-| The shortcut isn't in Photos' Share menu                                | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.            |
-| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions          | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                   |
-| Notification "Saved 0 photo(s)" and Quick Look shows the log            | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                              |
-| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. They decide which originals are offered for deletion.                  |
-| Results in `~/Pictures/JPEG XL` instead of next to the files            | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.       |
+| Symptom                                                                 | Fix                                                                                                                                                                                        |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The shortcut stops at Run Shell Script with an error about scripts      | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                           |
+| Quick Look shows `ERROR: jxlbatch is not installed`                     | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.                                     |
+| `"jxlbatch" cannot be opened because the developer cannot be verified`  | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch`, or install it with the `curl` command instead.                          |
+| `! … is not jxlbatch <version>` in the log                              | The encoder and the shortcuts are from different releases. Update the older one (see [Updating](#5-updating)).                                                                             |
+| The shortcut isn't in Photos' Share menu                                | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                     |
+| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions          | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                            |
+| Notification "Saved 0 photo(s)" and Quick Look shows the log            | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                       |
+| `! not saved to Photos: <name>` in the log                              | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing. |
+| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. They decide which originals are offered for deletion.                                           |
+| Results in `~/Pictures/JPEG XL` instead of next to the files            | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                |

@@ -1,11 +1,12 @@
 # @NAME@ @VERSION@: converts the photos Shortcuts passes as files ("$@")
 # with jxlbatch. Help: @HELP_URL@
 setopt extendedglob
-WORK=@WORK@
+@WORK_SETUP@
 rm -rf "$WORK"
 mkdir -p "$WORK"
 LOG="$WORK/jxl_log.txt"
 : > "$LOG"
+@WORK_CHECK@
 VERSION='@VERSION@'
 QUALITY='@QUALITY@'
 # @LABEL@: one per input file, in the same order (see the shortcut)

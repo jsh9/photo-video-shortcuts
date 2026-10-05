@@ -38,11 +38,19 @@ assembled by `build_mac_shortcuts.py` (not embedded in Python); the shared
 plist builder is `scripts/wf.py`; the work folder is a fixed
 `$TMPDIR/compress-photos-macos` (so the follow-up steps need no path parsing);
 the encoder is found through `~/.local/bin` first, with a `JXLBATCH` override
-for the tests. The spikes in section 5 that need a hand-built shortcut (S1–S5,
-S8, S9) are still to be run on a Mac; S6, S7 and S10 are done (static arm64
-build, Gatekeeper via `curl`, byte-identical output; see `test_mac_script.py`).
-Written 2026-10-04 against Compress Photos 0.3.1 on macOS 27.0 (Shortcuts 8);
-decisions settled the same day (section 7).
+for the tests. Spike results on macOS 26 (2026-10-04, with a diagnostic
+shortcut): S2 failed, so the design changed: Run AppleScript returns nothing
+for `POSIX file`, `alias` or a file URL, and Get File refuses absolute paths,
+but Get File with a path relative to Shortcuts' iCloud Drive folder works, so
+the Photos shortcut's work folder is `compress-photos-macos/` in that folder
+(fallback 2 of section 4.3). S8 passed (the Run Shell Script keys work as
+written). The shell runs unsandboxed in `com.apple.shortcuts.mac-helper` with
+its own `$TMPDIR`. S6, S7 and S10 are done (static arm64 build, Gatekeeper via
+`curl`, byte-identical output; see `test_mac_script.py`). Still to confirm: S1,
+S3, S4, S5 (a first Share-menu run passed no input at all; to be repeated), and
+that Save to Photo Album accepts a `.jxl` file on the Mac. Written 2026-10-04
+against Compress Photos 0.3.1 on macOS 27.0 (Shortcuts 8); decisions settled
+the same day (section 7).
 
 ## 1. Verdict
 

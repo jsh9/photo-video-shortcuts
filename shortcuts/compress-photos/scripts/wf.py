@@ -508,6 +508,23 @@ class Builder:
             'AppleScript Result',
         )
 
+    def get_file_from_shortcuts_folder(self, *path, error_if_missing=False):
+        """
+        Get File: ``path`` relative to Shortcuts' own folder in iCloud Drive
+        (text with variables). Without ``error_if_missing``, a missing file
+        gives no output. Absolute paths are refused by Shortcuts on the Mac.
+        """
+        a = self.add(
+            'is.workflow.actions.documentpicker.open',
+            {
+                'WFGetFilePath': plain_or_text(*path),
+                'WFShowFilePicker': False,
+                'WFFileErrorIfNotFound': error_if_missing,
+                'WFFileStorageService': 'iCloud Drive',
+            },
+        )
+        return output_of(a, 'File')
+
     def quick_look(self, ref):
         """Quick Look (Preview Document): shows text or a file in a window."""
         self.add(

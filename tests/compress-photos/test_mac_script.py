@@ -59,7 +59,15 @@ class Mac:
         self.home = root / 'home'
         self.tmp.mkdir()
         self.home.mkdir()
-        self.work = self.tmp / 'compress-photos-macos'
+        # the Photos shortcut's work folder (inside Shortcuts' iCloud Drive
+        # folder) and the Finder shortcut's (in TMPDIR)
+        self.icloud = (
+            self.home
+            / 'Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents'
+        )
+        self.icloud.mkdir(parents=True)
+        self.work = self.icloud / 'compress-photos-macos'
+        self.work_files = self.tmp / 'compress-photos-macos'
         self.jxlbatch = jxlbatch
 
     def env(self, jxlbatch=None):
@@ -125,12 +133,11 @@ def test_photos_prints_one_line_per_result_with_the_path(mac):
         skipped='echo "Skipped 1 video(s): only still photos are converted."',
     )
     assert out.splitlines() == [
-        f'{mac.work}/jxl_out_1.jxl|1|delete|IMG_0001.jxl',
-        f'{mac.work}/jxl_out_2.jxl|2|delete|IMG_0002.jxl',
+        'jxl_out_1.jxl|1|delete|IMG_0001.jxl',
+        'jxl_out_2.jxl|2|delete|IMG_0002.jxl',
     ]
     for line in out.splitlines():
-        path = line.split('|')[0]
-        assert os.path.getsize(path) > 0
+        assert os.path.getsize(mac.work / line.split('|')[0]) > 0
 
     # The work folder stays for the shortcut to read the files; the log has
     # what the shortcut skipped and what jxlbatch printed.
@@ -166,6 +173,16 @@ def test_photos_nothing_converted_prints_nothing(mac, gen):
 def test_photos_without_input(mac, gen):
     assert mac.batch('photos') == ''
     assert 'ERROR: no photos to convert.' in mac.log
+
+
+def test_photos_notes_a_missing_icloud_folder(mac, gen):
+    shutil.rmtree(mac.icloud)
+    a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
+    assert mac.batch('photos', a).strip() == (
+        'jxl_out_1.jxl|1|delete|IMG_0001.jxl'
+    )
+    assert "! Shortcuts' iCloud Drive folder not found" in mac.log
+    assert re.search(gen.WARNINGS, mac.log)
 
 
 def test_warnings_pattern(gen):
@@ -235,7 +252,7 @@ def test_files_next_to_originals_folders_and_fallback(mac):
     # the folder's non-image file was never staged
     assert 'notes' not in out
     # the work folder is gone
-    assert not mac.work.exists()
+    assert not mac.work_files.exists()
     assert c.exists() and a.exists()  # originals untouched
 
 

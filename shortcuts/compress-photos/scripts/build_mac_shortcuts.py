@@ -64,7 +64,18 @@ ENCODER_PATHS = [
 # The work folder: one per user, in the user's temporary folder (TMPDIR ends
 # with a slash on macOS). Fixed, so that the shortcut's later steps can find
 # the log and the results without parsing the script's output.
-WORK = '"${TMPDIR:-/tmp/}compress-photos-macos"'
+# Compress Photos (macOS): a folder inside Shortcuts' own folder in iCloud
+# Drive, because Get File, with a path relative to that folder, is the only
+# way a file written by a script gets into Shortcuts on the Mac (checked on
+# macOS 26: Run AppleScript's file results come back empty, and Get File
+# refuses absolute paths). Shortcuts reads it locally; the files are gone
+# before iCloud has much to sync.
+SHORTCUTS_FOLDER = '"$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents"'
+WORK_NAME = 'compress-photos-macos'
+WORK_PHOTOS = f'{SHORTCUTS_FOLDER}/{WORK_NAME}'
+# Compress Photo Files (macOS) needs no bridge: the user's temporary folder
+# (TMPDIR ends with a slash on macOS).
+WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
 # Where the file shortcut saves when it can't write next to the original.
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
@@ -86,7 +97,37 @@ SLOTS = {
 }
 
 
-def script_text(name, body, label):
+def work_setup(work):
+    """
+    The script lines that set WORK. For the Photos shortcut they also note,
+    before the folder is created, whether Shortcuts' iCloud Drive folder is
+    missing (iCloud Drive off for Shortcuts): Get File then finds nothing and
+    the shortcut reports every photo as not saved.
+    """
+    if work != WORK_PHOTOS:
+        return f'WORK={work}'
+
+    return (
+        f"icloud_missing=''\n"
+        f'[ -d {SHORTCUTS_FOLDER} ] || icloud_missing=1\n'
+        f'WORK={work}'
+    )
+
+
+def work_check(work):
+    """The note about the missing iCloud Drive folder, once the log exists."""
+    if work != WORK_PHOTOS:
+        return ''
+
+    return (
+        '[ -n "$icloud_missing" ] && echo "! Shortcuts\' iCloud Drive folder '
+        'not found: the results cannot reach Photos. Turn on iCloud Drive for '
+        'Shortcuts in System Settings > Apple Account > iCloud > Drive." '
+        '>> "$LOG"'
+    )
+
+
+def script_text(name, body, label, work):
     """
     The script as one text with the three @SLOTS@ still in it: common.zsh, then
     ``body`` (photos.zsh or files.zsh) with run.zsh at its @RUN@.
@@ -98,7 +139,8 @@ def script_text(name, body, label):
         '@VERSION@': VERSION,
         '@HELP_URL@': HELP_URL,
         '@EFFORT@': str(EFFORT),
-        '@WORK@': WORK,
+        '@WORK_SETUP@': work_setup(work),
+        '@WORK_CHECK@': work_check(work),
         '@FALLBACK@': FALLBACK_FOLDER,
         '@LABEL@': label,
         '@CANDIDATES@': ' '.join(f'"{p}"' for p in ENCODER_PATHS),
@@ -111,7 +153,7 @@ def script_text(name, body, label):
     return text
 
 
-def script(name, body, label, quality, lines):
+def script(name, body, label, work, quality, lines):
     """The Run Shell Script text parts: strings and the three variables."""
     refs = {
         '@QUALITY@': quality,
@@ -120,7 +162,8 @@ def script(name, body, label, quality, lines):
     }
     parts = []
     for piece in re.split(
-        '(@QUALITY@|@LINES@|@SKIPPED@)', script_text(name, body, label)
+        '(@QUALITY@|@LINES@|@SKIPPED@)',
+        script_text(name, body, label, work),
     ):
         if piece in refs:
             parts.append(refs[piece])
@@ -172,57 +215,76 @@ def build_photos(sample):
             NAME_PHOTOS,
             'photos.zsh',
             'NAMES',
+            WORK_PHOTOS,
             quality,
             b.combine(variable('Names'), '\n'),
         ),
         input_ref=photos,
     )
 
-    # Each output line is "path|index|delete or keep|Name.jxl"; no line when
+    # Each output line is "file|index|delete or keep|Name.jxl"; no line when
     # nothing was converted (then Match Text finds no "|").
     def save_results():
         lines = b.split(result, '\n')
 
         def per_file():
             parts = b.split(REPEAT_ITEM, '|')
-            path = b.item_from_list(parts, 'First Item')
+            file_name = b.item_from_list(parts, 'First Item')
             photo_name = b.item_from_list(parts, 'Last Item')
-            # AppleScript's file object becomes a Shortcuts File item.
-            file = b.run_applescript(
-                'on run {input, parameters}\n\treturn POSIX file "',
-                path,
-                '"\nend run',
-            )
+            # Get File reads it from the work folder inside Shortcuts' iCloud
+            # Drive folder (see WORK_PHOTOS).
+            file = b.get_file_from_shortcuts_folder(f'{WORK_NAME}/', file_name)
             saved = b.save_to_photos(b.set_name(file, photo_name))
-            index = b.item_at_index(parts, 2)
-            original = b.item_at_index(photos, index)
-            # "keep" means the JPEG XL lacks the original's HDR.
-            delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
-            b.if_has_value(
-                delete,
-                lambda: b.append_variable('Converted', original),
-                lambda: None,
-            )
-            b.repeat_each(
-                b.photo_albums(original),
-                lambda: b.save_to_album(saved, REPEAT_ITEM_2),
-            )
+
+            # Only a photo that is in Photos now counts, joins its original's
+            # albums, and lets the original be offered for deletion: a save
+            # that produced nothing (for example because the file could not
+            # be read) must never lead to a deletion.
+            def when_saved():
+                b.append_variable('Saved Photos', saved)
+                index = b.item_at_index(parts, 2)
+                original = b.item_at_index(photos, index)
+                # "keep" means the JPEG XL lacks the original's HDR.
+                delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
+                b.if_has_value(
+                    delete,
+                    lambda: b.append_variable('Converted', original),
+                    lambda: None,
+                )
+                b.repeat_each(
+                    b.photo_albums(original),
+                    lambda: b.save_to_album(saved, REPEAT_ITEM_2),
+                )
+
+            def not_saved():
+                b.append_variable(
+                    'Not Saved', b.text('! not saved to Photos: ', photo_name)
+                )
+
+            b.if_has_value(saved, when_saved, not_saved)
 
         b.repeat_each(lines, per_file)
-        b.set_variable('Saved', b.count(lines))
 
+    b.set_variable('Saved', b.text('0'))
+    b.if_has_value(b.match_text(result, r'\|'), save_results, lambda: None)
     b.if_has_value(
-        b.match_text(result, r'\|'),
-        save_results,
-        lambda: b.set_variable('Saved', b.text('0')),
+        variable('Saved Photos'),
+        lambda: b.set_variable('Saved', b.count(variable('Saved Photos'))),
+        lambda: None,
     )
     # The log: shown when it has a note, an error or a failed photo (what the
     # iPhone user reads in a-Shell), before the originals can be deleted.
-    log = b.run_shell_script(f'cat {WORK}/jxl_log.txt 2>/dev/null || true')
+    log = b.text(
+        b.run_shell_script(
+            f'cat {WORK_PHOTOS}/jxl_log.txt 2>/dev/null || true'
+        ),
+        '\n',
+        b.combine(variable('Not Saved'), '\n'),
+    )
     b.if_has_value(
         b.match_text(log, WARNINGS), lambda: b.quick_look(log), lambda: None
     )
-    b.run_shell_script(f'rm -rf {WORK}')
+    b.run_shell_script(f'rm -rf {WORK_PHOTOS}')
     b.notification(
         'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
     )
@@ -277,6 +339,7 @@ def build_files(sample):
             NAME_FILES,
             'files.zsh',
             'PATHS',
+            WORK_FILES,
             quality,
             b.combine(variable('Paths'), '\n'),
         ),
