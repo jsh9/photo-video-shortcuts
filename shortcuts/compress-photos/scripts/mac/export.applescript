@@ -11,14 +11,14 @@ on run {input, parameters}
 		tell application "Photos"
 			set sel to selection
 			if (count of sel) is 0 then return "ERROR: nothing is selected in Photos."
-			set lines to ""
+			set idText to ""
 			repeat with i from 1 to count of sel
 				set m to item i of sel
-				set lines to lines & (id of m) & "|" & (filename of m) & linefeed
+				set idText to idText & (id of m) & "|" & (filename of m) & linefeed
 			end repeat
 			export sel to dest with using originals
 		end tell
-		return lines
+		return idText
 	on error e number errNum
 		return "ERROR: Photos could not export the selected photos (" & errNum & ": " & e & ")"
 	end try

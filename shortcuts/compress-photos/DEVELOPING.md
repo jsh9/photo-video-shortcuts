@@ -146,13 +146,18 @@ Compress Photos (macOS)                      (shortcut)
        jxlbatch -q 83 -e 7 -C "$WORK" jxl_job.txt   (log in jxl_log.txt)
      and prints jxl_done.txt's lines:
        jxl_out_N.jxl|N|delete or keep|Name.jxl
-   then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
+      then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
    to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
    and saved to Photos and added to the original's albums; only when the
-   save produced a photo is a "delete" line's original added to Converted
-   the log is shown in Quick Look if it has a "!" note, an error or a failed
-   photo; the work folder is removed; a notification counts the saved photos;
-   Delete Photos asks about Converted (from the Share menu too)
+   save produced a photo does a "delete" line's original name join Converted
+   Names, which Run AppleScript (mac/collect.applescript) turns into the
+   photos (by file name, only when exactly one photo has it) and adds to the
+   album "Compressed to JPEG XL"
+      the log is shown in Quick Look if it has a "!" note, an error or a failed
+   photo; the work folder is removed; a notification counts the saved photos
+   and the collected originals (Delete Photos isn't used: its prompt is one
+   the Shortcuts app often can't show on macOS 26, "Presenter connection
+   failed", and it isn't available from the Share menu at all)
 
 Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
    files and folders from Finder; each input's File Path; a quality preset;

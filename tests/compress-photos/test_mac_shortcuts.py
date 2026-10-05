@@ -140,12 +140,14 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
     assert ph.render(
         p['WFGetFilePath'], {'Item from List': 'jxl_out_1.jxl'}
     ) == (f'{gen.WORK_NAME}/jxl_out_1.jxl')
-    # the picker route (the Otherwise branch of "If Selection") runs no
-    # AppleScript; the selection route does (see its own test)
+    # the picker route (the Otherwise branch of "If Selection") runs only
+    # the collect AppleScript; the selection route the others
     for action, inside in ph.inside_if_on(actions, "'Selection'"):
-        if ph.ident(action) == RUN_APPLESCRIPT:
+        if ph.ident(action) == RUN_APPLESCRIPT and not inside:
+            script = ph.params(action)['Script']
             assert (
-                inside or 'is Photos in front' in ph.params(action)['Script']
+                'is Photos in front' in script
+                or 'collects the originals' in script
             )
 
     idents = [ph.ident(a) for a in actions]
@@ -182,23 +184,41 @@ def test_photos_kept_originals_not_offered_for_deletion(shortcuts):
     appended = 0
     for action, inside in ph.inside_if_on(actions, matches[0]):
         if ph.ident(action) == 'is.workflow.actions.appendvariable' and (
-            ph.params(action)['WFVariableName'] == 'Converted'
+            ph.params(action)['WFVariableName'] == 'Converted Names'
         ):
-            assert inside, 'an original joins Converted unconditionally'
+            assert inside, 'an original joins Converted Names unconditionally'
             appended += 1
 
     assert appended == 1
 
 
-def test_photos_delete_prompt_only_with_originals_to_delete(shortcuts):
+def test_photos_originals_collected_in_an_album_not_deleted(gen, shortcuts):
+    # Delete Photos needs a prompt the Shortcuts app often can't show on
+    # macOS 26, so the Mac shortcut never deletes: the originals' names go
+    # to collect.applescript (inside "If Converted Names has any value"),
+    # which puts them in ORIGINALS_ALBUM.
     actions = shortcuts[PHOTOS]
-    deletes = 0
-    for action, inside in ph.inside_if_on(actions, "'Converted'"):
-        if ph.ident(action) == 'is.workflow.actions.deletephotos':
-            assert inside
-            deletes += 1
-
-    assert deletes == 1
+    assert not [
+        a for a in actions if ph.ident(a) == 'is.workflow.actions.deletephotos'
+    ]
+    collects = [
+        a
+        for a in actions
+        if ph.ident(a) == RUN_APPLESCRIPT
+        and ph.params(a)['Script'] == gen.applescript_text('collect')
+    ]
+    assert len(collects) == 1
+    assert gen.ORIGINALS_ALBUM in ph.params(collects[0])['Script']
+    ref = next(ph.references(ph.params(collects[0])['Input']))
+    ids = {ph.params(a)['UUID']: a for a in actions if 'UUID' in ph.params(a)}
+    source = ph.params(ids[ref['OutputUUID']])
+    assert "'Converted Names'" in repr(source['text'])
+    flags = [
+        inside
+        for action, inside in ph.inside_if_on(actions, "'Converted Names'")
+        if action is collects[0]
+    ]
+    assert flags == [True]
 
 
 def test_photos_log_shown_only_with_warnings(gen, shortcuts):
@@ -222,7 +242,8 @@ def test_photos_log_shown_only_with_warnings(gen, shortcuts):
     for warn, look in zip(warns, looks, strict=True):
         flags = [inside for _, inside in ph.inside_if_on(actions, warn)]
         assert flags[look]
-        assert look < idents.index('is.workflow.actions.deletephotos')
+
+    del idents
 
 
 def test_files_shortcut_never_touches_photos(shortcuts):
@@ -342,11 +363,11 @@ def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
         and 'WFCameraRollSelectedGroup' not in ph.params(a)
     ]
     assert len(saves) == 1
-    guarded = {'Converted': 0, 'Saved Photos': 0, 'albums': 0}
+    guarded = {'Converted Names': 0, 'Saved Photos': 0, 'albums': 0}
     for action, inside in ph.inside_if_on(actions, saves[0]):
         p = ph.params(action)
         if ph.ident(action) == 'is.workflow.actions.appendvariable' and (
-            p['WFVariableName'] in ('Converted', 'Saved Photos')
+            p['WFVariableName'] in ('Converted Names', 'Saved Photos')
         ):
             assert inside, p['WFVariableName']
             guarded[p['WFVariableName']] += 1
@@ -356,7 +377,7 @@ def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
             assert inside, 'album addition outside the saved check'
             guarded['albums'] += 1
 
-    assert guarded == {'Converted': 1, 'Saved Photos': 1, 'albums': 1}
+    assert guarded == {'Converted Names': 1, 'Saved Photos': 1, 'albums': 1}
     # The count in the notification is of the photos actually saved.
     counts = [
         a
@@ -376,14 +397,15 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     actions = shortcuts[PHOTOS]
     scripts = [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
     assert [ph.params(a)['Script'][:40] for a in scripts] == [
-        gen.applescript_text(n)[:40] for n in ('probe', 'export', 'import')
+        gen.applescript_text(n)[:40]
+        for n in ('probe', 'export', 'import', 'collect')
     ]
     # Plain text only: a Shortcuts variable in the script text keeps a Run
     # AppleScript from compiling (seen on macOS 26); values go in as input.
     for a in scripts:
         assert isinstance(ph.params(a)['Script'], str)
 
-    probe, export, imp = scripts
+    probe, export, imp, collect = scripts
     assert 'Input' not in ph.params(probe)
     assert 'Input' in ph.params(export) and 'Input' in ph.params(imp)
     # the export's input is the prepare script's output (the work folder),
@@ -446,7 +468,7 @@ def test_applescripts_compile(gen):
 
     ph.need(shutil.which('osacompile'), 'osacompile is needed')
     with tempfile.TemporaryDirectory() as folder:
-        for name in ('probe', 'export', 'import'):
+        for name in ('probe', 'export', 'import', 'collect'):
             src = pathlib.Path(folder) / f'{name}.applescript'
             src.write_text(gen.applescript_text(name))
             result = subprocess.run(

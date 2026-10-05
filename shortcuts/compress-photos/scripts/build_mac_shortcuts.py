@@ -213,7 +213,7 @@ def build_photos(sample):
         "exports the originals, the JPEG XL copies are imported into the originals' "
         f'albums, and the originals whose copy has everything they have go into the album "{ORIGINALS_ALBUM}" '
         'for you to delete. Started any other way, it shows a photo picker, saves the '
-        "copies to Photos in the originals' albums, and offers to delete the originals. "
+        "copies to Photos in the originals' albums, and collects those originals in the same album. "
         'Needs jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
         f'Advanced. Setup and help: {HELP_URL}'
     )
@@ -303,8 +303,10 @@ def picker_route(b):
     """
     The photos in the variable Photos (the picker's, or the shortcut's input):
     Shortcuts passes them to the script as files, reads the results back with
-    Get File from WORK_PHOTOS, saves them to Photos and offers to delete the
-    originals.
+    Get File from WORK_PHOTOS, saves them to Photos, and has Photos collect the
+    originals to delete in ORIGINALS_ALBUM (collect.applescript, by file name:
+    a Shortcuts photo has no id. Delete Photos needs a prompt the Shortcuts app
+    often can't show on macOS 26).
     """
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
@@ -349,7 +351,7 @@ def picker_route(b):
             saved = b.save_to_photos(b.set_name(file, photo_name))
 
             # Only a photo that is in Photos now counts, joins its original's
-            # albums, and lets the original be offered for deletion: a save
+            # albums, and lets the original be collected for deletion: a save
             # that produced nothing (for example because the file could not
             # be read) must never lead to a deletion.
             def when_saved():
@@ -360,7 +362,9 @@ def picker_route(b):
                 delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
                 b.if_has_value(
                     delete,
-                    lambda: b.append_variable('Converted', original),
+                    lambda: b.append_variable(
+                        'Converted Names', b.text(b.get_name(original))
+                    ),
                     lambda: None,
                 )
                 b.repeat_each(
@@ -384,28 +388,51 @@ def picker_route(b):
         lambda: b.set_variable('Saved', b.count(variable('Saved Photos'))),
         lambda: None,
     )
-    # The log: shown when it has a note, an error or a failed photo (what the
-    # iPhone user reads in a-Shell), before the originals can be deleted.
+    # The originals to delete go into ORIGINALS_ALBUM (Photos, by name):
+    # "collected=N", then "! ..." problem lines.
+    b.set_variable('Collected', b.text('collected=0'))
+    b.if_has_value(
+        variable('Converted Names'),
+        lambda: b.set_variable(
+            'Collected',
+            b.run_applescript(
+                applescript_text('collect'),
+                input_ref=b.combine(variable('Converted Names'), '\n'),
+            ),
+        ),
+        lambda: None,
+    )
+    collected = b.match_text(
+        b.item_at_index(b.split(variable('Collected'), '\n'), 1), r'\d+'
+    )
+    # The log: shown when it has a note, an error, a failed photo or a copy
+    # that didn't reach Photos (what the iPhone user reads in a-Shell).
     log = b.text(
         b.run_shell_script(
             f'cat {WORK_PHOTOS}/jxl_log.txt 2>/dev/null || true'
         ),
         '\n',
         b.combine(variable('Not Saved'), '\n'),
+        '\n',
+        variable('Collected'),
     )
     b.if_has_value(
         b.match_text(log, WARNINGS), lambda: b.quick_look(log), lambda: None
     )
     b.run_shell_script(f'rm -rf {WORK_PHOTOS}')
-    b.notification(
-        'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
-    )
-    # Empty when nothing was converted or every original is kept. macOS asks
-    # to confirm, and the photos go to Recently Deleted.
     b.if_has_value(
-        variable('Converted'),
-        lambda: b.delete_photos(variable('Converted')),
-        lambda: None,
+        b.match_text(variable('Collected'), '^collected=[1-9]'),
+        lambda: b.notification(
+            'JPEG XL',
+            'Saved ',
+            variable('Saved'),
+            ' photo(s) to Photos. ',
+            collected,
+            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to delete.',
+        ),
+        lambda: b.notification(
+            'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
+        ),
     )
 
 
