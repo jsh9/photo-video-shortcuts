@@ -14,9 +14,10 @@ Generates the two Mac shortcuts as signed .shortcut files.
 Both run jxlbatch (the native macOS build, dist/jxlbatch-macos, installed as
 ~/.local/bin/jxlbatch) through Shortcuts' Run Shell Script action, which waits
 for the script, so there is no a-Shell, no helper shortcut and no handoff. The
-shell scripts are in scripts/mac/*.zsh and the AppleScripts in
-scripts/mac/*.applescript; tests/compress-photos/test_mac_script.py runs the
-shell scripts for real. See ../README-mac.md and ../DEVELOPING.md.
+shell scripts are in scripts/mac/*.zsh and lib/mac/*.zsh (the progress window
+and the finish step), the AppleScripts in lib/mac/*.applescript (lib/ is shared
+with the other tools' shortcuts); tests/compress-photos/test_mac_script.py runs
+the shell scripts for real. See ../README-mac.md and ../DEVELOPING.md.
 
 Usage::
 
@@ -120,6 +121,9 @@ CORES_CHOICES = [
 # The shell script (zsh): scripts/mac/*.zsh, with @PLACEHOLDERS@
 
 MAC = HERE / 'mac'
+# The Mac parts shared with the other tools: the progress window
+# (progress.zsh, at run.zsh's @PROGRESS@), finish.zsh and the AppleScripts.
+LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # The placeholders that become Shortcuts variables, and the variable each one
 # is in the shortcut: the chosen quality (Match Text's Matches), the cores
 # choice (the variable Cores, see choose_cores), the lines of NAMES or PATHS
@@ -176,6 +180,7 @@ def script_text(name, body, label, work):
     """
     text = (MAC / 'common.zsh').read_text() + (MAC / body).read_text()
     text = text.replace('@RUN@\n', (MAC / 'run.zsh').read_text())
+    text = text.replace('@PROGRESS@\n', (LIB_MAC / 'progress.zsh').read_text())
     for placeholder, value in {
         '@NAME@': name,
         '@VERSION@': VERSION,
@@ -184,7 +189,7 @@ def script_text(name, body, label, work):
         '@ROUTE@': ROUTES[work],
         '@WORK_SETUP@': work_setup(work),
         '@WORK_CHECK@': work_check(work),
-        '@FINISH@': (MAC / 'finish.zsh')
+        '@FINISH@': (LIB_MAC / 'finish.zsh')
         .read_text()
         .replace('@ROUTE@', ROUTES[work]),
         '@FALLBACK@': FALLBACK_FOLDER,
@@ -201,12 +206,12 @@ def script_text(name, body, label, work):
 
 def applescript_text(name):
     """
-    mac/<name>.applescript, with @ORIGINALS_ALBUM@ filled in. Plain text: a
+    lib/mac/<name>.applescript, with @ORIGINALS_ALBUM@ filled in. Plain text: a
     Shortcuts variable inside a Run AppleScript's text keeps it from compiling
     (it then produces no output and no error; seen on macOS 26), so values go
     in through the action's input (``wf.Builder.run_applescript``).
     """
-    text = (MAC / f'{name}.applescript').read_text()
+    text = (LIB_MAC / f'{name}.applescript').read_text()
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text
@@ -230,7 +235,7 @@ def finish_script(work):
     return (
         f'W={work}; LOGDIR={LOG_DIR}; LOG="$LOGDIR/{route}.log"\n'
         '{ echo; cat; echo; } >> "$LOG"\n'
-        + (MAC / 'finish.zsh').read_text().replace('@ROUTE@', route)
+        + (LIB_MAC / 'finish.zsh').read_text().replace('@ROUTE@', route)
         + cleanup
     )
 
