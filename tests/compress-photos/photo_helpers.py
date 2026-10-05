@@ -372,15 +372,68 @@ CONTROL_FLOW = {
 OBJ = '￼'  # where a variable sits inside a Shortcuts text field
 
 
-def load_generator():
-    """scripts/build_shortcuts.py as a module."""
+def load_generator(name='build_shortcuts'):
+    """
+    scripts/<name>.py (build_shortcuts or build_mac_shortcuts) as a module.
+    """
     import importlib.util
 
-    path = TOOL / 'scripts' / 'build_shortcuts.py'
-    spec = importlib.util.spec_from_file_location('build_shortcuts', path)
+    path = TOOL / 'scripts' / f'{name}.py'
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def walk(actions):
+    """(action, repeat depth) in order, checking control flow nests."""
+    stack = []
+    for action in actions:
+        p = params(action)
+        if ident(action) in CONTROL_FLOW:
+            mode = p['WFControlFlowMode']
+            if mode == 0:
+                stack.append((p['GroupingIdentifier'], ident(action)))
+            else:
+                assert stack, f'{ident(action)} closes nothing'
+                assert stack[-1] == (p['GroupingIdentifier'], ident(action))
+                if mode == 2:
+                    stack.pop()
+
+        depth = sum(1 for _, kind in stack if kind.endswith('repeat.each'))
+        yield action, depth
+
+    assert not stack, f'unclosed blocks: {stack}'
+
+
+def inside_if_on(actions, needle):
+    """
+    For each action, whether it runs inside the "then" branch of an If whose
+    condition input mentions ``needle`` (e.g. a variable name or an output
+    UUID), as (action, inside) pairs.
+    """
+    open_groups = []
+    for action in actions:
+        p = params(action)
+        if ident(action) == 'is.workflow.actions.conditional':
+            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
+            if mode == 0:
+                open_groups.append((group, needle in repr(p['WFInput'])))
+            elif mode == 1:
+                open_groups[-1] = (group, False)  # the Otherwise branch
+            else:
+                open_groups.pop()
+
+        yield action, any(inside for _, inside in open_groups)
+
+
+def shell_scripts(actions, values):
+    """The script text of each Run Shell Script action (the Mac shortcuts)."""
+    return [
+        render(params(a)['Script'], values)
+        for a in actions
+        if ident(a) == 'is.workflow.actions.runshellscript'
+    ]
 
 
 def ident(action):

@@ -11,7 +11,9 @@ included: Live Photos and videos are skipped.
 iOS can display JPEG XL but has no encoder, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
 `jxlbatch`. It uses libjxl, the reference JPEG XL encoder. How it works, and
-how to build it: [DEVELOPING.md](DEVELOPING.md).
+how to build it: [DEVELOPING.md](DEVELOPING.md). On a Mac, use the Mac
+shortcuts instead: [Compress Photos (macOS)](README-mac.md), the same encoder
+without a-Shell.
 
 <!--TOC-->
 

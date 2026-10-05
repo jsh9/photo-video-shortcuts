@@ -7,8 +7,9 @@ Each shortcut lives in shortcuts/<name>/ with a VERSION file shared by its
 changed, for example "compress-photos-v0.1.0", but carries the current files of
 all shortcuts, so the README's "latest" download links always work:
 
-- <name>-shortcuts-v<version>.zip: the shortcut's .shortcut files, inside a
-  folder of the same name (the files keep their names with spaces);
+- <name>-shortcuts-v<version>.zip: the shortcut's iPhone .shortcut files, and
+  <name>-mac-shortcuts-v<version>.zip its Mac ones (when it has any), each
+  inside a folder of the same name (the files keep their names with spaces);
 - the encoders declared in the tool's release.json, with fixed names.
 
 Before publishing, it checks the git state, the changelog entry, that every
@@ -50,8 +51,30 @@ OTHER_BLOCK = re.compile(
 )  # heading, quote, table
 
 
+# The platforms a tool's release.json may list shortcuts for, and the word in
+# the platform's ZIP name (none for the iPhone, whose ZIP name came first).
+PLATFORMS = ('iphone', 'mac')
+PLATFORM_INFIX = {'iphone': '', 'mac': 'mac'}
+PLATFORM_TITLE = {'iphone': 'iPhone', 'mac': 'Mac'}
+
+
 class ReleaseError(Exception):
     pass
+
+
+def encoder_kind(name):
+    """
+    'wasm' for a WebAssembly encoder (<name>.wasm, run with wasmtime), 'native'
+    for a Mac executable (a name without an extension, run directly), or None
+    for a name that is neither.
+    """
+    if name.endswith('.wasm') and name != '.wasm':
+        return 'wasm'
+
+    if name and '.' not in name:
+        return 'native'
+
+    return None
 
 
 def run(cmd, cwd=None, capture=False):
@@ -102,11 +125,28 @@ class Tool:
                 f'{manifest}: expected encoders and shortcuts lists'
             )
 
+        # "shortcuts" is a list (iPhone shortcuts) or {platform: list}.
+        shortcuts = declared['shortcuts']
+        if isinstance(shortcuts, list):
+            shortcuts = {'iphone': shortcuts}
+
+        if (
+            not isinstance(shortcuts, dict)
+            or not shortcuts
+            or set(shortcuts) - set(PLATFORMS)
+        ):
+            raise ReleaseError(
+                f'{manifest}: shortcuts must be a list or a dict with the '
+                f'keys {", ".join(PLATFORMS)}'
+            )
+
         names = []
-        for key, suffix in (('encoders', '.wasm'), ('shortcuts', '.shortcut')):
-            files = declared[key]
+        for key, files in [('encoders', declared['encoders'])] + [
+            (f'shortcuts.{platform}', files)
+            for platform, files in shortcuts.items()
+        ]:
             if not isinstance(files, list) or (
-                key == 'shortcuts' and not files
+                key != 'encoders' and not files
             ):
                 raise ReleaseError(
                     f'{manifest}: {key} must be a list (shortcuts cannot be empty)'
@@ -117,8 +157,11 @@ class Tool:
                     not isinstance(name, str)
                     or '/' in name
                     or '\\' in name
-                    or not name.endswith(suffix)
-                    or name == suffix
+                    or not (
+                        encoder_kind(name)
+                        if key == 'encoders'
+                        else name.endswith('.shortcut') and name != '.shortcut'
+                    )
                 ):
                     raise ReleaseError(
                         f'{manifest}: invalid {key} filename: {name!r}'
@@ -130,15 +173,23 @@ class Tool:
             raise ReleaseError(f'{manifest}: duplicate filenames')
 
         self.encoder_names = declared['encoders']
-        self.shortcut_names = declared['shortcuts']
+        # {platform: [names]}, in PLATFORMS order
+        self.shortcut_names = {
+            p: shortcuts[p] for p in PLATFORMS if p in shortcuts
+        }
 
     @property
     def tag(self):
         return f'{self.name}-v{self.version}'
 
-    @property
-    def zip_name(self):
-        return f'{self.name}-shortcuts-v{self.version}'
+    def zip_name(self, platform):
+        """
+        The ZIP of a platform's shortcuts: "<name>-shortcuts-v<version>" for
+        the iPhone (the first platform, so existing links keep working), and
+        "<name>-mac-shortcuts-v<version>" for the Mac.
+        """
+        infix = '' if platform == 'iphone' else f'-{PLATFORM_INFIX[platform]}'
+        return f'{self.name}{infix}-shortcuts-v{self.version}'
 
 
 def find_tools():
@@ -194,16 +245,25 @@ def check_git(tool):
 
 
 def build(tool, sign):
-    """Builds a tool's encoders and shortcuts with its own scripts."""
+    """
+    Builds a tool's encoders and shortcuts with its own scripts: build-wasm.sh
+    and build-macos.sh (each when present), then build_shortcuts.py (the iPhone
+    shortcuts) and build_mac_shortcuts.py (the Mac ones, when present).
+    """
     scripts = tool.path / 'scripts'
-    if (scripts / 'build-wasm.sh').exists():
-        run([scripts / 'build-wasm.sh'], cwd=tool.path)
+    for script in ('build-wasm.sh', 'build-macos.sh'):
+        if (scripts / script).exists():
+            run([scripts / script], cwd=tool.path)
 
-    cmd = [sys.executable, scripts / 'build_shortcuts.py', '--guess']
-    if not sign:
-        cmd.append('--no-sign')
+    for script in ('build_shortcuts.py', 'build_mac_shortcuts.py'):
+        if not (scripts / script).exists():
+            continue
 
-    run(cmd, cwd=tool.path)
+        cmd = [sys.executable, scripts / script, '--guess']
+        if not sign:
+            cmd.append('--no-sign')
+
+        run(cmd, cwd=tool.path)
 
 
 def fresh(path, since):
@@ -227,22 +287,33 @@ def encoders(tool, since):
     ]
 
 
-def check_encoder_version(tool, wasm):
-    """Each encoder must report the tool's VERSION (`<encoder> --version`)."""
-    if not shutil.which('wasmtime'):
-        raise ReleaseError('wasmtime is needed to check encoder versions')
+def check_encoder_version(tool, encoder):
+    """
+    Each encoder must report the tool's VERSION (`<encoder> --version`): a
+    .wasm file through wasmtime, a native Mac executable directly (the release
+    is built on a Mac).
+    """
+    if encoder_kind(encoder.name) == 'wasm':
+        if not shutil.which('wasmtime'):
+            raise ReleaseError('wasmtime is needed to check encoder versions')
 
-    output = run(['wasmtime', 'run', wasm, '--version'], capture=True)
+        cmd = ['wasmtime', 'run', encoder, '--version']
+    else:
+        cmd = [encoder, '--version']
+
+    output = run(cmd, capture=True)
     if not re.search(rf'\b{re.escape(tool.version)}\b', output):
         raise ReleaseError(
-            f'{wasm.name} reports "{output.strip()}", not {tool.version}'
+            f'{encoder.name} reports "{output.strip()}", not {tool.version}'
         )
 
 
-def shortcut_files(tool, sign, since):
-    """Declared shortcuts, mapped to unsigned build filenames in CI."""
+def shortcut_files(tool, platform, sign, since):
+    """
+    A platform's declared shortcuts, mapped to unsigned build filenames in CI.
+    """
     files = []
-    for name in tool.shortcut_names:
+    for name in tool.shortcut_names[platform]:
         path = (
             tool.path / 'dist' / name
             if sign
@@ -256,10 +327,11 @@ def shortcut_files(tool, sign, since):
     return files
 
 
-def verify_zip(tool, path, files):
+def verify_zip(tool, platform, path, files):
     """Reopen the ZIP and check its exact members, CRCs, and source bytes."""
-    expected = [f'{tool.zip_name}/{name}' for name in tool.shortcut_names]
-    sources = {f'{tool.zip_name}/{name}': src for src, name in files}
+    folder = tool.zip_name(platform)
+    expected = [f'{folder}/{name}' for name in tool.shortcut_names[platform]]
+    sources = {f'{folder}/{name}': src for src, name in files}
     try:
         with zipfile.ZipFile(path) as z:
             members = z.namelist()
@@ -283,20 +355,24 @@ def verify_zip(tool, path, files):
         raise ReleaseError(f'{path}: cannot verify ZIP: {e}') from e
 
 
-def make_zip(tool, files):
-    """Package only the manifest's complete list, then verify the archive."""
+def make_zip(tool, platform, files):
+    """
+    Package only the manifest's complete list for one platform, then verify the
+    archive.
+    """
     names = [name for _, name in files]
-    if sorted(names) != sorted(tool.shortcut_names):
+    if sorted(names) != sorted(tool.shortcut_names[platform]):
         raise ReleaseError(
-            f'{tool.name}: shortcut files do not match release.json'
+            f'{tool.name}: {platform} shortcut files do not match release.json'
         )
 
-    path = OUT / f'{tool.zip_name}.zip'
+    folder = tool.zip_name(platform)
+    path = OUT / f'{folder}.zip'
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         for src, name in files:
-            z.write(src, f'{tool.zip_name}/{name}')
+            z.write(src, f'{folder}/{name}')
 
-    verify_zip(tool, path, files)
+    verify_zip(tool, platform, path, files)
     return path
 
 
@@ -520,7 +596,10 @@ def release_notes(tool, tools, baseline, entries):
 
     lines += ['## Files in this release', '']
     for t in tools:
-        lines.append(f'- {t.title} {t.version} (**{states[t.name]}**)')
+        platforms = ', '.join(PLATFORM_TITLE[p] for p in t.shortcut_names)
+        lines.append(
+            f'- {t.title} {t.version} (**{states[t.name]}**): {platforms}'
+        )
 
     lines += [
         '',
@@ -590,11 +669,14 @@ def main():
     for t in tools:
         since = time.time()
         build(t, sign)
-        for wasm in encoders(t, since):
-            check_encoder_version(t, wasm)
-            assets.append(wasm)
+        for encoder in encoders(t, since):
+            check_encoder_version(t, encoder)
+            assets.append(encoder)
 
-        assets.append(make_zip(t, shortcut_files(t, sign, since)))
+        for platform in t.shortcut_names:
+            assets.append(
+                make_zip(t, platform, shortcut_files(t, platform, sign, since))
+            )
 
     names = [a.name for a in assets]
     if len(names) != len(set(names)):

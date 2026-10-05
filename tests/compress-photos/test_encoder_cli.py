@@ -158,3 +158,15 @@ def test_pq_png_brightness(encoder, tmp_path, mode, primaries, pq):
         'pq transfer function' in info or 'transfer function: pq' in info
     ) == pq
     assert ph.jxl_intensity_target(jxl) == (10000 if pq else None)
+
+
+def test_mac_flag_drops_the_share_sheet_hint(encoder, photos, tmp_path):
+    # The Mac shortcuts hand over the library's files as they are, so an
+    # iPhone JPEG is the original: no "Send As" hint with --mac.
+    ph.stage(tmp_path, list(photos.values()))
+    result = encoder.run(
+        ['--mac', '-q', '83', '-e', '7', 'jxl_job.txt'], tmp_path
+    )
+    assert result.returncode == 0, result.stdout
+    assert 'Note: Photos sent' not in result.stdout
+    assert 'send as Current' not in result.stdout

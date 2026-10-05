@@ -1,7 +1,8 @@
 # Compress Photos: developer notes
 
-How the shortcut and its encoder, `jxlbatch`, work, and how to build them. For
-installing and using it, see [README.md](README.md).
+How the shortcuts and their encoder, `jxlbatch`, work, and how to build them.
+For installing and using them, see [README.md](README.md) (iPhone) and
+[README-mac.md](README-mac.md) (Mac).
 
 <!--TOC-->
 
@@ -10,8 +11,9 @@ ______________________________________________________________________
 **Table of Contents**
 
 - [1. How it works](#1-how-it-works)
-  - [1.1. XMP](#11-xmp)
-  - [1.2. HDR](#12-hdr)
+  - [1.1. On the Mac](#11-on-the-mac)
+  - [1.2. XMP](#12-xmp)
+  - [1.3. HDR](#13-hdr)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -110,7 +112,124 @@ quality ~70 and holds the whole image, which takes about 2.7 GB for 24 MP, more
 than iOS lets a-Shell use. The cost is files about 2.5% larger at those
 qualities, with the same visual quality (SSIMULACRA2).
 
-### 1.1. XMP
+### 1.1. On the Mac
+
+```
+Compress Photos (macOS)                      (shortcut)
+   photos: the shortcut's input if any (never on the Mac, see below); else,
+   if Photos is in front with photos selected (Share menu, right-click >
+   Shortcuts, menu bar), that selection, through AppleScript (the "selection
+   route"); else its own photo picker (the "picker route")
+
+   selection route: asks for a quality preset; Run Shell Script empties
+   ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
+   Run AppleScript (mac/export.applescript, input: that folder) has Photos
+   export the originals into its in/ and returns "id|filename" lines; Run
+   Shell Script (common.zsh + selection.zsh, IDS = those lines) stages in/*
+   (a photo plus a .mov of the same name is a Live Photo: skipped; a video
+   alone: skipped), runs jxlbatch, renames each result to out/Name.jxl and
+   prints "path|id|delete or keep|Name.jxl"; Run AppleScript
+   (mac/import.applescript, input: those lines) has Photos import each file,
+   add it to every album its original is in (one pass over all albums,
+   nested ones too), and add the "delete" originals to the album
+   "Compressed to JXL" (a script can't delete photos); returns
+   "imported=N", "collected=M" and "! ..." lines, which join the log
+
+   picker route: keeps the still photos (same as the iPhone), asks for a
+   quality preset, collects the photos' names, then Run Shell Script
+   (/bin/zsh, the photos passed as files, "$@"):
+     scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
+     /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
+     writes jxl_job.txt in compress-photos-macos/ inside Shortcuts' iCloud
+     Drive folder (~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/
+     Documents), runs
+       jxlbatch -q 83 -e 7 -C "$WORK" jxl_job.txt   (log in jxl_log.txt)
+     and prints jxl_done.txt's lines:
+       jxl_out_N.jxl|N|delete or keep|Name.jxl
+         then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
+   to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
+   and saved to Photos and added to the original's albums; the originals are
+   left alone (no ids to collect them by; a lookup by file name could pick
+   the wrong photo)
+         the log is shown in Quick Look if it has a "!" note, an error or a failed
+   photo; the finish script appends the outcome and "Done" to the log (for
+   the progress window) and removes the work folder; a notification counts
+   the saved photos (Delete Photos isn't used: its prompt is one the
+   Shortcuts app often can't show on macOS 26, "Presenter connection
+   failed", and it isn't available from the Share menu at all)
+
+         both routes, and the Finder shortcut: the log, the progress window's
+   script and its pid file live in ~/Library/Caches/compress-photos-macos as
+   <route>.log, <route>.command and <route>.pid (routes: photos-selection,
+   photos-picker, files), outside iCloud Drive and Pictures, so that Terminal
+   needs no access to those and runs of different routes don't clobber each
+   other; run.zsh opens a Terminal window (`open -a Terminal <route>.command`,
+   which records its pid and `exec`s a `tail -f` of the log) that follows
+   jxlbatch's output, unless WATCH=0, and finish.zsh ends exactly that window
+   by its pid; jxlbatch runs with --mac, which drops its hints about the
+   iPhone's share sheet. The AppleScripts ask Photos only when it is running
+   (a tell block would launch it) and wrap Photos' export, import and album
+   scan in `with timeout of 3600 seconds` (AppleScript's default is 2
+   minutes per command). Two selected photos with one file name get no id
+   (selection.zsh), so a copy is never added to the wrong albums.
+
+Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
+   files and folders from Finder; each input's File Path; a quality preset;
+   Run Shell Script with common.zsh + files.zsh: stages each file (a folder's
+   HEIF/JPEG/PNG files), runs jxlbatch, moves each jxl_out_N.jxl next to its
+   original as Name.jxl (never replacing: "Name 2.jxl"; ~/Pictures/JPEG XL
+   when the original's folder is unknown or not writable), prints the log and
+   "Wrote N JPEG XL file(s)."; Quick Look of the log on notes, a notification
+```
+
+Run Shell Script waits for the script, so there is no handoff, no helper
+shortcut, no marker files and no retry. The work folder of the Photos shortcut
+is inside Shortcuts' iCloud Drive folder because that is the one place a file
+written by a script gets back into Shortcuts on the Mac: Get File with a path
+relative to that folder works, while Run AppleScript's file results
+(`POSIX file`, `alias`, file URL) come back as nothing and Get File refuses
+absolute paths (checked on macOS 26 with a diagnostic shortcut; see
+`docs/compress-photos-mac-design.md`, section 5). The Finder shortcut needs no
+bridge and works in `$TMPDIR`. A save that produces nothing (for example with
+iCloud Drive off for Shortcuts) leaves the original alone and is listed in the
+log as `! not saved to Photos`. The script is assembled by
+`build_mac_shortcuts.py` from `scripts/mac/*.zsh` with the quality, the lines
+of names or paths, and the Skipped Echo as Shortcuts variables; `jxlbatch`
+itself and the job and result files are the iPhone's. The encoder is the static
+macOS build (`build-macos.sh`), with threads; its output is byte for byte
+`jxlbatch.wasm`'s (`test_mac_script.py` checks this). Shortcuts hands the
+script the photos as files whose names may not be the photos' names, so the
+shortcut passes the names (Get Name) in job order and the script uses them for
+the job names; the Finder shortcut passes each input's File Path the same way,
+so results land next to the originals even when Shortcuts passed a temporary
+copy. A `JXLBATCH` environment variable overrides the encoder search (the tests
+use it). The script never exits nonzero for a conversion problem: it writes
+`ERROR:` lines to the log instead, which the shortcut then shows.
+
+What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
+changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
+of Run Shell Script (`Script`, `Shell`, `Input`, `InputMode` with
+`as arguments`; confirmed on macOS 26) and Get File (`WFGetFilePath`,
+`WFFileStorageService` iCloud Drive; confirmed), that Save to Photo Album
+accepts a `.jxl` File and adds it to albums by name (confirmed), and Photos'
+AppleScript interface (`selection`, `export ... with using originals`,
+`import ... skip check duplicates`, `albums`, `folders`, `add`; confirmed: the
+originals export in well under a second, an import keeps the file name, and one
+album scan of 151 albums takes about 3 s). Run AppleScript's text must be
+plain: with a Shortcuts variable in it the script doesn't compile and the
+action silently returns nothing, so values go in through the action's input
+(`item 1 of input`), and `item 1 of selection` must be read from a variable
+(`set sel to selection`), not from `selection` directly. What the Mac doesn't
+do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the shortcut
+an `NSItemProvider` with a file URL of a JPEG export that Shortcuts' extension
+can't represent
+(`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
+`public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
+picker; and Delete Photos isn't registered in the share extension at all, and
+in the app it needs the Shortcuts window for its prompt
+(`Presenter connection failed` otherwise).
+
+### 1.2. XMP
 
 Ordinary XMP is copied byte for byte, whatever its format: photos from other
 apps often carry XMP that isn't strict XML (trailing NUL bytes, Latin-1 text,
@@ -162,7 +281,7 @@ segment that is cut short, since either could mean metadata is lost. Failed
 photos are absent from `jxl_done.txt`, so the shortcut cannot offer to delete
 their originals. The CLI and job/result formats stay the same.
 
-### 1.2. HDR
+### 1.3. HDR
 
 An HDR HEIC from an iPhone becomes an HDR JPEG XL: Photos and ImageIO show HDR
 stored in the pixels as PQ, but ignore a JPEG XL gain map (`jhgm` box).
@@ -349,15 +468,19 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 
 ## 2. Layout
 
-| Path                         | What it is                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release.json`               | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                                                                                                          |
-| `VERSION`                    | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                                                                                                  |
-| `src/`                       | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
-| `third_party/`               | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                       |
-| `scripts/build-wasm.sh`      | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                         |
-| `scripts/build-native.sh`    | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                                                                                                         |
-| `scripts/build_shortcuts.py` | generates and signs the two `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                                      |
+| Path                                                  | What it is                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`                                        | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                                                                                                          |
+| `VERSION`                                             | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                                                                                                  |
+| `src/`                                                | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
+| `third_party/`                                        | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                       |
+| `scripts/build-wasm.sh`                               | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                         |
+| `scripts/build-macos.sh`                              | builds `dist/jxlbatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                          |
+| `scripts/build-native.sh`                             | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                                                                                                         |
+| `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI and skcms) and `build-macos.sh` (skcms)                                                                                                                                                                                                                                                     |
+| `scripts/wf.py`                                       | the Shortcuts plist builder shared by both platforms: text and variables, built-in actions, the quality list, the still-photo filter, writing and signing                                                                                                                                                                                                                       |
+| `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                               |
+| `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `files.zsh`)                                                                                                                                                                                                                                    |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).
@@ -369,7 +492,9 @@ Run these from this folder (`shortcuts/compress-photos`):
 ```bash
 ./scripts/build-native.sh
 ./scripts/build-wasm.sh
+./scripts/build-macos.sh
 python3 scripts/build_shortcuts.py --guess
+python3 scripts/build_mac_shortcuts.py --guess
 ```
 
 - TinyXML2 is vendored with its license and compiled into the native, SIMD
@@ -379,7 +504,8 @@ python3 scripts/build_shortcuts.py --guess
 - **What `build-wasm.sh` does:** it downloads wasi-sdk 34, libjxl v0.11.2,
   libheif v1.23.5 and libde265 v1.1.3 into the repository's `.deps/` folder,
   shared with the other tools. WASI has no threads, C++ exceptions or
-  `mkstemp`, so it applies small edits, and one more for Apple's HDR profile:
+  `mkstemp`, so it applies small edits (`scripts/patch_deps.py --wasi`), and
+  one more for Apple's HDR profile (`--skcms`):
   - libjxl: drops its threads dependency, the same edit as
     [gen2brain/jpegxl](https://github.com/gen2brain/jpegxl).
   - libheif: decodes on the calling thread, keeping HEVC deblocking and SAO;
@@ -391,14 +517,26 @@ python3 scripts/build_shortcuts.py --guess
     profile (see [HDR](#12-hdr)). Profiles without a PQ `cicp` tag parse as
     before. The native build uses Homebrew's libjxl, with lcms2, which needs no
     patch.
+- **What `build-macos.sh` does:** the same libraries, the same feature flags
+  and the same skcms edit, built as static arm64 libraries for macOS 14 or
+  later (CMake, in `build/macos/`), from a second libjxl checkout,
+  `.deps/libjxl-native`, since `build-wasm.sh` patches the threads out of
+  `.deps/libjxl` (the libheif edits are guarded by `__wasi__` and
+  `__cpp_exceptions`, so that checkout is shared). `jxlbatch` is compiled with
+  `-DJXLBATCH_THREADS` (libjxl's thread pool), linked statically (the result
+  depends only on `libc++` and `libSystem`, which the script checks with
+  `otool -L`), stripped and ad-hoc signed. It refuses to run on an Intel Mac.
+  The output is byte for byte `jxlbatch.wasm`'s (`test_mac_script.py`).
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC), HDR decoding and keeping Apple's HDR profile (a tiny
   built-in HDR HEIC) and a 12 MP encode. Running it in a-Shell checks the
   phone.
-- **Tests** are in `tests/compress-photos/`: the generated shortcuts, the
-  encoder, end-to-end conversions checked with Apple's ImageIO, and the
-  shortcut's a-Shell commands run against the encoder. Run `python3 -m pytest`
-  from the repository root; see [tests/README.md](../../tests/README.md).
+- **Tests** are in `tests/compress-photos/`: the generated shortcuts (both
+  platforms), the encoder (all four builds), end-to-end conversions checked
+  with Apple's ImageIO, the iPhone shortcut's a-Shell commands run against the
+  encoder, and the Mac shortcuts' zsh script run for real. Run
+  `python3 -m pytest` from the repository root; see
+  [tests/README.md](../../tests/README.md).
 
 ## 4. Generating the shortcuts
 
@@ -413,9 +551,16 @@ python3 scripts/build_shortcuts.py --guess
   `scripts/sample/JXL Sample.plist`, and later runs copy the exact format from
   it.
 - The quality presets are `QUALITY_PRESETS` near the top of the script.
+- `scripts/build_mac_shortcuts.py` writes and signs the two Mac `.shortcut`
+  files the same way. Its `--guess` templates are the built-in actions only (no
+  a-Shell). To check the Mac actions' format against a real shortcut, build one
+  on the Mac with Run Shell Script and Run AppleScript, share it by iCloud
+  link, and run `build_mac_shortcuts.py --fetch <link>`, which saves
+  `scripts/sample/Mac Sample.plist`; later runs copy the format from it.
 - Releases are built and published by `scripts/release.py` at the repository
-  root. They ship the two `.shortcut` files in one ZIP,
-  `compress-photos-shortcuts-v<version>.zip`; see
+  root. They ship the iPhone `.shortcut` files in
+  `compress-photos-shortcuts-v<version>.zip` and the Mac ones in
+  `compress-photos-mac-shortcuts-v<version>.zip`; see
   [docs/releasing.md](../../docs/releasing.md).
 
 ## 5. Building the shortcuts by hand (fallback)
@@ -591,18 +736,23 @@ ID. The script's checks and the release notes it writes are described in
 
    - signed in to an Apple ID, for `shortcuts sign`;
    - the Homebrew packages from [Building](#3-building-mac), plus `wasmtime`,
-     which runs each encoder's `--version`;
+     which runs each encoder's `--version` (the macOS encoder runs directly);
    - `gh` logged in with access to the repository (`gh auth status`), since
      `gh release create` publishes.
 
-3. **Try the build on an iPhone (recommended).** The tests run the shortcut on
-   a model of Shortcuts, not on a phone. From the repository root,
-   `python3 scripts/release.py compress-photos --dry-run` builds and signs
-   everything without creating a tag or release. Copy the files from
-   `shortcuts/compress-photos/dist/` to the phone, add the two shortcuts, put
-   `jxlbatch.wasm` in a-Shell, run `jxlbatch --selftest`, then convert a few
-   photos from the share sheet and from the Shortcuts app. The PR that changed
-   the shortcuts may list what to look at.
+3. **Try the build on an iPhone and on the Mac (recommended).** The tests run
+   the shortcuts on a model of Shortcuts, not in Shortcuts itself. From the
+   repository root, `python3 scripts/release.py compress-photos --dry-run`
+   builds and signs everything without creating a tag or release. For the
+   iPhone, copy the files from `shortcuts/compress-photos/dist/` to the phone,
+   add the two shortcuts, put `jxlbatch.wasm` in a-Shell, run
+   `jxlbatch --selftest`, then convert a few photos from the share sheet and
+   from the Shortcuts app. For the Mac, copy `dist/jxlbatch-macos` to
+   `~/.local/bin/jxlbatch`, double-click the two Mac `.shortcut` files, then
+   convert a few photos from Photos' Share menu and from the picker (HDR
+   photos, a Live Photo and a video among them), and a few files and a folder
+   from Finder's Quick Actions. The PR that changed the shortcuts may list what
+   to look at.
 
 4. **Update `main`.** A real run refuses to publish unless the checkout is on
    `main`, clean, and the same as `origin/main`:
@@ -622,15 +772,16 @@ ID. The script's checks and the release notes it writes are described in
    It rebuilds every shortcut (the first WebAssembly build downloads its
    dependencies into `.deps/`), checks the files and the ZIP, then prints the
    files and the release notes and asks you to confirm (`[y/N]`). Check that
-   the list has `jxlbatch.wasm`, `jxlbatch-scalar.wasm` and
-   `compress-photos-shortcuts-v<version>.zip`, and that the notes have the
+   the list has `jxlbatch.wasm`, `jxlbatch-scalar.wasm`, `jxlbatch-macos`,
+   `compress-photos-shortcuts-v<version>.zip` and
+   `compress-photos-mac-shortcuts-v<version>.zip`, and that the notes have the
    changelog entry; answer `y` to create the tag and the release. Any other
    answer publishes nothing.
 
 6. **Check the result.** The
    [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases)
-   should show `Compress Photos <version>` as Latest with those three files.
-   The README's "latest" download links point at it.
+   should show `Compress Photos <version>` as Latest with those five files. The
+   README's "latest" download links point at it.
 
 A real run (not `--dry-run`) stops when the working tree isn't clean, the
 branch isn't `main`, `main` differs from `origin/main`, the tag already exists,

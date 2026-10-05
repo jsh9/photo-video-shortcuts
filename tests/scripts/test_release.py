@@ -12,18 +12,23 @@ from types import SimpleNamespace
 import pytest
 import release
 
-ENCODERS = ['jxlbatch.wasm', 'jxlbatch-scalar.wasm']
+ENCODERS = ['jxlbatch.wasm', 'jxlbatch-scalar.wasm', 'jxlbatch-macos']
 SHORTCUTS = ['Compress Photos.shortcut', 'JXL-Import.shortcut']
+MAC_SHORTCUTS = [
+    'Compress Photos (macOS).shortcut',
+    'Compress Photo Files (macOS).shortcut',
+]
+PLATFORMS = {'iphone': SHORTCUTS, 'mac': MAC_SHORTCUTS}
 
 
-def tool(tmp_path, name='compress-photos', version='0.1.0'):
+def tool(tmp_path, name='compress-photos', version='0.1.0', shortcuts=None):
     path = tmp_path / 'shortcuts' / name
     path.mkdir(parents=True)
     (path / 'VERSION').write_text(version + '\n')
     (path / 'release.json').write_text(
         json.dumps({
             'encoders': ENCODERS,
-            'shortcuts': SHORTCUTS,
+            'shortcuts': PLATFORMS if shortcuts is None else shortcuts,
         })
     )
     return release.Tool(path)
@@ -35,7 +40,7 @@ def outputs(t, sign=True):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'encoder')
 
-    for name in SHORTCUTS:
+    for name in SHORTCUTS + MAC_SHORTCUTS:
         path = (
             t.path / 'dist' / name
             if sign
@@ -52,7 +57,31 @@ def test_tool_names(tmp_path):
     t = tool(tmp_path)
     assert t.title == 'Compress Photos'
     assert t.tag == 'compress-photos-v0.1.0'
-    assert t.zip_name == 'compress-photos-shortcuts-v0.1.0'
+    # The iPhone ZIP keeps the name from before there were Mac shortcuts.
+    assert t.zip_name('iphone') == 'compress-photos-shortcuts-v0.1.0'
+    assert t.zip_name('mac') == 'compress-photos-mac-shortcuts-v0.1.0'
+    assert list(t.shortcut_names) == ['iphone', 'mac']
+
+
+def test_plain_shortcut_list_means_iphone(tmp_path):
+    t = tool(tmp_path, shortcuts=SHORTCUTS)
+    assert t.shortcut_names == {'iphone': SHORTCUTS}
+
+
+@pytest.mark.parametrize(
+    'name,kind',
+    [
+        ('jxlbatch.wasm', 'wasm'),
+        ('jxlbatch-scalar.wasm', 'wasm'),
+        ('jxlbatch-macos', 'native'),
+        ('.wasm', None),
+        ('', None),
+        ('jxlbatch.exe', None),
+        ('jxlbatch.macos.bin', None),
+    ],
+)
+def test_encoder_kind(name, kind):
+    assert release.encoder_kind(name) == kind
 
 
 @pytest.mark.parametrize('version', ['0.1', 'v0.1.0', 'dev', '1.2.3.4'])
@@ -77,6 +106,16 @@ def test_tool_rejects_bad_version(tmp_path, version):
             'shortcuts': SHORTCUTS * 2,
         },
         {'encoders': 'oops', 'shortcuts': SHORTCUTS},
+        {'encoders': ['jxlbatch.exe'], 'shortcuts': SHORTCUTS},
+        {'encoders': ENCODERS, 'shortcuts': {}},
+        {'encoders': ENCODERS, 'shortcuts': {'windows': SHORTCUTS}},
+        {'encoders': ENCODERS, 'shortcuts': {'iphone': []}},
+        {'encoders': ENCODERS, 'shortcuts': {'iphone': 'oops'}},
+        # the same file on two platforms
+        {
+            'encoders': ENCODERS,
+            'shortcuts': {'iphone': SHORTCUTS, 'mac': SHORTCUTS},
+        },
     ],
 )
 def test_invalid_manifest(tmp_path, manifest):
@@ -92,26 +131,34 @@ def test_invalid_manifest(tmp_path, manifest):
 
 
 @pytest.mark.parametrize('sign', [True, False])
-def test_zip_exact_names_and_contents(tmp_path, monkeypatch, sign):
+@pytest.mark.parametrize('platform', ['iphone', 'mac'])
+def test_zip_exact_names_and_contents(tmp_path, monkeypatch, sign, platform):
     monkeypatch.setattr(release, 'OUT', tmp_path)
     t = tool(tmp_path)
     since = time.time()
     outputs(t, sign)
-    files = release.shortcut_files(t, sign, since)
-    assert [name for _, name in files] == SHORTCUTS
+    files = release.shortcut_files(t, platform, sign, since)
+    assert [name for _, name in files] == PLATFORMS[platform]
     # Old experimental outputs must never be swept into a release.
     (t.path / 'dist' / 'obsolete.wasm').write_bytes(b'old')
     assert [p.name for p in release.encoders(t, since)] == ENCODERS
-    path = release.make_zip(t, files)
-    assert path.name == 'compress-photos-shortcuts-v0.1.0.zip'
+    path = release.make_zip(t, platform, files)
+    folder = t.zip_name(platform)
+    assert (
+        path.name
+        == {
+            'iphone': 'compress-photos-shortcuts-v0.1.0.zip',
+            'mac': 'compress-photos-mac-shortcuts-v0.1.0.zip',
+        }[platform]
+    )
     with zipfile.ZipFile(path) as z:
-        assert z.namelist() == [f'{t.zip_name}/{n}' for n in SHORTCUTS]
+        assert z.namelist() == [f'{folder}/{n}' for n in PLATFORMS[platform]]
         assert z.testzip() is None
         for src, name in files:
-            assert z.read(f'{t.zip_name}/{name}') == src.read_bytes()
+            assert z.read(f'{folder}/{name}') == src.read_bytes()
 
 
-@pytest.mark.parametrize('name', ENCODERS + SHORTCUTS)
+@pytest.mark.parametrize('name', ENCODERS + SHORTCUTS + MAC_SHORTCUTS)
 @pytest.mark.parametrize('failure', ['missing', 'empty', 'stale'])
 def test_required_files(tmp_path, name, failure):
     t = tool(tmp_path)
@@ -136,7 +183,8 @@ def test_required_files(tmp_path, name, failure):
         if name in ENCODERS:
             release.encoders(t, since)
         else:
-            release.shortcut_files(t, True, since)
+            platform = 'iphone' if name in SHORTCUTS else 'mac'
+            release.shortcut_files(t, platform, True, since)
 
 
 def test_missing_unsigned_import(tmp_path):
@@ -144,7 +192,7 @@ def test_missing_unsigned_import(tmp_path):
     outputs(t, False)
     (t.path / 'build/shortcuts/JXL-Import.unsigned.wflow').unlink()
     with pytest.raises(release.ReleaseError, match='JXL-Import.*missing'):
-        release.shortcut_files(t, False, time.time() - 60)
+        release.shortcut_files(t, 'iphone', False, time.time() - 60)
 
 
 @pytest.mark.parametrize(
@@ -154,15 +202,16 @@ def test_zip_reopened_and_verified(tmp_path, monkeypatch, damage):
     monkeypatch.setattr(release, 'OUT', tmp_path)
     t = tool(tmp_path)
     outputs(t)
-    files = release.shortcut_files(t, True, time.time() - 60)
+    files = release.shortcut_files(t, 'iphone', True, time.time() - 60)
     path = tmp_path / 'bad.zip'
+    folder = t.zip_name('iphone')
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_STORED) as z:
         for src, name in files:
             if damage == 'missing' and name == SHORTCUTS[1]:
                 continue
 
             z.writestr(
-                f'{t.zip_name}/{name}',
+                f'{folder}/{name}',
                 b'wrong' if damage == 'bytes' else src.read_bytes(),
             )
 
@@ -173,7 +222,7 @@ def test_zip_reopened_and_verified(tmp_path, monkeypatch, damage):
                 else nullcontext()
             ):
                 z.writestr(
-                    f'{t.zip_name}/{SHORTCUTS[0] if damage == "duplicate" else "extra"}',
+                    f'{folder}/{SHORTCUTS[0] if damage == "duplicate" else "extra"}',
                     b'x',
                 )
 
@@ -183,7 +232,7 @@ def test_zip_reopened_and_verified(tmp_path, monkeypatch, damage):
         )
 
     with pytest.raises(release.ReleaseError, match='ZIP'):
-        release.verify_zip(t, path, files)
+        release.verify_zip(t, 'iphone', path, files)
 
 
 def test_make_zip_refuses_incomplete_list(tmp_path, monkeypatch):
@@ -191,15 +240,75 @@ def test_make_zip_refuses_incomplete_list(tmp_path, monkeypatch):
     outputs(t)
     monkeypatch.setattr(release, 'OUT', tmp_path)
     with pytest.raises(release.ReleaseError, match='release.json'):
-        release.make_zip(t, release.shortcut_files(t, True, 0)[:1])
+        release.make_zip(
+            t, 'iphone', release.shortcut_files(t, 'iphone', True, 0)[:1]
+        )
+    # nor the other platform's files
+    with pytest.raises(release.ReleaseError, match='release.json'):
+        release.make_zip(
+            t, 'mac', release.shortcut_files(t, 'iphone', True, 0)
+        )
 
 
-def test_encoder_version_checked(tmp_path, monkeypatch):
+@pytest.mark.parametrize('name', ['jxlbatch.wasm', 'jxlbatch-macos'])
+def test_encoder_version_checked(tmp_path, monkeypatch, name):
     t = tool(tmp_path)
     monkeypatch.setattr(release.shutil, 'which', lambda _: '/wasmtime')
-    monkeypatch.setattr(release, 'run', lambda *a, **k: 'jxlbatch 0.2.0')
+    commands = []
+
+    def run(cmd, **kw):
+        commands.append([str(c) for c in cmd])
+        return 'jxlbatch 0.2.0'
+
+    monkeypatch.setattr(release, 'run', run)
     with pytest.raises(release.ReleaseError, match='not 0.1.0'):
+        release.check_encoder_version(t, t.path / 'dist' / name)
+
+    # A .wasm encoder runs through wasmtime, a Mac executable directly.
+    expected = (
+        ['wasmtime', 'run', str(t.path / 'dist' / name), '--version']
+        if name.endswith('.wasm')
+        else [str(t.path / 'dist' / name), '--version']
+    )
+    assert commands == [expected]
+
+
+def test_native_encoder_needs_no_wasmtime(tmp_path, monkeypatch):
+    t = tool(tmp_path)
+    monkeypatch.setattr(release.shutil, 'which', lambda _: None)
+    monkeypatch.setattr(release, 'run', lambda *a, **k: 'jxlbatch 0.1.0 (x)')
+    release.check_encoder_version(t, t.path / 'dist/jxlbatch-macos')
+    with pytest.raises(release.ReleaseError, match='wasmtime'):
         release.check_encoder_version(t, t.path / 'dist/jxlbatch.wasm')
+
+
+def test_build_runs_every_build_script(tmp_path, monkeypatch):
+    t = tool(tmp_path)
+    scripts = t.path / 'scripts'
+    scripts.mkdir()
+    for name in (
+        'build-wasm.sh',
+        'build-macos.sh',
+        'build_shortcuts.py',
+        'build_mac_shortcuts.py',
+    ):
+        (scripts / name).write_text('')
+
+    commands = []
+    monkeypatch.setattr(
+        release,
+        'run',
+        lambda cmd, **kw: commands.append([str(c) for c in cmd]),
+    )
+    release.build(t, sign=False)
+    assert [c[-2:] if c[-1] == '--no-sign' else c[-1:] for c in commands] == [
+        [str(scripts / 'build-wasm.sh')],
+        [str(scripts / 'build-macos.sh')],
+        ['--guess', '--no-sign'],
+        ['--guess', '--no-sign'],
+    ]
+    assert commands[2][1] == str(scripts / 'build_shortcuts.py')
+    assert commands[3][1] == str(scripts / 'build_mac_shortcuts.py')
 
 
 def baseline(versions=None):
@@ -232,7 +341,7 @@ def test_states_and_notes_for_all_tools(tmp_path):
         assert list(states.values()) == expected
         notes = release.release_notes(photos, tools, previous, entries)
         for t, state in zip(tools, expected):
-            assert f'{t.title} {t.version} (**{state}**)' in notes
+            assert f'{t.title} {t.version} (**{state}**): iPhone, Mac' in notes
             if state in ('new', 'updated'):
                 assert entries[t.name] in notes
             elif state == 'unchanged':
@@ -375,7 +484,13 @@ def test_github_only_explicit_404_means_missing(
 
 @pytest.mark.parametrize('sign', [True, False])
 @pytest.mark.parametrize(
-    'missing', ['jxlbatch-scalar.wasm', 'JXL-Import.shortcut']
+    'missing',
+    [
+        'jxlbatch-scalar.wasm',
+        'jxlbatch-macos',
+        'JXL-Import.shortcut',
+        'Compress Photo Files (macOS).shortcut',
+    ],
 )
 def test_main_rejects_missing_outputs_before_publishing(
         tmp_path, monkeypatch, sign, missing
@@ -397,7 +512,9 @@ def test_main_rejects_missing_outputs_before_publishing(
         path = (
             t.path / 'dist' / missing
             if sign or missing in ENCODERS
-            else t.path / 'build/shortcuts/JXL-Import.unsigned.wflow'
+            else t.path
+            / 'build/shortcuts'
+            / (missing.removesuffix('.shortcut') + '.unsigned.wflow')
         )
         path.unlink()
 

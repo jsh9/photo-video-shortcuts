@@ -16,6 +16,7 @@ import photo_helpers as ph  # noqa: E402
 WASM = ph.TOOL / 'dist' / 'jxlbatch.wasm'
 WASM_SCALAR = ph.TOOL / 'dist' / 'jxlbatch-scalar.wasm'
 NATIVE = ph.TOOL / 'build' / 'jxlbatch'
+MACOS = ph.TOOL / 'dist' / 'jxlbatch-macos'  # the Mac shortcuts' encoder
 
 
 @pytest.fixture(scope='session')
@@ -44,23 +45,41 @@ def wasm():
     return wasm_encoder(WASM)
 
 
-@pytest.fixture(scope='session', params=['wasm', 'wasm-scalar', 'native'])
+def native_encoder(path, label, build_script):
+    ph.need(path.exists(), f'{path} is missing; run {build_script}')
+    probe = ph.run([path, '--version'])
+    ph.need(
+        probe.returncode == 0,
+        f'{path} does not run: ' + (probe.stderr.splitlines() or [''])[0],
+    )
+    return ph.Encoder(label, [path])
+
+
+@pytest.fixture(scope='session')
+def macos():
+    """The static macOS build that ships for the Mac shortcuts."""
+    return native_encoder(MACOS, 'macos', 'scripts/build-macos.sh')
+
+
+@pytest.fixture(
+    scope='session', params=['wasm', 'wasm-scalar', 'native', 'macos']
+)
 def encoder(request):
-    """Every build: SIMD and scalar WebAssembly, and the native Mac build."""
+    """
+    Every build: SIMD and scalar WebAssembly, the native Mac build against
+    Homebrew's libraries (fast to build, for development), and the static macOS
+    build that ships for the Mac shortcuts.
+    """
     if request.param == 'wasm':
         return wasm_encoder(WASM)
 
     if request.param == 'wasm-scalar':
         return wasm_encoder(WASM_SCALAR)
 
-    ph.need(NATIVE.exists(), f'{NATIVE} is missing; run build-native.sh')
-    native = ph.Encoder('native', [NATIVE])
-    probe = ph.run([NATIVE, '--version'])
-    ph.need(
-        probe.returncode == 0,
-        f'{NATIVE} does not run: ' + (probe.stderr.splitlines() or [''])[0],
-    )
-    return native
+    if request.param == 'macos':
+        return native_encoder(MACOS, 'macos', 'scripts/build-macos.sh')
+
+    return native_encoder(NATIVE, 'native', 'build-native.sh')
 
 
 @pytest.fixture(scope='session')

@@ -22,30 +22,9 @@ def shortcuts(gen):
     }
 
 
-def walk(actions):
-    """(action, repeat depth) in order, checking control flow nests."""
-    stack = []
-    for action in actions:
-        p = ph.params(action)
-        if ph.ident(action) in ph.CONTROL_FLOW:
-            mode = p['WFControlFlowMode']
-            if mode == 0:
-                stack.append((p['GroupingIdentifier'], ph.ident(action)))
-            else:
-                assert stack, f'{ph.ident(action)} closes nothing'
-                assert stack[-1] == (p['GroupingIdentifier'], ph.ident(action))
-                if mode == 2:
-                    stack.pop()
-
-        depth = sum(1 for _, kind in stack if kind.endswith('repeat.each'))
-        yield action, depth
-
-    assert not stack, f'unclosed blocks: {stack}'
-
-
 @pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
 def test_blocks_balanced(shortcuts, name):
-    list(walk(shortcuts[name]))
+    list(ph.walk(shortcuts[name]))
 
 
 @pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
@@ -62,7 +41,7 @@ def test_outputs_used_after_they_exist(shortcuts, name):
 @pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
 def test_repeat_variables_in_scope(shortcuts, name):
     # "Repeat Item 2" is the item of a repeat inside a repeat.
-    for action, depth in walk(shortcuts[name]):
+    for action, depth in ph.walk(shortcuts[name]):
         for ref in ph.references(ph.params(action)):
             var = ref.get('VariableName', '')
             if var == 'Repeat Item 2':

@@ -37,7 +37,14 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .deps
-          key: deps-macos-${{ hashFiles('shortcuts/*/scripts/build-wasm.sh') }}
+          key: deps-macos-${{ hashFiles('shortcuts/*/scripts/build-wasm.sh', 'shortcuts/*/scripts/build-macos.sh', 'shortcuts/*/scripts/patch_deps.py') }}
+      # The static libraries of the macOS encoder take minutes to build.
+      - name: Cache the macOS encoder's library builds
+        uses: actions/cache@v6
+        with:
+          path: shortcuts/*/build/macos
+          key: macos-libs-${{ runner.arch }}-${{ hashFiles('shortcuts/*/scripts/build-macos.sh',
+            'shortcuts/*/scripts/patch_deps.py') }}
       - name: 'Build Compress Photos: native encoder (for tests)'
         working-directory: shortcuts/compress-photos
         run: ./scripts/build-native.sh
