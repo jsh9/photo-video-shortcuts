@@ -2,17 +2,21 @@
 """
 Generates the two Mac shortcuts as signed .shortcut files.
 
-- "Compress Photos (macOS)": photos from the Photos library (the Share menu in
-  Photos, or a photo picker when started any other way) → JPEG XL copies in
-  Photos, in the same albums, with the option to delete the originals.
+- "Compress Photos (macOS)": started while Photos is in front with photos
+  selected, it converts that selection (Photos exports the originals, the
+  copies are imported into the originals' albums, and the originals whose copy
+  has everything they have are collected in an album for the user to delete);
+  started any other way, it shows a photo picker and saves the copies to
+  Photos, in the originals' albums, leaving the originals alone.
 - "Compress Photo Files (macOS)": image files or folders from Finder (Quick
   Actions) → .jxl files next to the originals.
 
 Both run jxlbatch (the native macOS build, dist/jxlbatch-macos, installed as
 ~/.local/bin/jxlbatch) through Shortcuts' Run Shell Script action, which waits
 for the script, so there is no a-Shell, no helper shortcut and no handoff. The
-shell script is in ``SCRIPT_*`` below; tests/compress-photos/test_mac_script.py
-runs it for real. See ../README-mac.md and ../DEVELOPING.md.
+shell scripts are in scripts/mac/*.zsh and the AppleScripts in
+scripts/mac/*.applescript; tests/compress-photos/test_mac_script.py runs the
+shell scripts for real. See ../README-mac.md and ../DEVELOPING.md.
 
 Usage::
 
@@ -61,10 +65,10 @@ ENCODER_PATHS = [
     '/usr/local/bin/jxlbatch',
     '/opt/homebrew/bin/jxlbatch',
 ]
-# The work folder: one per user, in the user's temporary folder (TMPDIR ends
-# with a slash on macOS). Fixed, so that the shortcut's later steps can find
-# the log and the results without parsing the script's output.
-# Compress Photos (macOS): a folder inside Shortcuts' own folder in iCloud
+# The work folders, one per user and fixed, so that the shortcut's later steps
+# find the results without parsing the script's output.
+#
+# Compress Photos (macOS) from its picker: a folder inside Shortcuts' own folder in iCloud
 # Drive, because Get File, with a path relative to that folder, is the only
 # way a file written by a script gets into Shortcuts on the Mac (checked on
 # macOS 26: Run AppleScript's file results come back empty, and Get File
@@ -88,8 +92,15 @@ WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
 ORIGINALS_ALBUM = 'Compressed to JXL'
 # Where every route keeps its log and the progress window's script: a plain
 # folder, so that Terminal (the progress window) never needs access to
-# iCloud Drive or Pictures (common.zsh sets the same path).
+# iCloud Drive or Pictures (common.zsh sets the same path). Each route has its
+# own files there (<route>.log, <route>.command, <route>.pid), so that runs of
+# different routes don't clobber each other.
 LOG_DIR = '"$HOME/Library/Caches/compress-photos-macos"'
+ROUTES = {
+    WORK_PHOTOS: 'photos-picker',
+    WORK_SELECTION: 'photos-selection',
+    WORK_FILES: 'files',
+}
 # Where the file shortcut saves when it can't write next to the original.
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
@@ -158,8 +169,12 @@ def script_text(name, body, label, work):
         '@VERSION@': VERSION,
         '@HELP_URL@': HELP_URL,
         '@EFFORT@': str(EFFORT),
+        '@ROUTE@': ROUTES[work],
         '@WORK_SETUP@': work_setup(work),
         '@WORK_CHECK@': work_check(work),
+        '@FINISH@': (MAC / 'finish.zsh')
+        .read_text()
+        .replace('@ROUTE@', ROUTES[work]),
         '@FALLBACK@': FALLBACK_FOLDER,
         '@LABEL@': label,
         '@CANDIDATES@': ' '.join(f'"{p}"' for p in ENCODER_PATHS),
@@ -188,20 +203,23 @@ def applescript_text(name):
 def finish_script(work):
     """
     The last Run Shell Script of a Photos route (input: the outcome, to stdin):
-    appends it and "Done" to the log, so the progress window (a Terminal
-    following the log, see run.zsh) shows it and ends, and removes the work
-    folder.
+    appends it to the log, ends this run's progress window (finish.zsh: "Done",
+    then the window's own tail, by its recorded pid), and removes the work
+    files. The selection route keeps out/: Photos may reference the imported
+    files instead of copying them (Photos ▸ Settings ▸ Importing), and the next
+    run starts by emptying the folder anyway.
     """
+    route = ROUTES[work]
+    cleanup = (
+        'rm -rf "$W/in" "$W"/jxl_*'
+        if work == WORK_SELECTION
+        else 'rm -rf "$W"'
+    )
     return (
-        f'W={work}; L={LOG_DIR}\n'
-        '{ echo; cat; echo; } >> "$L/jxl_log.txt"\n'
-        'if [ -e "$L/progress.command" ]; then\n'
-        '  echo "Done. You can close this window." >> "$L/jxl_log.txt"\n'
-        '  sleep 1\n'
-        "  pkill -f 'tail -n [+]1 -f .*compress-photos-macos/jxl_log.txt' 2>/dev/null\n"
-        '  rm -f "$L/progress.command"\n'
-        'fi\n'
-        'rm -rf "$W"'
+        f'W={work}; LOGDIR={LOG_DIR}; LOG="$LOGDIR/{route}.log"\n'
+        '{ echo; cat; echo; } >> "$LOG"\n'
+        + (MAC / 'finish.zsh').read_text().replace('@ROUTE@', route)
+        + cleanup
     )
 
 
@@ -250,10 +268,21 @@ def build_photos(sample):
     # photos selected in Photos when Photos is in front, else a picker.
     def without_input():
         probe = b.run_applescript(applescript_text('probe'))
+
+        def picker():
+            # "ERROR: ..." (for example, Shortcuts may not control Photos) is
+            # shown, so the user knows why the picker opens instead.
+            b.if_has_value(
+                b.match_text(probe, '^ERROR'),
+                lambda: b.notification('JPEG XL', probe),
+                lambda: None,
+            )
+            b.set_variable('Photos', b.select_photos())
+
         b.if_has_value(
             b.match_text(probe, '^SELECTION'),
             lambda: b.set_variable('Selection', probe),
-            lambda: b.set_variable('Photos', b.select_photos()),
+            picker,
         )
 
     b.if_has_value(
@@ -300,7 +329,9 @@ def selection_route(b):
     imported = b.match_text(b.item_at_index(lines, 1), r'\d+')
     collected = b.match_text(b.item_at_index(lines, 2), r'\d+')
     log = b.text(
-        b.run_shell_script(f'cat {LOG_DIR}/jxl_log.txt 2>/dev/null || true'),
+        b.run_shell_script(
+            f'cat {LOG_DIR}/{ROUTES[WORK_SELECTION]}.log 2>/dev/null || true'
+        ),
         '\n',
         outcome,
     )
@@ -408,7 +439,9 @@ def picker_route(b):
     # The log: shown when it has a note, an error, a failed photo or a copy
     # that didn't reach Photos (what the iPhone user reads in a-Shell).
     log = b.text(
-        b.run_shell_script(f'cat {LOG_DIR}/jxl_log.txt 2>/dev/null || true'),
+        b.run_shell_script(
+            f'cat {LOG_DIR}/{ROUTES[WORK_PHOTOS]}.log 2>/dev/null || true'
+        ),
         '\n',
         b.combine(variable('Not Saved'), '\n'),
     )

@@ -37,8 +37,8 @@ move() {  # move RESULT DESTINATION-FOLDER NAME.jxl
   local dir=$2
   if [ -z "$dir" ] || ! [ -d "$dir" ] || ! [ -w "$dir" ]; then dir=$FALLBACK; fi
   mkdir -p "$dir" || return
-  local dest="$dir/$3" base=${3%.jxl} k=2
-  while [ -e "$dest" ]; do dest="$dir/$base $k.jxl"; k=$((k + 1)); done
+  local dest
+  dest=$(unique "$dir/$3")
   mv "$1" "$dest" && wrote=$((wrote + 1)) && echo "  -> $dest" >> "$LOG"
 }
 if [ -f "$WORK/jxl_done.txt" ]; then
@@ -49,12 +49,7 @@ if [ -f "$WORK/jxl_done.txt" ]; then
 fi
 # The log ends with the count; the progress window, if any, with "Done".
 { echo; echo "Wrote $wrote JPEG XL file(s)."; } >> "$LOG"
-if [ -e "$LOGDIR/progress.command" ]; then
-  echo "Done. You can close this window." >> "$LOG"
-  sleep 1
-  pkill -f 'tail -n [+]1 -f .*compress-photos-macos/jxl_log.txt' 2>/dev/null
-  rm -f "$LOGDIR/progress.command"
-fi
+@FINISH@
 # The output: the log, then the count.
 cat "$LOG"
 echo

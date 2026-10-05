@@ -8,9 +8,22 @@ setopt nullglob
 case $IDS in
   ERROR*) echo "$IDS" >> "$LOG";;
 esac
-typeset -A ids
+# filename -> id. A name two selected photos share can't be told apart in
+# the export, so it gets no id: its copy is saved but joins no album, and
+# neither original is collected for deletion.
+typeset -A ids seen
 for line in "${(@f)IDS}"; do
-  case $line in *'|'*) ids[${line#*|}]=${line%%|*};; esac
+  case $line in *'|'*) ;; *) continue;; esac
+  name=${line#*|}
+  if (( ${+seen[$name]} )); then
+    if [ -n "${ids[$name]}" ]; then
+      echo "! two or more selected photos are named $name: their copies are saved, but not added to albums, and the originals are not collected" >> "$LOG"
+    fi
+    ids[$name]=''
+  else
+    ids[$name]=${line%%|*}
+  fi
+  seen[$name]=1
 done
 typeset -a origs
 n=0; live=0; videos=0
@@ -44,8 +57,7 @@ if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
     [ -n "$file" ] || continue
     [ -z "$name" ] && name=$flag  # a line from an older jxlbatch: file|index|name
-    dest="$WORK/out/$name"; base=${name%.jxl}; k=2
-    while [ -e "$dest" ]; do dest="$WORK/out/$base $k.jxl"; k=$((k + 1)); done
+    dest=$(unique "$WORK/out/$name")
     mv "$WORK/$file" "$dest" || continue
     printf '%s|%s|%s|%s\n' "$dest" "${ids[${origs[$idx]}]}" "$flag" "${dest:t}"
   done < "$WORK/jxl_done.txt"

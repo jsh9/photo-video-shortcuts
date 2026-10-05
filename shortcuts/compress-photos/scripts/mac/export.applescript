@@ -8,16 +8,20 @@ on run {input, parameters}
 	try
 		set work to item 1 of input as text
 		set dest to POSIX file (work & "/in/")
-		tell application "Photos"
-			set sel to selection
-			if (count of sel) is 0 then return "ERROR: nothing is selected in Photos."
-			set idText to ""
-			repeat with i from 1 to count of sel
-				set m to item i of sel
-				set idText to idText & (id of m) & "|" & (filename of m) & linefeed
-			end repeat
-			export sel to dest with using originals
-		end tell
+		-- Exporting many photos, or ones iCloud must first download, takes
+		-- longer than AppleScript's default 2-minute limit on one command.
+		with timeout of 3600 seconds
+			tell application "Photos"
+				set sel to selection
+				if (count of sel) is 0 then return "ERROR: nothing is selected in Photos."
+				set idText to ""
+				repeat with i from 1 to count of sel
+					set m to item i of sel
+					set idText to idText & (id of m) & "|" & (filename of m) & linefeed
+				end repeat
+				export sel to dest with using originals
+			end tell
+		end timeout
 		return idText
 	on error e number errNum
 		return "ERROR: Photos could not export the selected photos (" & errNum & ": " & e & ")"

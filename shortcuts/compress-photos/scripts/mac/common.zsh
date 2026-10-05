@@ -1,13 +1,20 @@
-# @NAME@ @VERSION@: converts the photos Shortcuts passes as files ("$@")
-# with jxlbatch. Help: @HELP_URL@
+# @NAME@ @VERSION@, @ROUTE@: converts photos with jxlbatch.
+# Help: @HELP_URL@
 setopt extendedglob
 @WORK_SETUP@
 # The log (and the progress window's script) stay out of iCloud Drive and
 # Pictures: Terminal reads them without asking for access to those folders.
+# One log per route, so that runs of different routes don't clobber each other.
 LOGDIR="$HOME/Library/Caches/compress-photos-macos"
 mkdir -p "$LOGDIR"
-LOG="$LOGDIR/jxl_log.txt"
+LOG="$LOGDIR/@ROUTE@.log"
 : > "$LOG"
+# unique PATH: PATH if nothing is there, else "PATH 2", "PATH 3"... (for .jxl)
+unique() {
+  local dest=$1 base=${1%.jxl} k=2
+  while [ -e "$dest" ]; do dest="$base $k.jxl"; k=$((k + 1)); done
+  print -r -- "$dest"
+}
 @WORK_CHECK@
 VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress

@@ -18,15 +18,19 @@ on run {input, parameters}
 		repeat with ln in paragraphs of plan
 			set ln to ln as text
 			if ln is not "" then
-				set AppleScript's text item delimiters to "|"
-				set parts to text items of ln
-				set AppleScript's text item delimiters to oldDelims
-				set f to POSIX file (item 1 of parts)
-				set origId to item 2 of parts
-				set flag to item 3 of parts
-				set jxlName to item 4 of parts
+				set jxlName to ln
 				try
-					tell application "Photos" to set newItems to import {f} skip check duplicates yes
+					set AppleScript's text item delimiters to "|"
+					set parts to text items of ln
+					set AppleScript's text item delimiters to oldDelims
+					if (count of parts) < 4 then error "unexpected result line"
+					set f to POSIX file (item 1 of parts)
+					set origId to item 2 of parts
+					set flag to item 3 of parts
+					set jxlName to item 4 of parts
+					with timeout of 3600 seconds
+						tell application "Photos" to set newItems to import {f} skip check duplicates yes
+					end timeout
 					if (count of newItems) > 0 then
 						set imported to imported + 1
 						if origId is not "" then
@@ -39,6 +43,7 @@ on run {input, parameters}
 						set problems to problems & "! " & jxlName & ": Photos did not import it" & linefeed
 					end if
 				on error e number errNum
+					set AppleScript's text item delimiters to oldDelims
 					set problems to problems & "! " & jxlName & ": import failed (" & errNum & ": " & e & ")" & linefeed
 				end try
 			end if
@@ -47,6 +52,7 @@ on run {input, parameters}
 	-- Albums: one pass over every album, nested ones included. Each new item
 	-- joins every album its original is in.
 	if (count of pairs) > 0 then
+		with timeout of 3600 seconds
 		tell application "Photos"
 			set allAlbums to my collectAlbums(albums, folders)
 			repeat with a in allAlbums
@@ -62,6 +68,7 @@ on run {input, parameters}
 				end try
 			end repeat
 		end tell
+		end timeout
 	end if
 	-- The originals to delete, in one album.
 	if (count of toCollect) > 0 then

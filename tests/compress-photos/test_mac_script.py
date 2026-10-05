@@ -130,7 +130,11 @@ class Mac:
         """The route's log script and finish script, in order."""
         work = '/Pictures/.' if shortcut == 'selection' else 'iCloud~'
         scripts = self.scripts(shortcut)
-        show_log = next(s for s in scripts if s.startswith('cat '))
+        show_log = next(
+            s
+            for s in scripts
+            if s.startswith('cat ') and f'{self.LOGS[shortcut]}.log' in s
+        )
         finish = [
             s for s in scripts if 'Done. You can close' in s and work in s
         ]
@@ -157,9 +161,19 @@ class Mac:
         assert result.stderr == ''
         return result.stdout
 
+    LOGS = {
+        'photos': 'photos-picker',
+        'selection': 'photos-selection',
+        'files': 'files',
+    }
+
+    def log_file(self, shortcut='photos'):
+        return self.logdir / f'{self.LOGS[shortcut]}.log'
+
     @property
     def log(self):
-        return (self.logdir / 'jxl_log.txt').read_text()
+        """The picker route's log."""
+        return self.log_file('photos').read_text()
 
 
 @pytest.fixture
@@ -304,7 +318,7 @@ def test_selection_converts_exported_originals(mac):
         'IMG_0001.jxl',
         'IMG_0002.jxl',
     ]
-    log = mac.log
+    log = mac.log_file('selection').read_text()
     assert log.startswith(
         'Skipped 1 Live Photo(s), 1 video(s): only still photos are converted.'
     )
@@ -314,29 +328,61 @@ def test_selection_converts_exported_originals(mac):
     assert (mac.selection_work / 'in' / 'IMG_0001.HEIC').exists()
 
 
+def test_selection_duplicate_names_get_no_id(mac, gen):
+    # Two selected photos with one file name can't be told apart in the
+    # export: neither gets an id (no albums, nothing collected), and the log
+    # says so; a photo with a unique name is unaffected.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001 (1).HEIC')
+    exported(mac, 'hdr/o1.heic', 'IMG_0002.HEIC')
+    out = mac.batch(
+        'selection',
+        lines='A|IMG_0001.HEIC\nB|IMG_0001.HEIC\nC|IMG_0002.HEIC\n',
+    )
+    folder = mac.selection_work / 'out'
+    assert out.splitlines() == [
+        f'{folder}/IMG_0001 (1).jxl||delete|IMG_0001 (1).jxl',
+        f'{folder}/IMG_0001.jxl||delete|IMG_0001.jxl',
+        f'{folder}/IMG_0002.jxl|C|delete|IMG_0002.jxl',
+    ]
+    log = mac.log_file('selection').read_text()
+    assert (
+        log.count('! two or more selected photos are named IMG_0001.HEIC') == 1
+    )
+    assert re.search(gen.WARNINGS, log)
+
+
 def test_selection_unknown_id_and_export_error(mac, gen):
     exported(mac, 'hdr/srgb.heic', 'IMG_0007 (1).HEIC')
     out = mac.batch('selection', lines='ERROR: Photos could not export\n')
     assert out.splitlines() == [
         f'{mac.selection_work}/out/IMG_0007 (1).jxl||delete|IMG_0007 (1).jxl'
     ]
-    log = mac.log
+    log = mac.log_file('selection').read_text()
     assert log.startswith('ERROR: Photos could not export')
     assert re.search(gen.WARNINGS, log)
 
 
 def test_selection_nothing_exported(mac, gen):
     assert mac.batch('selection', lines='') == ''
-    assert 'ERROR: no photos to convert.' in mac.log
+    assert (
+        'ERROR: no photos to convert.' in mac.log_file('selection').read_text()
+    )
 
 
 def test_selection_follow_up_scripts(mac):
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     mac.batch('selection', lines='A1|IMG_0001.HEIC\n')
     show_log, finish = mac.follow_ups('selection')
-    assert mac.run(show_log).stdout == mac.log
+    assert mac.run(show_log).stdout == mac.log_file('selection').read_text()
     assert mac.run(finish, stdin='outcome line').returncode == 0
-    assert not mac.selection_work.exists()
+    # in/ and the job files go; out/ stays (Photos may reference its files)
+    assert not (mac.selection_work / 'in').exists()
+    assert not list(mac.selection_work.glob('jxl_*'))
+    assert (mac.selection_work / 'out' / 'IMG_0001.jxl').exists()
+    assert (
+        mac.log_file('selection').read_text().rstrip().endswith('outcome line')
+    )
 
 
 def test_progress_window_follows_the_log_and_ends_with_done(mac):
@@ -346,21 +392,24 @@ def test_progress_window_follows_the_log_and_ends_with_done(mac):
     a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
     result = mac.run(mac.main_script('photos'), a, watch=True)
     assert result.returncode == 0, result.stderr
-    command = (mac.logdir / 'progress.command').read_text()
-    assert command.startswith('#!/bin/zsh\nexec tail -n +1 -f ')
+    command = (mac.logdir / 'photos-picker.command').read_text()
+    assert command.startswith('#!/bin/zsh\necho $$ > ')
+    assert '\nexec tail -n +1 -f ' in command
     # zsh's (q) quoting escapes spaces and tildes
-    assert str(mac.logdir / 'jxl_log.txt') in command.replace('\\', '')
+    assert str(mac.log_file('photos')) in command.replace('\\', '')
     assert (mac.root / 'opened.txt').read_text().splitlines() == [
         '-a',
         'Terminal',
-        str(mac.logdir / 'progress.command'),
+        str(mac.logdir / 'photos-picker.command'),
     ]
-    # a real tail, as the Terminal window would run it
+    # a real tail, as the Terminal window would run it, with its pid recorded
+    # as the .command does
     tail = subprocess.Popen(
-        ['tail', '-n', '+1', '-f', str(mac.logdir / 'jxl_log.txt')],
+        ['tail', '-n', '+1', '-f', str(mac.log_file('photos'))],
         stdout=subprocess.PIPE,
         text=True,
     )
+    (mac.logdir / 'photos-picker.pid').write_text(f'{tail.pid}\n')
     try:
         finish = mac.follow_ups('photos')[1]
         assert (
@@ -381,7 +430,7 @@ def test_progress_window_follows_the_log_and_ends_with_done(mac):
 def test_no_progress_window_when_off(mac):
     a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
     mac.batch('photos', a)
-    assert not (mac.logdir / 'progress.command').exists()
+    assert not list(mac.logdir.glob('*.command'))
     assert not (mac.root / 'opened.txt').exists()
 
 
@@ -391,13 +440,13 @@ def test_files_progress_window_ends_in_the_script(mac):
     result = mac.run(mac.main_script('files', lines=f'{a}\n'), a, watch=True)
     assert result.returncode == 0, result.stderr
     assert (mac.root / 'opened.txt').read_text().splitlines()[-1] == str(
-        mac.logdir / 'progress.command'
+        mac.logdir / 'files.command'
     )
     # the log ended with the count and "Done" before the folder went away
     assert 'Wrote 1 JPEG XL file(s).\nDone. You can close this window.' in (
         result.stdout
     )
-    assert not (mac.logdir / 'progress.command').exists()
+    assert not (mac.logdir / 'files.command').exists()
 
 
 def test_files_next_to_originals_folders_and_fallback(mac):

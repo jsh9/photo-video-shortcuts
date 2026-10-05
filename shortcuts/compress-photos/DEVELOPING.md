@@ -158,12 +158,20 @@ Compress Photos (macOS)                      (shortcut)
    Shortcuts app often can't show on macOS 26, "Presenter connection
    failed", and it isn't available from the Share menu at all)
 
-      both routes, and the Finder shortcut: the log and progress.command live
-   in ~/Library/Caches/compress-photos-macos, outside iCloud Drive and
-   Pictures, so that Terminal needs no access to those; run.zsh opens a
-   Terminal window (`open -a Terminal progress.command`, an `exec tail -f` of
-   the log) that follows jxlbatch's output, unless WATCH=0; jxlbatch runs
-   with --mac, which drops its hints about the iPhone's share sheet
+         both routes, and the Finder shortcut: the log, the progress window's
+   script and its pid file live in ~/Library/Caches/compress-photos-macos as
+   <route>.log, <route>.command and <route>.pid (routes: photos-selection,
+   photos-picker, files), outside iCloud Drive and Pictures, so that Terminal
+   needs no access to those and runs of different routes don't clobber each
+   other; run.zsh opens a Terminal window (`open -a Terminal <route>.command`,
+   which records its pid and `exec`s a `tail -f` of the log) that follows
+   jxlbatch's output, unless WATCH=0, and finish.zsh ends exactly that window
+   by its pid; jxlbatch runs with --mac, which drops its hints about the
+   iPhone's share sheet. The AppleScripts ask Photos only when it is running
+   (a tell block would launch it) and wrap Photos' export, import and album
+   scan in `with timeout of 3600 seconds` (AppleScript's default is 2
+   minutes per command). Two selected photos with one file name get no id
+   (selection.zsh), so a copy is never added to the wrong albums.
 
 Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
    files and folders from Finder; each input's File Path; a quality preset;

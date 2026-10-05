@@ -121,11 +121,16 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert (
         '"$jxlbatch" --mac -q "$QUALITY" -e 7 -C "$WORK" jxl_job.txt' in text
     )
-    assert 'open -a Terminal "$LOGDIR/progress.command"' in text
+    assert 'open -a Terminal "$cmd"' in text
+    assert (
+        'echo \\$\\$ > ' in text
+    )  # the window records its pid for finish.zsh
     assert 'jxl_in_$' in text and 'jxl_done.txt' in text
     for a in scripts:
         if ph.params(a).get('InputMode') == 'to stdin':
-            assert 'Done. You can close this window.' in ph.params(a)['Script']
+            script = ph.params(a)['Script']
+            assert 'Done. You can close this window.' in script
+            assert 'pkill' not in script  # ends its own window, by pid
 
 
 def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
@@ -201,6 +206,32 @@ def test_picker_route_leaves_the_originals_alone(gen, shortcuts):
 
     assert gen.ORIGINALS_ALBUM == 'Compressed to JXL'
     assert gen.ORIGINALS_ALBUM in gen.applescript_text('import')
+
+
+def test_probe_error_is_shown_before_the_picker(gen, shortcuts):
+    # "ERROR: ..." from the probe (for example, Shortcuts may not control
+    # Photos) is shown in a notification; the probe never launches Photos.
+    actions = shortcuts[PHOTOS]
+    probe = gen.applescript_text('probe')
+    assert 'if application "Photos" is running then' in probe
+    errors = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == '^ERROR'
+    ]
+    assert len(errors) == 1
+    shown = [
+        inside
+        for action, inside in ph.inside_if_on(
+            actions, ph.params(errors[0])['UUID']
+        )
+        if ph.ident(action) == 'is.workflow.actions.notification'
+        and "'AppleScript Result'" in repr(ph.params(action))
+    ]
+    assert shown == [True]
+    for name in ('export', 'import'):
+        assert 'with timeout of 3600 seconds' in gen.applescript_text(name)
 
 
 def test_photos_log_shown_only_with_warnings(gen, shortcuts):

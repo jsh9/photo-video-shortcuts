@@ -110,9 +110,12 @@ iPhone's need a-Shell, these need Run Shell Script.
     empty, for the next run.
   - An **edited photo** is converted from its unedited original on this path:
     the edits aren't applied. To convert the edited version, use the picker.
-  - Shortcuts never sees the photos Photos would hand over through the Share
-    menu (on macOS 26 that is a JPEG copy Shortcuts can't read), which is why
-    the shortcut asks Photos for the selection instead.
+    - Shortcuts never sees the photos Photos would hand over through the Share
+      menu (on macOS 26 that is a JPEG copy Shortcuts can't read), which is why
+      the shortcut asks Photos for the selection instead. If two selected
+      photos have the same file name, their copies are saved but not added to
+      albums, and neither original is collected, since the exported files can't
+      be told apart; the log says so.
 - **From the Shortcuts app** (or the menu bar, if you pin it, or a keyboard
   shortcut you give it) while Photos is not in front: a photo picker opens,
   without videos. Pick the photos there. This path converts each photo as it
@@ -143,23 +146,24 @@ iPhone's need a-Shell, these need Run Shell Script.
   every run.
 - **Progress:** a Terminal window opens and follows the conversion, photo by
   photo, as a-Shell shows it on the iPhone (the log it follows is in
-  `~/Library/Caches/compress-photos-macos`, so Terminal needs no access to
-  iCloud Drive or Pictures). When everything is done it ends with "Done. You
-  can close this window." The last run's log stays in that folder as
-  `jxl_log.txt`. (Terminal may close it by itself, depending on its "When the
-  shell exits" setting.) To do without it, open the shortcut in Shortcuts, find
-  the Run Shell Script action whose script starts with
-  `# Compress Photos (macOS)`, and change its line `WATCH=${WATCH:-1}` to
-  `WATCH=0`. The log also opens in Quick Look when it has a note, an error or a
-  failed photo.
+  `~/Library/Caches/compress-photos-macos`, one per route, so Terminal needs no
+  access to iCloud Drive or Pictures). When everything is done it ends with
+  "Done. You can close this window." The last run's log stays in that folder
+  (`photos-selection.log`, `photos-picker.log` or `files.log`). (Terminal may
+  close it by itself, depending on its "When the shell exits" setting.) To do
+  without it, open the shortcut in Shortcuts, find the Run Shell Script action
+  whose script starts with `# Compress Photos (macOS)`, and change its line
+  `WATCH=${WATCH:-1}` to `WATCH=0`. The log also opens in Quick Look when it
+  has a note, an error or a failed photo.
 - If Photos is set not to copy imported items into the library (Photos ▸
-  Settings ▸ General ▸ Importing), don't use the selection path: it removes its
-  work files after the import, and a referenced file would be gone. Deleted
-  photos go to Recently Deleted for 30 days. Deleting also removes what the
-  JPEG XL doesn't have: depth data, the SDR version of an HDR photo, edit
-  history and Photos-only information (favorites, captions, people). Unlike the
-  iPhone, this is offered from the Share menu too, since the shortcut keeps the
-  originals in hand.
+  Settings ▸ General ▸ Importing), the imported copies reference the files in
+  the shortcut's hidden work folder in Pictures, which the next run empties:
+  don't use the selection path with that setting, or move the copies out of the
+  folder before the next run. Deleted photos go to Recently Deleted for 30
+  days. Deleting also removes what the JPEG XL doesn't have: depth data, the
+  SDR version of an HDR photo, edit history and Photos-only information
+  (favorites, captions, people). Unlike the iPhone, this is offered from the
+  Share menu too, since the shortcut keeps the originals in hand.
 - Photos may list the copies under Duplicates. Merging keeps only one file, so
   check which one before you merge.
 - With iCloud Photos and *Optimize Mac Storage*, Shortcuts downloads each
