@@ -11,7 +11,9 @@
 #define STBI_NO_STDIO
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
-#define STBI_NO_THREAD_LOCALS
+#ifndef JXLBATCH_THREADS
+#define STBI_NO_THREAD_LOCALS  // WebAssembly has no thread-local storage
+#endif
 #include "../third_party/stb_image.h"
 
 int stb_decode(const uint8_t *buf, size_t len, image_t *img, char *err, size_t err_len) {

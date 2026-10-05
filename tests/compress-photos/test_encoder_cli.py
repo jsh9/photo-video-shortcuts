@@ -198,6 +198,7 @@ def stage_with_failures(folder, photos):
     them, so that a batch has failures to report in order too.
     """
     staged = ph.stage(folder, list(photos.values()))
+    assert len(staged) >= 4, 'two photos become failures; two must remain'
     Image.new('RGB', (8, 8)).save(folder / 'jxl_in_2.orig', 'GIF')
     (folder / f'jxl_in_{len(staged) - 1}.orig').unlink()
     return len(staged) - 2
@@ -232,8 +233,9 @@ def test_parallel_batch_matches_sequential(encoder, photos, tmp_path):
                 p.name: p.read_bytes() for p in folder.glob('jxl_out_*.jxl')
             },
         }
-        assert len(runs[label]['files']) == converted
-        assert f'Done: {converted} of {converted + 2} converted' in body
+        # exactly the two failures staged: every test photo converts
+        assert len(runs[label]['files']) == converted, body
+        assert f'Done: {converted} of {converted + 2} converted' in body, body
         assert '2 failed; see the messages above.' in body
 
     one, three = runs['one'], runs['three']

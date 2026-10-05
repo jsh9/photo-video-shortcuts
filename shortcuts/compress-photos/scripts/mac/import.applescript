@@ -59,7 +59,8 @@ on run {input, parameters}
 				tell application "Photos" to set newItems to import theFiles skip check duplicates yes
 			end timeout
 		on error e number errNum
-			set problems to problems & "! importing all the files at once failed (" & errNum & ": " & e & "); imported one at a time instead" & linefeed
+			-- A note, not a "!" problem: the files that then fail get their own.
+			set problems to problems & "Photos did not take all the files in one import (" & errNum & ": " & e & "); they were imported one at a time." & linefeed
 			set newItems to {}
 			repeat with i from 1 to count of theFiles
 				try

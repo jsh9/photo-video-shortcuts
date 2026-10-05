@@ -284,25 +284,24 @@ def test_encoder_missing_is_reported_in_the_log(mac):
 
 
 def test_encoder_of_another_version_is_noted(mac):
-    fake = mac.root / 'jxlbatch'
-    fake.write_text('#!/bin/sh\necho "jxlbatch 0.0.1 (fake)"\n')
-    fake.chmod(0o755)
+    fake = fake_jxlbatch(mac, version='0.0.1')
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     result = mac.run(mac.main_script('photos'), a, jxlbatch=fake)
     assert result.returncode == 0
     assert f'! {fake} is not jxlbatch {VERSION}' in mac.log
 
 
-def fake_jxlbatch(mac):
+def fake_jxlbatch(mac, version=VERSION):
     """
-    A stand-in for jxlbatch that passes the script's version check and records
-    its arguments in <root>/args.txt instead of converting.
+    A stand-in for jxlbatch that answers --version with ``version`` (the
+    shortcut's own by default, so the script's check passes) and records its
+    arguments in <root>/args.txt instead of converting.
     """
     fake = mac.root / 'jxlbatch'
     fake.write_text(
         '#!/bin/sh\n'
         'case "$1" in\n'
-        f'  --version) echo "jxlbatch {VERSION} (fake)";;\n'
+        f'  --version) echo "jxlbatch {version} (fake)";;\n'
         f'  *) printf \'%s\\n\' "$@" > "{mac.root}/args.txt";;\n'
         'esac\n'
     )

@@ -688,6 +688,9 @@ typedef struct {
   int keep;  // the original had HDR that the JXL lacks: not to be deleted
   int apple_jpeg, not_iphone;
   double bytes_in, bytes_out;
+  // The photo's summary, printed once it is in jxl_done.txt: e.g.
+  // "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s".
+  char info[192], sizes[96];
 } outcome_t;
 
 // Converts one photo: jxl_in_N.orig to jxl_out_N.jxl, printing its lines.
@@ -858,7 +861,6 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   ok = 1;
 
   {
-    // e.g. "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s"
     char in_s[32], out_s[32], depth[32] = "";
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
@@ -867,11 +869,11 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     } else if (img.bits > 8) {
       snprintf(depth, sizeof depth, ", 10-bit");
     }
-    say_wrap("  ", "%s %ux%u%s%s%s", format_name(orig_format == FMT_UNKNOWN ? pixel_format : orig_format), img.w,
-             img.h, depth, img.channels == 2 || img.channels == 4 ? ", alpha" : "",
-             exif_len || xmp_len ? "" : ", no metadata");
-    say_wrap("  ", "%s -> %s (%.0f%%), %.1f s", in_s, out_s, orig_size > 0 ? 100.0 * jxl_len / orig_size : 0.0,
-             now_seconds() - t0);
+    snprintf(res->info, sizeof res->info, "%s %ux%u%s%s%s",
+             format_name(orig_format == FMT_UNKNOWN ? pixel_format : orig_format), img.w, img.h, depth,
+             img.channels == 2 || img.channels == 4 ? ", alpha" : "", exif_len || xmp_len ? "" : ", no metadata");
+    snprintf(res->sizes, sizeof res->sizes, "%s -> %s (%.0f%%), %.1f s", in_s, out_s,
+             orig_size > 0 ? 100.0 * jxl_len / orig_size : 0.0, now_seconds() - t0);
   }
 
 done:
@@ -892,12 +894,13 @@ done:
 }
 
 // Adds a converted photo to the batch: its line in jxl_done.txt and the
-// counts. "file|index|delete or keep|name": the shortcut saves `file` as
-// `name`, and after saving may delete the photo at position `index` of the
-// ones it staged, unless marked "keep". (Older shortcuts read only the first
-// and last fields.) No trailing newline: Shortcuts' Split Text would yield an
-// empty item. Returns 0 when the line can't be written: the photo then counts
-// as failed (its file stays, unused).
+// counts, then prints its summary, so a photo reads as converted only once
+// the shortcut will find it. "file|index|delete or keep|name": the shortcut
+// saves `file` as `name`, and after saving may delete the photo at position
+// `index` of the ones it staged, unless marked "keep". (Older shortcuts read
+// only the first and last fields.) No trailing newline: Shortcuts' Split Text
+// would yield an empty item. Returns 0 when the line can't be written: the
+// photo then counts as failed (its file stays, unused).
 static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, const outcome_t *res) {
   if (!batch->done_file) {
     char *p_done = path_join(dir, DONE_FILE);
@@ -917,6 +920,8 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
   batch->not_iphone += res->not_iphone;
   batch->bytes_in += res->bytes_in;
   batch->bytes_out += res->bytes_out;
+  say_wrap("  ", "%s", res->info);
+  say_wrap("  ", "%s", res->sizes);
   return 1;
 }
 
@@ -952,7 +957,7 @@ static void *runner_create(int threads) {
 // the rest: one per 5 cores, at most 3 (beyond that the cores are shared
 // again and the memory adds up: each photo holds its decoded pixels, up to
 // about 1 GB for a 48 MP HDR photo), and one per 4 GB of memory.
-static int auto_workers(size_t count) {
+static int auto_workers(void) {
   int n = (cpu_count() + 2) / 5;  // 8 cores: 2; 14: 3
   const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGESIZE);
   if (pages > 0 && page > 0) {
@@ -960,17 +965,16 @@ static int auto_workers(size_t count) {
     if (n > (int)(gb / 4)) n = (int)(gb / 4);
   }
   if (n > 3) n = 3;
-  if (n < 1) n = 1;
-  if (count && (size_t)n > count) n = (int)count;
-  return n;
+  return n < 1 ? 1 : n;
 }
 
-// How many photos to convert at a time and with how many threads each, from
-// -j and -t: by default one at a time with all the cores (as the builds
-// without threads do, one thread).
+// How many photos to convert at a time (never more than there are photos,
+// one for none) and with how many threads each, from -j and -t: by default
+// one at a time with all the cores (as the builds without threads do, one
+// thread).
 static void plan_threads(const options_t *opt, size_t count, int *workers, int *threads) {
-  *workers = opt->jobs > 0 ? opt->jobs : auto_workers(count);
-  if (count && (size_t)*workers > count) *workers = (int)count;
+  *workers = opt->jobs > 0 ? opt->jobs : auto_workers();
+  if ((size_t)*workers > count) *workers = (int)count;
   if (*workers < 1) *workers = 1;
   *threads = opt->threads > 0 ? opt->threads : (cpu_count() + *workers - 1) / *workers;
 }

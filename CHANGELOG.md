@@ -34,8 +34,8 @@ encoder. Every release includes the current files of all shortcuts.
   - With several HEIF photos decoding at a time, libheif's memory accounting
     could fail one of them with "Security limit exceeded" (it counts a
     context's images in a table keyed by the context's address, and `jxlbatch`
-    releases a decoded image after its context). `jxlbatch` turns that one
-    check off for its contexts; the other limits stay.
+    released a decoded image after its context). The context now stays until
+    its images are released.
 - Changed
   - Update the Mac shortcuts and `jxlbatch-macos` together: the shortcuts pass
     the new options, which an older encoder rejects (the log then shows its

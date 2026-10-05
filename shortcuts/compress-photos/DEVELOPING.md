@@ -232,12 +232,12 @@ is its own (libheif contexts, libjxl encoders, tinyxml2 documents); stb_image's
 failure reason is a plain global (`STBI_NO_THREAD_LOCALS`, for WebAssembly), so
 two photos failing to decode at the same moment could swap messages, nothing
 worse. One trap: libheif 1.23 counts a context's image memory in a table keyed
-by the context's address, and `heif.c` releases a decoded image after its
-context (the image outlives it), so with concurrent decodes a stale release
-lands on another context's count and fails that photo with "Security limit
-exceeded"; `heif.c` sets each context's `max_total_memory` to 0 (off), and the
-other limits stay. The WebAssembly build accepts `-j` and `-t` and converts one
-photo at a time.
+by the context's address, and `heif.c` hands out decoded images that outlive
+the `heif_decode` call; released after their context, with concurrent decodes,
+a stale release landed on another context's count and failed that photo with
+"Security limit exceeded". So the context now lives as long as its images
+(`heif_source_t`: a hold per image plus the call's own). The WebAssembly build
+accepts `-j` and `-t` and converts one photo at a time.
 
 What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
 changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
