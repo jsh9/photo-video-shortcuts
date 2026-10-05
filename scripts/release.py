@@ -56,6 +56,10 @@ OTHER_BLOCK = re.compile(
 PLATFORMS = ('iphone', 'mac')
 PLATFORM_INFIX = {'iphone': '', 'mac': 'mac'}
 PLATFORM_TITLE = {'iphone': 'iPhone', 'mac': 'Mac'}
+# The option that makes an encoder print its version, when it isn't --version:
+# FFmpeg's programs take only -version (given --version, they print their
+# version line, then exit with an error).
+VERSION_OPTIONS = {'ffmpeg-macos': '-version', 'ffprobe-macos': '-version'}
 
 
 class ReleaseError(Exception):
@@ -289,17 +293,18 @@ def encoders(tool, since):
 
 def check_encoder_version(tool, encoder):
     """
-    Each encoder must report the tool's VERSION (`<encoder> --version`): a
-    .wasm file through wasmtime, a native Mac executable directly (the release
-    is built on a Mac).
+    Each encoder must report the tool's VERSION (`<encoder> --version`, or the
+    option in VERSION_OPTIONS): a .wasm file through wasmtime, a native Mac
+    executable directly (the release is built on a Mac).
     """
+    option = VERSION_OPTIONS.get(encoder.name, '--version')
     if encoder_kind(encoder.name) == 'wasm':
         if not shutil.which('wasmtime'):
             raise ReleaseError('wasmtime is needed to check encoder versions')
 
-        cmd = ['wasmtime', 'run', encoder, '--version']
+        cmd = ['wasmtime', 'run', encoder, option]
     else:
-        cmd = [encoder, '--version']
+        cmd = [encoder, option]
 
     output = run(cmd, capture=True)
     if not re.search(rf'\b{re.escape(tool.version)}\b', output):

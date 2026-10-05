@@ -50,7 +50,8 @@ built on a Mac).
 Encoder files and signed shortcuts come from that tool's `dist/`. Every
 declared file must exist, contain data, and have been regenerated during its
 current build. Extra files in `dist/` are ignored. The script runs each
-encoder's `--version` and checks it against the tool's `VERSION`.
+encoder's `--version` (`-version` for `ffmpeg` and `ffprobe`, which reject two
+dashes) and checks it against the tool's `VERSION`.
 
 Each platform gets its own ZIP, `<name>-shortcuts-v<version>.zip` for the
 iPhone (the name from before there were Mac shortcuts, so existing links keep

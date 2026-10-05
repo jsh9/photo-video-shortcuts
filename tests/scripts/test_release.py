@@ -68,6 +68,23 @@ def test_plain_shortcut_list_means_iphone(tmp_path):
     assert t.shortcut_names == {'iphone': SHORTCUTS}
 
 
+def test_mac_only_tool():
+    # Compress Videos, from its own release.json: Mac shortcuts only, and
+    # native tools without an extension.
+    t = release.Tool(release.SHORTCUTS / 'compress-videos')
+    assert list(t.shortcut_names) == ['mac']
+    assert t.encoder_names == [
+        'ffmpeg-macos',
+        'ffprobe-macos',
+        'vidmeta-macos',
+    ]
+    assert t.zip_name('mac') == f'compress-videos-mac-shortcuts-v{t.version}'
+    notes = release.release_notes(
+        t, [t], {'tag': None, 'versions': {}}, {t.name: '- Added'}
+    )
+    assert f'Compress Videos {t.version} (**new**): Mac\n' in notes
+
+
 @pytest.mark.parametrize(
     'name,kind',
     [
@@ -250,8 +267,17 @@ def test_make_zip_refuses_incomplete_list(tmp_path, monkeypatch):
         )
 
 
-@pytest.mark.parametrize('name', ['jxlbatch.wasm', 'jxlbatch-macos'])
-def test_encoder_version_checked(tmp_path, monkeypatch, name):
+@pytest.mark.parametrize(
+    'name, option',
+    [
+        ('jxlbatch.wasm', '--version'),
+        ('jxlbatch-macos', '--version'),
+        # FFmpeg's programs take only -version
+        ('ffmpeg-macos', '-version'),
+        ('ffprobe-macos', '-version'),
+    ],
+)
+def test_encoder_version_checked(tmp_path, monkeypatch, name, option):
     t = tool(tmp_path)
     monkeypatch.setattr(release.shutil, 'which', lambda _: '/wasmtime')
     commands = []
@@ -266,9 +292,9 @@ def test_encoder_version_checked(tmp_path, monkeypatch, name):
 
     # A .wasm encoder runs through wasmtime, a Mac executable directly.
     expected = (
-        ['wasmtime', 'run', str(t.path / 'dist' / name), '--version']
+        ['wasmtime', 'run', str(t.path / 'dist' / name), option]
         if name.endswith('.wasm')
-        else [str(t.path / 'dist' / name), '--version']
+        else [str(t.path / 'dist' / name), option]
     )
     assert commands == [expected]
 

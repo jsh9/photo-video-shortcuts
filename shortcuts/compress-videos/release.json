@@ -1,0 +1,6 @@
+{
+  "encoders": ["ffmpeg-macos", "ffprobe-macos", "vidmeta-macos"],
+  "shortcuts": {
+    "mac": ["Compress Videos (macOS).shortcut"]
+  }
+}

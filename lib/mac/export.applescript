@@ -1,4 +1,4 @@
--- Compress Photos (macOS): exports the original files of the photos selected
+-- @NAME@: exports the original files of the photos selected
 -- in Photos into <work>/in (input: the work folder's path), and returns one
 -- line per selected photo, "id|filename", for the shell to match the exported
 -- files to the photos. "using originals": the original file as it was

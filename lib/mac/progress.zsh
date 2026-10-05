@@ -1,5 +1,5 @@
 if [ "$WATCH" = 1 ]; then
-  # A Terminal window follows the log while jxlbatch runs; it records its
+  # A Terminal window follows the log while @ENCODER@ runs; it records its
   # process id so that the finish step can end exactly this window (finish.zsh).
   cmd="$LOGDIR/@ROUTE@.command"
   print -r -- '#!/bin/zsh' > "$cmd"

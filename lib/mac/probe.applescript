@@ -1,4 +1,4 @@
--- Compress Photos (macOS): is Photos in front with photos selected?
+-- @NAME@: is Photos in front with photos selected?
 -- Returns "SELECTION" and the count, "NONE" (then the shortcut opens its photo
 -- picker), or "ERROR: ..." (for example, Shortcuts may not control Photos; the
 -- shortcut shows it, then opens the picker). Photos is only asked when it is

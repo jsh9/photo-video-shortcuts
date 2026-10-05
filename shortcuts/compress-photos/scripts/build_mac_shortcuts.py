@@ -186,6 +186,7 @@ def script_text(name, body, label, work):
         '@VERSION@': VERSION,
         '@HELP_URL@': HELP_URL,
         '@EFFORT@': str(EFFORT),
+        '@ENCODER@': 'jxlbatch',
         '@ROUTE@': ROUTES[work],
         '@WORK_SETUP@': work_setup(work),
         '@WORK_CHECK@': work_check(work),
@@ -206,12 +207,14 @@ def script_text(name, body, label, work):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @ORIGINALS_ALBUM@ filled in. Plain text: a
-    Shortcuts variable inside a Run AppleScript's text keeps it from compiling
-    (it then produces no output and no error; seen on macOS 26), so values go
-    in through the action's input (``wf.Builder.run_applescript``).
+    lib/mac/<name>.applescript, with @NAME@, @KIND@ and @ORIGINALS_ALBUM@
+    filled in. Plain text: a Shortcuts variable inside a Run AppleScript's text
+    keeps it from compiling (it then produces no output and no error; seen on
+    macOS 26), so values go in through the action's input
+    (``wf.Builder.run_applescript``).
     """
     text = (LIB_MAC / f'{name}.applescript').read_text()
+    text = text.replace('@NAME@', NAME_PHOTOS).replace('@KIND@', 'JPEG XL')
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text

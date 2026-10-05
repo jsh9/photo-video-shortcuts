@@ -1,5 +1,5 @@
--- Compress Photos (macOS): imports the JPEG XL files the shell made, each into
--- the albums its original is in, and collects the originals whose JPEG XL has
+-- @NAME@: imports the @KIND@ files the shell made, each into
+-- the albums its original is in, and collects the originals whose @KIND@ has
 -- everything they have in the album "@ORIGINALS_ALBUM@", for the user to
 -- delete (a script cannot delete photos).
 --
