@@ -6,6 +6,10 @@
 // "jxl_out_i.jxl|i|delete|Name.jxl" to jxl_done.txt ("keep" instead of
 // "delete" when the JXL lacks the original's HDR). A jxl_in_i.png converted
 // by Shortcuts is used only for other formats (older versions of the shortcut).
+//
+// Builds with threads (JXLBATCH_THREADS, the Mac) can convert several photos
+// at a time (-j), each with a share of the cores (-t); the output and
+// jxl_done.txt then read as with one at a time (see parallel_batch).
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -23,6 +27,7 @@
 #include <jxl/encode.h>
 #ifdef JXLBATCH_THREADS
 #include <jxl/thread_parallel_runner.h>
+#include <pthread.h>
 #endif
 
 #include "gainmap.h"
@@ -57,18 +62,57 @@ typedef struct {
   int retry;  // --retry: skip a batch that a run already started
   int sdr;    // --sdr: HDR photos as SDR
   int mac;    // --mac: for the Mac shortcuts; no hints about the iPhone's share sheet
+  int jobs;   // -j: photos converted at a time (0: from the number of cores); threads builds
+  int threads;  // -t: threads per photo (0: the cores, shared by the photos); threads builds
 } options_t;
 
 #ifdef JXLBATCH_THREADS
-static void *g_runner;
+#define THREAD_LOCAL _Thread_local
+#else
+#define THREAD_LOCAL  // one thread
 #endif
+
+// A growable text, where say() writes while a photo is converted at the same
+// time as others (parallel_batch): each photo's lines come out as one block.
+typedef struct {
+  char *data;
+  size_t len, cap;
+} textbuf_t;
+
+static THREAD_LOCAL textbuf_t *t_out;  // this thread's buffer; NULL: stdout
+#ifdef JXLBATCH_THREADS
+static THREAD_LOCAL void *t_runner;  // this thread's libjxl thread pool; NULL: one thread
+#endif
+
+static int textbuf_vprintf(textbuf_t *b, const char *fmt, va_list ap) {
+  va_list copy;
+  va_copy(copy, ap);
+  const int n = vsnprintf(NULL, 0, fmt, copy);
+  va_end(copy);
+  if (n < 0) return -1;
+  if (b->len + (size_t)n + 1 > b->cap) {
+    size_t cap = b->cap ? b->cap : 1024;
+    while (cap < b->len + (size_t)n + 1) cap *= 2;
+    char *grown = (char *)realloc(b->data, cap);
+    if (!grown) return -1;  // the line is lost; the photo is still converted
+    b->data = grown;
+    b->cap = cap;
+  }
+  vsnprintf(b->data + b->len, b->cap - b->len, fmt, ap);
+  b->len += (size_t)n;
+  return n;
+}
 
 static void say(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprintf(fmt, ap);
+  if (t_out) {
+    textbuf_vprintf(t_out, fmt, ap);
+  } else {
+    vprintf(fmt, ap);
+    fflush(stdout);
+  }
   va_end(ap);
-  fflush(stdout);
 }
 
 // The output is read in a-Shell on an iPhone (about 45 columns in portrait),
@@ -96,12 +140,11 @@ static void say_wrap(const char *indent, const char *fmt, ...) {
       while (take > 0 && p[take] != ' ') take--;
       if (take == 0) take = avail;
     }
-    printf("%s%.*s\n", indent, (int)take, p);
+    say("%s%.*s\n", indent, (int)take, p);
     p += take;
     while (*p == ' ') p++;
     if (*p == '\n' && take == len) p++;
   }
-  fflush(stdout);
 }
 
 static double now_seconds(void) {
@@ -359,7 +402,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
     return ENC_FAIL;
   }
 #ifdef JXLBATCH_THREADS
-  if (g_runner) JxlEncoderSetParallelRunner(enc, JxlThreadParallelRunner, g_runner);
+  if (t_runner) JxlEncoderSetParallelRunner(enc, JxlThreadParallelRunner, t_runner);
 #endif
   const int lossless = opt->quality >= 100.0f;
   const int gray = img->channels <= 2;
@@ -637,14 +680,26 @@ typedef struct {
   FILE *done_file;
 } batch_t;
 
+// What a converted photo adds to the batch (commit_outcome). Kept apart from
+// the conversion so that photos converted at the same time join the batch one
+// at a time, in job order.
+typedef struct {
+  char name_out[64];
+  int keep;  // the original had HDR that the JXL lacks: not to be deleted
+  int apple_jpeg, not_iphone;
+  double bytes_in, bytes_out;
+} outcome_t;
+
+// Converts one photo: jxl_in_N.orig to jxl_out_N.jxl, printing its lines.
+// Returns 1 and fills `res` when the file was written.
 static int process_job(const char *dir, const job_t *job, size_t pos, size_t total,
-                       const options_t *opt, batch_t *batch) {
+                       const options_t *opt, outcome_t *res) {
   char name_orig[64], name_png[64], name_out[64];
   snprintf(name_orig, sizeof name_orig, "jxl_in_%u.orig", job->index);
   snprintf(name_png, sizeof name_png, "jxl_in_%u.png", job->index);
   snprintf(name_out, sizeof name_out, "jxl_out_%u.jxl", job->index);
   char *p_orig = path_join(dir, name_orig), *p_png = path_join(dir, name_png);
-  char *p_out = path_join(dir, name_out), *p_done = path_join(dir, DONE_FILE);
+  char *p_out = path_join(dir, name_out);
   uint8_t *orig = NULL, *png = NULL, *jxl = NULL, *exif = NULL, *xmp = NULL;
   size_t orig_len = 0, png_len = 0, jxl_len = 0, exif_len = 0, xmp_len = 0;
   meta_t mo, mp;
@@ -661,7 +716,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   const double t0 = now_seconds();
 
   say("\n[%zu/%zu] %s\n", pos, total, job->name);
-  if (!p_orig || !p_png || !p_out || !p_done) {
+  if (!p_orig || !p_png || !p_out) {
     snprintf(err, sizeof err, "out of memory");
     goto done;
   }
@@ -791,29 +846,15 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     snprintf(err, sizeof err, "cannot write %s (%s)", name_out, strerror(errno));
     goto done;
   }
-  if (!batch->done_file) {
-    batch->done_file = fopen(p_done, "w");
-    if (!batch->done_file) {
-      snprintf(err, sizeof err, "cannot write %s (%s)", DONE_FILE, strerror(errno));
-      goto done;
-    }
-  }
-  // "file|index|delete or keep|name": the shortcut saves `file` as `name`,
-  // and after saving may delete the photo at position `index` of the ones it
-  // staged, unless marked "keep": the original had HDR that the JXL lacks
-  // (except a gain map not labeled as Apple's: the owner's choice).
-  // (Older shortcuts read only the first and last fields.)
-  // No trailing newline: Shortcuts' Split Text would yield an empty item.
-  const int keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
-  fprintf(batch->done_file, "%s%s|%u|%s|%s.jxl", batch->done ? "\n" : "", name_out, job->index,
-          keep ? "keep" : "delete", job->name);
-  fflush(batch->done_file);
-  batch->done++;
-  batch->kept += keep;
-  batch->apple_jpegs += apple_jpeg;
-  batch->not_iphone += hdr.not_iphone;
-  batch->bytes_in += orig_size;
-  batch->bytes_out += (double)jxl_len;
+  // The original is kept (not offered for deletion) when it had HDR that
+  // the JXL lacks, except a gain map not labeled as Apple's: the owner's
+  // choice.
+  snprintf(res->name_out, sizeof res->name_out, "%s", name_out);
+  res->keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
+  res->apple_jpeg = apple_jpeg;
+  res->not_iphone = hdr.not_iphone;
+  res->bytes_in = orig_size;
+  res->bytes_out = (double)jxl_len;
   ok = 1;
 
   {
@@ -847,9 +888,162 @@ done:
   free(p_orig);
   free(p_png);
   free(p_out);
-  free(p_done);
   return ok;
 }
+
+// Adds a converted photo to the batch: its line in jxl_done.txt and the
+// counts. "file|index|delete or keep|name": the shortcut saves `file` as
+// `name`, and after saving may delete the photo at position `index` of the
+// ones it staged, unless marked "keep". (Older shortcuts read only the first
+// and last fields.) No trailing newline: Shortcuts' Split Text would yield an
+// empty item. Returns 0 when the line can't be written: the photo then counts
+// as failed (its file stays, unused).
+static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, const outcome_t *res) {
+  if (!batch->done_file) {
+    char *p_done = path_join(dir, DONE_FILE);
+    batch->done_file = p_done ? fopen(p_done, "w") : NULL;
+    free(p_done);
+    if (!batch->done_file) {
+      say_wrap("  ", "FAILED: cannot write %s (%s)", DONE_FILE, strerror(errno));
+      return 0;
+    }
+  }
+  fprintf(batch->done_file, "%s%s|%u|%s|%s.jxl", batch->done ? "\n" : "", res->name_out, job->index,
+          res->keep ? "keep" : "delete", job->name);
+  fflush(batch->done_file);
+  batch->done++;
+  batch->kept += res->keep;
+  batch->apple_jpegs += res->apple_jpeg;
+  batch->not_iphone += res->not_iphone;
+  batch->bytes_in += res->bytes_in;
+  batch->bytes_out += res->bytes_out;
+  return 1;
+}
+
+// One photo after the other, on this thread.
+static void serial_batch(const char *dir, const job_t *jobs, size_t count, const options_t *opt,
+                         batch_t *batch) {
+  for (size_t i = 0; i < count; i++) {
+    outcome_t res;
+    if (process_job(dir, &jobs[i], i + 1, count, opt, &res)) commit_outcome(batch, dir, &jobs[i], &res);
+  }
+}
+
+#ifdef JXLBATCH_THREADS
+// Parallel conversion (-j): `workers` threads each take the next photo, with
+// a libjxl thread pool of their own (a pool serves one encoder at a time) and
+// say() writing to the photo's buffer. Finished photos join the batch in job
+// order, each printed as one block, so the output and jxl_done.txt read as
+// with one photo at a time; a photo's lines appear once the photos before it
+// are done.
+
+static int cpu_count(void) {
+  const size_t n = JxlThreadParallelRunnerDefaultNumWorkerThreads();
+  return n >= 1 && n <= 1024 ? (int)n : 1;
+}
+
+static void *runner_create(int threads) {
+  return threads > 1 ? JxlThreadParallelRunnerCreate(NULL, (size_t)threads) : NULL;
+}
+
+// -j 0: how many photos to convert at a time. One photo keeps about half of
+// the cores busy on average (decoding, the gain map and the metadata run on
+// one thread, only libjxl's encoder on all of them), so a few at a time fill
+// the rest: one per 5 cores, at most 3 (beyond that the cores are shared
+// again and the memory adds up: each photo holds its decoded pixels, up to
+// about 1 GB for a 48 MP HDR photo), and one per 4 GB of memory.
+static int auto_workers(size_t count) {
+  int n = (cpu_count() + 2) / 5;  // 8 cores: 2; 14: 3
+  const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGESIZE);
+  if (pages > 0 && page > 0) {
+    const double gb = (double)pages * (double)page / (1024.0 * 1024 * 1024);
+    if (n > (int)(gb / 4)) n = (int)(gb / 4);
+  }
+  if (n > 3) n = 3;
+  if (n < 1) n = 1;
+  if (count && (size_t)n > count) n = (int)count;
+  return n;
+}
+
+// How many photos to convert at a time and with how many threads each, from
+// -j and -t: by default one at a time with all the cores (as the builds
+// without threads do, one thread).
+static void plan_threads(const options_t *opt, size_t count, int *workers, int *threads) {
+  *workers = opt->jobs > 0 ? opt->jobs : auto_workers(count);
+  if (count && (size_t)*workers > count) *workers = (int)count;
+  if (*workers < 1) *workers = 1;
+  *threads = opt->threads > 0 ? opt->threads : (cpu_count() + *workers - 1) / *workers;
+}
+
+typedef struct {
+  textbuf_t out;  // the photo's lines
+  outcome_t res;
+  int ok, finished;
+} slot_t;
+
+typedef struct {
+  const char *dir;
+  const options_t *opt;
+  const job_t *jobs;
+  size_t count;
+  batch_t *batch;
+  int threads;       // per worker
+  size_t next;       // the next photo to take
+  size_t committed;  // photos 0..committed-1 have joined the batch
+  slot_t *slots;     // one per photo
+  pthread_mutex_t lock;
+} pool_t;
+
+static void *pool_worker(void *arg) {
+  pool_t *pool = (pool_t *)arg;
+  t_runner = runner_create(pool->threads);
+  for (;;) {
+    pthread_mutex_lock(&pool->lock);
+    const size_t i = pool->next < pool->count ? pool->next++ : pool->count;
+    pthread_mutex_unlock(&pool->lock);
+    if (i >= pool->count) break;
+    slot_t *s = &pool->slots[i];
+    t_out = &s->out;
+    s->ok = process_job(pool->dir, &pool->jobs[i], i + 1, pool->count, pool->opt, &s->res);
+    t_out = NULL;
+    pthread_mutex_lock(&pool->lock);
+    s->finished = 1;
+    while (pool->committed < pool->count && pool->slots[pool->committed].finished) {
+      slot_t *done = &pool->slots[pool->committed];
+      if (done->out.data) fwrite(done->out.data, 1, done->out.len, stdout);
+      fflush(stdout);
+      free(done->out.data);
+      done->out.data = NULL;
+      if (done->ok) commit_outcome(pool->batch, pool->dir, &pool->jobs[pool->committed], &done->res);
+      pool->committed++;
+    }
+    pthread_mutex_unlock(&pool->lock);
+  }
+  if (t_runner) JxlThreadParallelRunnerDestroy(t_runner);
+  t_runner = NULL;
+  return NULL;
+}
+
+// Returns -1 (nothing converted) only when out of memory.
+static int parallel_batch(const char *dir, const job_t *jobs, size_t count, const options_t *opt,
+                          batch_t *batch, int workers, int threads) {
+  pool_t pool = {dir, opt, jobs, count, batch, threads, 0, 0, NULL, PTHREAD_MUTEX_INITIALIZER};
+  pool.slots = (slot_t *)calloc(count ? count : 1, sizeof *pool.slots);
+  pthread_t *tids = (pthread_t *)calloc((size_t)workers, sizeof *tids);
+  if (!pool.slots || !tids) {
+    free(pool.slots);
+    free(tids);
+    return -1;
+  }
+  int started = 0;
+  while (started < workers && pthread_create(&tids[started], NULL, pool_worker, &pool) == 0) started++;
+  if (!started) pool_worker(&pool);  // no threads to be had: this thread does the work
+  for (int w = 0; w < started; w++) pthread_join(tids[w], NULL);
+  free(tids);
+  free(pool.slots);
+  return 0;
+}
+#endif
 
 // Finds the folder holding `job`: -C, the current folder, $PWD, $SHORTCUTS.
 // In a-Shell, relative paths are the reliable choice: its WASI layer opens
@@ -971,17 +1165,37 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   char *started = path_join(dir_for_files, STARTED_FILE);
   if (started) write_file(started, (const uint8_t *)"", 0);
   free(started);
+  // How the cores are used, when it isn't one photo at a time on all of them.
+  char how[64] = "";
+#ifdef JXLBATCH_THREADS
+  int workers = 1, threads = 1;
+  plan_threads(opt, count, &workers, &threads);
+  if (workers > 1) {
+    snprintf(how, sizeof how, ", %d at a time (%d thread%s each)", workers, threads, threads == 1 ? "" : "s");
+  } else if (threads == 1) {
+    snprintf(how, sizeof how, ", 1 thread");
+  }
+#endif
   if (opt->quality >= 100.0f) {
-    say_wrap("", "jxlbatch: %zu photo%s, lossless, effort %d", count, count == 1 ? "" : "s", opt->effort);
+    say_wrap("", "jxlbatch: %zu photo%s, lossless, effort %d%s", count, count == 1 ? "" : "s", opt->effort, how);
   } else {
-    say_wrap("", "jxlbatch: %zu photo%s, quality %g, effort %d", count, count == 1 ? "" : "s", opt->quality,
-             opt->effort);
+    say_wrap("", "jxlbatch: %zu photo%s, quality %g, effort %d%s", count, count == 1 ? "" : "s", opt->quality,
+             opt->effort, how);
   }
 
   batch_t batch;
   memset(&batch, 0, sizeof batch);
   const double t0 = now_seconds();
-  for (size_t i = 0; i < count; i++) process_job(dir_for_files, &jobs[i], i + 1, count, opt, &batch);
+#ifdef JXLBATCH_THREADS
+  if (workers == 1 || parallel_batch(dir_for_files, jobs, count, opt, &batch, workers, threads) != 0) {
+    t_runner = runner_create(threads);
+    serial_batch(dir_for_files, jobs, count, opt, &batch);
+    if (t_runner) JxlThreadParallelRunnerDestroy(t_runner);
+    t_runner = NULL;
+  }
+#else
+  serial_batch(dir_for_files, jobs, count, opt, &batch);
+#endif
   if (batch.done_file) fclose(batch.done_file);
 
   char in_s[32], out_s[32];
@@ -1259,11 +1473,16 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
-      "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-C DIR]\n"
+  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [-C DIR] JOBFILE\n"
+      "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-t THREADS] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
+      "  -j  photos converted at a time, 0-64 (default 1; 0: from the number of cores)\n"
+      "  -t  threads per photo, 0-64 (default 0: the cores, shared by the photos)\n"
+#ifndef JXLBATCH_THREADS
+      "      (this build has no threads: -j and -t change nothing)\n"
+#endif
       "  -C  folder holding JOBFILE and the jxl_in_* files\n"
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
@@ -1271,12 +1490,13 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0, 0, 0};
+  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
-    if ((!strcmp(a, "-q") || !strcmp(a, "-e") || !strcmp(a, "-C")) && i + 1 < argc) {
+    if ((!strcmp(a, "-q") || !strcmp(a, "-e") || !strcmp(a, "-C") || !strcmp(a, "-j") || !strcmp(a, "-t")) &&
+        i + 1 < argc) {
       const char *v = argv[++i];
       char *end = NULL;
       if (a[1] == 'q') {
@@ -1297,6 +1517,17 @@ int main(int argc, char **argv) {
           return 2;
         }
         opt.effort = (int)e;
+      } else if (a[1] == 'j' || a[1] == 't') {
+        long n = strtol(v, &end, 10);
+        if (end == v || *end || n < 0 || n > 64) {
+          say("ERROR: %s must be between 0 and 64 (got \"%s\")\n", a, v);
+          return 2;
+        }
+        if (a[1] == 'j') {
+          opt.jobs = (int)n;
+        } else {
+          opt.threads = (int)n;
+        }
       } else {
         opt.dir = v;
       }
@@ -1323,11 +1554,11 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
-#ifdef JXLBATCH_THREADS
-  g_runner = JxlThreadParallelRunnerCreate(NULL, JxlThreadParallelRunnerDefaultNumWorkerThreads());
-#endif
   int rc;
   if (mode == 1) {
+#ifdef JXLBATCH_THREADS
+    t_runner = runner_create(opt.threads > 0 ? opt.threads : cpu_count());  // a batch plans its own
+#endif
     rc = selftest(&opt);
   } else if (mode == 2) {
     rc = memtest();
@@ -1338,7 +1569,7 @@ int main(int argc, char **argv) {
     rc = run_batch(&opt, job);
   }
 #ifdef JXLBATCH_THREADS
-  if (g_runner) JxlThreadParallelRunnerDestroy(g_runner);
+  if (t_runner) JxlThreadParallelRunnerDestroy(t_runner);
 #endif
   return rc;
 }

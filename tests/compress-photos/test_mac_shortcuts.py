@@ -15,9 +15,11 @@ FILES = 'Compress Photo Files (macOS)'
 RUN_SHELL = 'is.workflow.actions.runshellscript'
 RUN_APPLESCRIPT = 'is.workflow.actions.runapplescript'
 GET_FILE = 'is.workflow.actions.documentpicker.open'
+MENU = 'is.workflow.actions.choosefrommenu'
 # values for every variable the shortcuts' texts can mention
 VALUES = {
     'Matches': '83',
+    'Cores': 'all',
     'Combined Text': 'IMG_0001.HEIC',
     'Skipped Echo': '',
     'AppleScript Result': 'ID|IMG_0001.HEIC',
@@ -117,9 +119,11 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert len(batch) == 1
     text = ph.render(ph.params(batch[0])['Script'], VALUES)
     assert "QUALITY='83'" in text
+    assert "CORES='all'" in text
     assert 'for f in "$@"; do' in text
     assert (
-        '"$jxlbatch" --mac -q "$QUALITY" -e 7 -C "$WORK" jxl_job.txt' in text
+        '"$jxlbatch" --mac -q "$QUALITY" -e 7 "${cores[@]}" -C "$WORK" jxl_job.txt'
+        in text
     )
     assert 'open -a Terminal "$cmd"' in text
     assert (
@@ -131,6 +135,78 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
             script = ph.params(a)['Script']
             assert 'Done. You can close this window.' in script
             assert 'pkill' not in script  # ends its own window, by pid
+
+
+def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
+    # After the quality list, a Choose from Menu asks how to use the cores:
+    # "All cores (fast)" first (the usual choice), then "One core". Each case
+    # sets the variable Cores to the value the script reads, and the batch
+    # script turns "one" into one photo at a time on one thread (jxlbatch
+    # -j 1 -t 1) and anything else into several photos at a time with all the
+    # cores (-j 0).
+    assert gen.CORES_CHOICES == [
+        ('All cores (fast)', 'all'),
+        ('One core (keeps the Mac responsive)', 'one'),
+    ]
+    for name, routes in ((PHOTOS, 2), (FILES, 1)):
+        actions = shortcuts[name]
+        idents = [ph.ident(a) for a in actions]
+        qualities = [
+            i
+            for i, x in enumerate(idents)
+            if x == 'is.workflow.actions.choosefromlist'
+        ]
+        starts = [
+            i
+            for i, a in enumerate(actions)
+            if ph.ident(a) == MENU and ph.params(a)['WFControlFlowMode'] == 0
+        ]
+        batches = [
+            i
+            for i, a in enumerate(actions)
+            if ph.ident(a) == RUN_SHELL
+            and 'jxl_job.txt' in str(ph.params(a)['Script'])
+        ]
+        assert len(qualities) == len(starts) == len(batches) == routes
+        for quality, start, batch in zip(
+            qualities, starts, batches, strict=True
+        ):
+            assert quality < start < batch
+            p = ph.params(actions[start])
+            assert p['WFMenuPrompt'] == gen.CORES_PROMPT
+            assert p['WFMenuItems'] == [t for t, _ in gen.CORES_CHOICES]
+            cases = [
+                i
+                for i in range(start + 1, len(actions))
+                if ph.ident(actions[i]) == MENU
+                and ph.params(actions[i])['GroupingIdentifier']
+                == p['GroupingIdentifier']
+            ]
+            assert [
+                ph.params(actions[i])['WFControlFlowMode'] for i in cases
+            ] == [1, 1, 2]
+            for i, (title, value) in zip(
+                cases[:-1], gen.CORES_CHOICES, strict=True
+            ):
+                assert ph.params(actions[i])['WFMenuItemTitle'] == title
+                assert idents[i + 1 : i + 3] == [
+                    'is.workflow.actions.gettext',
+                    'is.workflow.actions.setvariable',
+                ]
+                assert (
+                    ph.render(
+                        ph.params(actions[i + 1])['WFTextActionText'], {}
+                    )
+                    == value
+                )
+                assert ph.params(actions[i + 2])['WFVariableName'] == 'Cores'
+
+        for text in ph.shell_scripts(actions, {**VALUES, 'Cores': 'one'}):
+            if '"$jxlbatch"' in text:
+                assert "CORES='one'" in text
+                assert 'one) cores=(-j 1 -t 1);;' in text
+                assert '*) cores=(-j 0);;' in text
+                assert '"${cores[@]}" -C "$WORK" jxl_job.txt' in text
 
 
 def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
@@ -284,6 +360,7 @@ def test_files_passes_real_paths(shortcuts):
         actions,
         {
             'Matches': '72',
+            'Cores': 'all',
             'Combined Text': '/a/b.heic\n\n/c',
             'Skipped Echo': '',
         },

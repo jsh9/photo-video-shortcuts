@@ -3,6 +3,7 @@ jxlbatch's command line and batch behavior, for every build (SIMD and scalar
 WebAssembly, native).
 """
 
+import re
 import zlib
 
 import photo_helpers as ph
@@ -170,3 +171,98 @@ def test_mac_flag_drops_the_share_sheet_hint(encoder, photos, tmp_path):
     assert result.returncode == 0, result.stdout
     assert 'Note: Photos sent' not in result.stdout
     assert 'send as Current' not in result.stdout
+
+
+def has_threads(encoder, folder):
+    """
+    Whether the build has threads (native, macOS): -j and -t then take effect.
+    The WebAssembly builds accept them and convert one photo at a time.
+    """
+    help_text = encoder.run(['--help'], folder).stdout
+    return 'this build has no threads' not in help_text
+
+
+@pytest.mark.parametrize(
+    ('option', 'value'),
+    [('-j', '65'), ('-j', 'x'), ('-t', '-1'), ('-t', '1.5')],
+)
+def test_rejects_bad_jobs_and_threads(encoder, tmp_path, option, value):
+    result = encoder.run([option, value, 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 2
+    assert f'{option} must be between 0 and 64' in result.stdout
+
+
+def stage_with_failures(folder, photos):
+    """
+    Every test photo staged, with a GIF (unsupported) and a missing file among
+    them, so that a batch has failures to report in order too.
+    """
+    staged = ph.stage(folder, list(photos.values()))
+    Image.new('RGB', (8, 8)).save(folder / 'jxl_in_2.orig', 'GIF')
+    (folder / f'jxl_in_{len(staged) - 1}.orig').unlink()
+    return len(staged) - 2
+
+
+def header_and_body(output):
+    """
+    jxlbatch's first paragraph (one line, however it was wrapped) and the rest
+    without its timings, which differ from run to run.
+    """
+    header, body = output.split('\n\n', 1)
+    body = re.sub(r'(, [0-9.]+ s|in [0-9]+ s)(?=\n|$)', '', body)
+    return ' '.join(header.split()), body
+
+
+def test_parallel_batch_matches_sequential(encoder, photos, tmp_path):
+    # Several photos at a time (-j) give the same files, the same
+    # jxl_done.txt and the same output as one at a time: finished photos
+    # join the batch in job order, each printed as one block.
+    runs = {}
+    for label, args in (('one', []), ('three', ['-j', '3'])):
+        folder = tmp_path / label
+        converted = stage_with_failures(folder, photos)
+        result = encoder.run([*args, 'jxl_job.txt'], folder)
+        assert result.returncode == 0, result.stdout
+        header, body = header_and_body(result.stdout)
+        runs[label] = {
+            'header': header,
+            'body': body,
+            'done': (folder / 'jxl_done.txt').read_text(),
+            'files': {
+                p.name: p.read_bytes() for p in folder.glob('jxl_out_*.jxl')
+            },
+        }
+        assert len(runs[label]['files']) == converted
+        assert f'Done: {converted} of {converted + 2} converted' in body
+        assert '2 failed; see the messages above.' in body
+
+    one, three = runs['one'], runs['three']
+    for key in ('body', 'done', 'files'):
+        assert one[key] == three[key], key
+
+    # The header says so, in the builds with threads.
+    assert 'at a time' not in one['header']
+    assert (', 3 at a time (' in three['header']) == has_threads(
+        encoder, tmp_path
+    )
+
+
+def test_one_thread(encoder, tmp_path):
+    # -j 1 -t 1 (the Mac shortcuts' "One core"): one photo at a time on one
+    # thread, said in the header by the builds with threads.
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    result = encoder.run(['-j', '1', '-t', '1', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    header, body = header_and_body(result.stdout)
+    assert header.endswith(', 1 thread') == has_threads(encoder, tmp_path)
+    assert 'Done: 1 of 1 converted' in body
+
+
+def test_auto_jobs_never_exceed_the_photos(encoder, tmp_path):
+    # -j 0 (the Mac shortcuts' "All cores") picks from the cores, but never
+    # more workers than photos: one photo is converted by one.
+    ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
+    result = encoder.run(['-j', '0', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'at a time' not in result.stdout
+    assert 'Done: 1 of 1 converted' in result.stdout

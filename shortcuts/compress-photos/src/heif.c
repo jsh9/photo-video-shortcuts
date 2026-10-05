@@ -439,6 +439,14 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
     snprintf(err, err_len, "out of memory");
     return -1;
   }
+  // libheif (1.23) counts the memory of a context's images in a table keyed
+  // by the context's address, and an image released after its context (as
+  // here: the decoded image outlives the context) is subtracted from whatever
+  // context has that address by then. With several photos decoding at a time
+  // (jxlbatch -j), that wrecks another photo's count and fails it with
+  // "Security limit exceeded", so the total-memory limit is off; the other
+  // limits (image size, block size, ...) stay.
+  heif_context_get_security_limits(ctx)->max_total_memory = 0;
   struct heif_error e = heif_context_read_from_memory_without_copy(ctx, buf, len, NULL);
   if (e.code != heif_error_Ok) {
     snprintf(err, err_len, "unreadable HEIF (%s)", e.message);

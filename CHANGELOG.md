@@ -3,6 +3,34 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.5.0] - 2026-10-05
+
+- Added
+  - The Mac shortcuts ask, after the quality, how to use the Mac's cores. *All
+    cores (fast)* converts several photos at a time, each with a share of the
+    cores: two at a time on an 8-core Mac, three on 14 cores or more, fewer
+    with less than 8 GB of memory; a batch of 18 photos took 7 s instead of
+    10.5 s on a 14-core Mac. *One core (keeps the Mac responsive)* converts one
+    photo at a time on one thread. The files are the same bytes either way, and
+    the log and `jxl_done.txt` read as before, photo by photo in order (a
+    photo's lines appear once the photos before it are done).
+  - `jxlbatch -j N` converts N photos at a time (`-j 0`: from the cores and the
+    memory) and `-t T` sets the threads per photo, in the builds with threads
+    (`jxlbatch-macos`, `build-native.sh`); the WebAssembly build accepts both
+    and converts one photo at a time, as before. The default is unchanged: one
+    photo at a time with all the cores.
+- Fixed
+  - With several HEIF photos decoding at a time, libheif's memory accounting
+    could fail one of them with "Security limit exceeded" (it counts a
+    context's images in a table keyed by the context's address, and `jxlbatch`
+    releases a decoded image after its context). `jxlbatch` turns that one
+    check off for its contexts; the other limits stay.
+- Changed
+  - Update the Mac shortcuts and `jxlbatch-macos` together: the shortcuts pass
+    the new options, which an older encoder rejects (the log then shows its
+    usage text and the version note). The iPhone shortcuts and `jxlbatch.wasm`
+    only carry the new version number; iPhone users don't need to update.
+
 ## [Compress Photos 0.4.0] - 2026-10-04
 
 - Added

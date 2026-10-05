@@ -121,7 +121,8 @@ Compress Photos (macOS)                      (shortcut)
    Shortcuts, menu bar), that selection, through AppleScript (the "selection
    route"); else its own photo picker (the "picker route")
 
-   selection route: asks for a quality preset; Run Shell Script empties
+   selection route: asks for a quality preset and how to use the cores (All
+   cores / One core); Run Shell Script empties
    ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
    Run AppleScript (mac/export.applescript, input: that folder) has Photos
    export the originals into its in/ and returns "id|filename" lines; Run
@@ -136,15 +137,17 @@ Compress Photos (macOS)                      (shortcut)
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
    picker route: keeps the still photos (same as the iPhone), asks for a
-   quality preset, collects the photos' names, then Run Shell Script
+   quality preset and how to use the cores, collects the photos' names, then
+   Run Shell Script
    (/bin/zsh, the photos passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
      /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
      writes jxl_job.txt in compress-photos-macos/ inside Shortcuts' iCloud
      Drive folder (~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/
      Documents), runs
-       jxlbatch -q 83 -e 7 -C "$WORK" jxl_job.txt   (log in jxl_log.txt)
-     and prints jxl_done.txt's lines:
+       jxlbatch --mac -q 83 -e 7 -j 0 -C "$WORK" jxl_job.txt
+     (-j 1 -t 1 for One core; the log in ~/Library/Caches, below) and prints
+     jxl_done.txt's lines:
        jxl_out_N.jxl|N|delete or keep|Name.jxl
          then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
    to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
@@ -174,8 +177,9 @@ Compress Photos (macOS)                      (shortcut)
    (selection.zsh), so a copy is never added to the wrong albums.
 
 Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
-   files and folders from Finder; each input's File Path; a quality preset;
-   Run Shell Script with common.zsh + files.zsh: stages each file (a folder's
+   files and folders from Finder; each input's File Path; a quality preset
+   and the cores choice; Run Shell Script with common.zsh + files.zsh: stages
+   each file (a folder's
    HEIF/JPEG/PNG files), runs jxlbatch, moves each jxl_out_N.jxl next to its
    original as Name.jxl (never replacing: "Name 2.jxl"; ~/Pictures/JPEG XL
    when the original's folder is unknown or not writable), prints the log and
@@ -205,6 +209,34 @@ so results land next to the originals even when Shortcuts passed a temporary
 copy. A `JXLBATCH` environment variable overrides the encoder search (the tests
 use it). The script never exits nonzero for a conversion problem: it writes
 `ERROR:` lines to the log instead, which the shortcut then shows.
+
+**Several photos at a time.** The shortcuts' second question, *Cores to use*,
+becomes `jxlbatch -j 0` (*All cores*) or `-j 1 -t 1` (*One core*) in `run.zsh`.
+In the builds with threads, `-j N` starts N worker threads (`parallel_batch` in
+`jxlbatch.c`), each taking the next photo with a libjxl thread pool of its own
+(`-t` threads each; a pool serves one encoder at a time) and with `say()`
+writing to the photo's buffer (a thread-local pointer), so that the photos'
+lines don't mix; finished photos join the batch in job order (`commit_outcome`:
+the `jxl_done.txt` line and the counts), each printed as one block, so the
+output and `jxl_done.txt` are the same as with one photo at a time, apart from
+the timings (`test_encoder_cli.py` and `test_mac_script.py` check this). `-j 0`
+picks one worker per 5 cores, at most 3 and at most one per 4 GB of memory,
+never more than there are photos, and `-t 0` divides the cores among the
+workers. One photo alone keeps about half of the cores busy on average
+(decoding, the gain map and the metadata run on one thread, only libjxl's
+encoder on all of them), which is where the gain comes from: 18 photos, 8 of
+them 11 to 24 MP HDR, took 7 s instead of 10.5 s on a 14-core Mac, with 2, 3
+and 4 at a time within half a second of each other. Everything a worker touches
+is its own (libheif contexts, libjxl encoders, tinyxml2 documents); stb_image's
+failure reason is a plain global (`STBI_NO_THREAD_LOCALS`, for WebAssembly), so
+two photos failing to decode at the same moment could swap messages, nothing
+worse. One trap: libheif 1.23 counts a context's image memory in a table keyed
+by the context's address, and `heif.c` releases a decoded image after its
+context (the image outlives it), so with concurrent decodes a stale release
+lands on another context's count and fails that photo with "Security limit
+exceeded"; `heif.c` sets each context's `max_total_memory` to 0 (off), and the
+other limits stay. The WebAssembly build accepts `-j` and `-t` and converts one
+photo at a time.
 
 What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
 changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
