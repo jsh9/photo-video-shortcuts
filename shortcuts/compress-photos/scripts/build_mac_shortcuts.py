@@ -86,6 +86,10 @@ WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
 # leaves the originals alone (a lookup by file name could pick the wrong
 # photo).
 ORIGINALS_ALBUM = 'Compressed to JXL'
+# Where every route keeps its log and the progress window's script: a plain
+# folder, so that Terminal (the progress window) never needs access to
+# iCloud Drive or Pictures (common.zsh sets the same path).
+LOG_DIR = '"$HOME/Library/Caches/compress-photos-macos"'
 # Where the file shortcut saves when it can't write next to the original.
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
@@ -189,12 +193,13 @@ def finish_script(work):
     folder.
     """
     return (
-        f'W={work}\n'
-        '{ echo; cat; echo; } >> "$W/jxl_log.txt"\n'
-        'if [ -e "$W/progress.command" ]; then\n'
-        '  echo "Done. You can close this window." >> "$W/jxl_log.txt"\n'
+        f'W={work}; L={LOG_DIR}\n'
+        '{ echo; cat; echo; } >> "$L/jxl_log.txt"\n'
+        'if [ -e "$L/progress.command" ]; then\n'
+        '  echo "Done. You can close this window." >> "$L/jxl_log.txt"\n'
         '  sleep 1\n'
         "  pkill -f 'tail -n [+]1 -f .*compress-photos-macos/jxl_log.txt' 2>/dev/null\n"
+        '  rm -f "$L/progress.command"\n'
         'fi\n'
         'rm -rf "$W"'
     )
@@ -295,9 +300,7 @@ def selection_route(b):
     imported = b.match_text(b.item_at_index(lines, 1), r'\d+')
     collected = b.match_text(b.item_at_index(lines, 2), r'\d+')
     log = b.text(
-        b.run_shell_script(
-            f'cat {WORK_SELECTION}/jxl_log.txt 2>/dev/null || true'
-        ),
+        b.run_shell_script(f'cat {LOG_DIR}/jxl_log.txt 2>/dev/null || true'),
         '\n',
         outcome,
     )
@@ -405,9 +408,7 @@ def picker_route(b):
     # The log: shown when it has a note, an error, a failed photo or a copy
     # that didn't reach Photos (what the iPhone user reads in a-Shell).
     log = b.text(
-        b.run_shell_script(
-            f'cat {WORK_PHOTOS}/jxl_log.txt 2>/dev/null || true'
-        ),
+        b.run_shell_script(f'cat {LOG_DIR}/jxl_log.txt 2>/dev/null || true'),
         '\n',
         b.combine(variable('Not Saved'), '\n'),
     )

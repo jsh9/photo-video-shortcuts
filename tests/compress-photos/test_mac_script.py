@@ -71,6 +71,10 @@ class Mac:
         # the selection route's: in ~/Pictures, where Photos' sandbox reaches
         self.selection_work = self.home / 'Pictures' / '.compress-photos-macos'
         (self.selection_work / 'in').mkdir(parents=True)
+        # every route's log and progress-window script
+        self.logdir = (
+            self.home / 'Library' / 'Caches' / 'compress-photos-macos'
+        )
         self.jxlbatch = jxlbatch
 
     def env(self, jxlbatch=None, watch=False):
@@ -125,12 +129,13 @@ class Mac:
     def follow_ups(self, shortcut):
         """The route's log script and finish script, in order."""
         work = '/Pictures/.' if shortcut == 'selection' else 'iCloud~'
-        return [
-            s
-            for s in self.scripts(shortcut)
-            if work in s
-            and (s.startswith('cat ') or 'Done. You can close' in s)
+        scripts = self.scripts(shortcut)
+        show_log = next(s for s in scripts if s.startswith('cat '))
+        finish = [
+            s for s in scripts if 'Done. You can close' in s and work in s
         ]
+        assert len(finish) == 1
+        return [show_log, finish[0]]
 
     def run(self, script, *args, jxlbatch=None, stdin='', watch=False):
         """
@@ -154,7 +159,7 @@ class Mac:
 
     @property
     def log(self):
-        return (self.work / 'jxl_log.txt').read_text()
+        return (self.logdir / 'jxl_log.txt').read_text()
 
 
 @pytest.fixture
@@ -203,9 +208,10 @@ def test_photos_follow_up_scripts_read_the_log_and_clean_up(mac):
     assert mac.run(show_log).stdout == mac.log
     assert mac.run(finish, stdin='outcome line').returncode == 0
     assert not mac.work.exists()
-    # the log script after cleanup: nothing, and no error
+    # the log stays (the last run's, in ~/Library/Caches) with the outcome
     result = mac.run(show_log)
-    assert (result.returncode, result.stdout) == (0, '')
+    assert result.returncode == 0
+    assert result.stdout.rstrip().endswith('outcome line')
 
 
 def test_photos_nothing_converted_prints_nothing(mac, gen):
@@ -298,7 +304,7 @@ def test_selection_converts_exported_originals(mac):
         'IMG_0001.jxl',
         'IMG_0002.jxl',
     ]
-    log = (mac.selection_work / 'jxl_log.txt').read_text()
+    log = mac.log
     assert log.startswith(
         'Skipped 1 Live Photo(s), 1 video(s): only still photos are converted.'
     )
@@ -314,27 +320,21 @@ def test_selection_unknown_id_and_export_error(mac, gen):
     assert out.splitlines() == [
         f'{mac.selection_work}/out/IMG_0007 (1).jxl||delete|IMG_0007 (1).jxl'
     ]
-    log = (mac.selection_work / 'jxl_log.txt').read_text()
+    log = mac.log
     assert log.startswith('ERROR: Photos could not export')
     assert re.search(gen.WARNINGS, log)
 
 
 def test_selection_nothing_exported(mac, gen):
     assert mac.batch('selection', lines='') == ''
-    assert (
-        'ERROR: no photos to convert.'
-        in (mac.selection_work / 'jxl_log.txt').read_text()
-    )
+    assert 'ERROR: no photos to convert.' in mac.log
 
 
 def test_selection_follow_up_scripts(mac):
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     mac.batch('selection', lines='A1|IMG_0001.HEIC\n')
     show_log, finish = mac.follow_ups('selection')
-    assert (
-        mac.run(show_log).stdout
-        == (mac.selection_work / 'jxl_log.txt').read_text()
-    )
+    assert mac.run(show_log).stdout == mac.log
     assert mac.run(finish, stdin='outcome line').returncode == 0
     assert not mac.selection_work.exists()
 
@@ -346,18 +346,18 @@ def test_progress_window_follows_the_log_and_ends_with_done(mac):
     a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
     result = mac.run(mac.main_script('photos'), a, watch=True)
     assert result.returncode == 0, result.stderr
-    command = (mac.work / 'progress.command').read_text()
+    command = (mac.logdir / 'progress.command').read_text()
     assert command.startswith('#!/bin/zsh\nexec tail -n +1 -f ')
     # zsh's (q) quoting escapes spaces and tildes
-    assert str(mac.work / 'jxl_log.txt') in command.replace('\\', '')
+    assert str(mac.logdir / 'jxl_log.txt') in command.replace('\\', '')
     assert (mac.root / 'opened.txt').read_text().splitlines() == [
         '-a',
         'Terminal',
-        str(mac.work / 'progress.command'),
+        str(mac.logdir / 'progress.command'),
     ]
     # a real tail, as the Terminal window would run it
     tail = subprocess.Popen(
-        ['tail', '-n', '+1', '-f', str(mac.work / 'jxl_log.txt')],
+        ['tail', '-n', '+1', '-f', str(mac.logdir / 'jxl_log.txt')],
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -381,7 +381,7 @@ def test_progress_window_follows_the_log_and_ends_with_done(mac):
 def test_no_progress_window_when_off(mac):
     a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
     mac.batch('photos', a)
-    assert not (mac.work / 'progress.command').exists()
+    assert not (mac.logdir / 'progress.command').exists()
     assert not (mac.root / 'opened.txt').exists()
 
 
@@ -391,13 +391,13 @@ def test_files_progress_window_ends_in_the_script(mac):
     result = mac.run(mac.main_script('files', lines=f'{a}\n'), a, watch=True)
     assert result.returncode == 0, result.stderr
     assert (mac.root / 'opened.txt').read_text().splitlines()[-1] == str(
-        mac.work_files / 'progress.command'
+        mac.logdir / 'progress.command'
     )
     # the log ended with the count and "Done" before the folder went away
     assert 'Wrote 1 JPEG XL file(s).\nDone. You can close this window.' in (
         result.stdout
     )
-    assert not (mac.work_files / 'jxl_log.txt').exists()
+    assert not (mac.logdir / 'progress.command').exists()
 
 
 def test_files_next_to_originals_folders_and_fallback(mac):

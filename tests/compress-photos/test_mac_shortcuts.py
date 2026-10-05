@@ -121,7 +121,7 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert (
         '"$jxlbatch" --mac -q "$QUALITY" -e 7 -C "$WORK" jxl_job.txt' in text
     )
-    assert 'open -a Terminal "$WORK/progress.command"' in text
+    assert 'open -a Terminal "$LOGDIR/progress.command"' in text
     assert 'jxl_in_$' in text and 'jxl_done.txt' in text
     for a in scripts:
         if ph.params(a).get('InputMode') == 'to stdin':
@@ -163,9 +163,9 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
     picker_texts = [
         text
         for text in ph.shell_scripts(actions, VALUES)
-        if '/Pictures/.' not in text
+        if '/Pictures/.' not in text and not text.startswith('cat ')
     ]
-    assert len(picker_texts) == 3  # the batch, the log, the cleanup
+    assert len(picker_texts) == 2  # the batch and the finish script
     for text in picker_texts:
         assert 'iCloud~is~workflow~my~workflows/Documents' in text
         assert gen.WORK_NAME in text

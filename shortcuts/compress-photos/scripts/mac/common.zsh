@@ -2,7 +2,11 @@
 # with jxlbatch. Help: @HELP_URL@
 setopt extendedglob
 @WORK_SETUP@
-LOG="$WORK/jxl_log.txt"
+# The log (and the progress window's script) stay out of iCloud Drive and
+# Pictures: Terminal reads them without asking for access to those folders.
+LOGDIR="$HOME/Library/Caches/compress-photos-macos"
+mkdir -p "$LOGDIR"
+LOG="$LOGDIR/jxl_log.txt"
 : > "$LOG"
 @WORK_CHECK@
 VERSION='@VERSION@'

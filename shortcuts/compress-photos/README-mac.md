@@ -142,11 +142,14 @@ iPhone's need a-Shell, these need Run Shell Script.
   whether Shortcuts may control Photos: choose Always Allow, or it asks on
   every run.
 - **Progress:** a Terminal window opens and follows the conversion, photo by
-  photo, as a-Shell shows it on the iPhone. When everything is done it ends
-  with "Done. You can close this window." (Terminal may close it by itself,
-  depending on its "When the shell exits" setting.) To do without it, open the
-  shortcut in Shortcuts, find the Run Shell Script action whose script starts
-  with `# Compress Photos (macOS)`, and change its line `WATCH=${WATCH:-1}` to
+  photo, as a-Shell shows it on the iPhone (the log it follows is in
+  `~/Library/Caches/compress-photos-macos`, so Terminal needs no access to
+  iCloud Drive or Pictures). When everything is done it ends with "Done. You
+  can close this window." The last run's log stays in that folder as
+  `jxl_log.txt`. (Terminal may close it by itself, depending on its "When the
+  shell exits" setting.) To do without it, open the shortcut in Shortcuts, find
+  the Run Shell Script action whose script starts with
+  `# Compress Photos (macOS)`, and change its line `WATCH=${WATCH:-1}` to
   `WATCH=0`. The log also opens in Quick Look when it has a note, an error or a
   failed photo.
 - If Photos is set not to copy imported items into the library (Photos ▸
