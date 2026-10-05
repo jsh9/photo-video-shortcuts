@@ -113,7 +113,9 @@ itself.
    Files (macOS)* → Add Shortcut.
 
 4. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
-   app with one photo, and allow Photos access when asked.
+   app with one photo, and allow Photos access when asked. The first time you
+   run it from Photos, macOS asks whether Shortcuts may control Photos: choose
+   Always Allow.
 
 How to use them, and what to do if they don't show up in Photos' Share menu or
 Finder's Quick Actions:

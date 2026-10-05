@@ -82,7 +82,11 @@ ______________________________________________________________________
    then double-click each `.shortcut` → Add Shortcut.
 
 4. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
-   app with one photo, and allow it to access Photos when asked. For the Share
+   app with one photo, and allow it to access Photos when asked. The first time
+   you run it from Photos (select a photo, Share ▸ *Compress Photos (macOS)*),
+   macOS asks whether Shortcuts may control Photos: choose Always Allow. (Don't
+   Allow makes the shortcut open its picker instead, every time; the permission
+   is under System Settings ▸ Privacy & Security ▸ Automation.) For the Share
    menu in Photos, the Shortcuts sharing extension must be enabled (System
    Settings ▸ General ▸ Login Items & Extensions ▸ Sharing); if the shortcut
    isn't offered there, check *Show in Share Sheet* in its details (the ⓘ
