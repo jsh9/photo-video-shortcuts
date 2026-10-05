@@ -25,8 +25,11 @@ encoder. Every release includes the current files of all shortcuts.
     up with a `whose id is` filter, which scans the whole library (about 1.6 s
     per photo in a library of 58,000 items), and the album pass asked Photos
     for each album separately (about 17 ms each, 12 s for 689 albums). The
-    originals are now referenced by id directly, and the albums' contents are
-    read one folder at a time: for 37 photos in that library, about 65 s less.
+    originals are now referenced by id directly, the files are imported in one
+    call instead of one per file (about 0.5 s each), and the albums' contents
+    are read one folder at a time. The log's last lines now say how long Photos
+    took for each of these steps, and the progress window says when Photos'
+    part begins.
   - With several HEIF photos decoding at a time, libheif's memory accounting
     could fail one of them with "Security limit exceeded" (it counts a
     context's images in a table keyed by the context's address, and `jxlbatch`

@@ -253,13 +253,18 @@ macOS 26): every call into Photos takes about 17 ms, so the album pass asks for
 `id of media items of albums` once per folder (5 s in all) rather than once per
 album (12 s), and a `media items whose id is X` filter scans the whole library
 (1.6 s each), so an original is referenced as `media item id X` instead (no
-measurable cost). Run AppleScript's text must be plain: with a Shortcuts
-variable in it the script doesn't compile and the action silently returns
-nothing, so values go in through the action's input (`item 1 of input`), and
-`item 1 of selection` must be read from a variable (`set sel to selection`),
-not from `selection` directly. What the Mac doesn't do (macOS 26): Photos'
-Share menu and right-click ▸ Shortcuts hand the shortcut an `NSItemProvider`
-with a file URL of a JPEG export that Shortcuts' extension can't represent
+measurable cost). Importing one file per `import` call took about 0.5 s each,
+so the files go in one call, matched to their lines by `filename`. AppleScript
+copies a list on every assignment, so the album pass uses each folder's id
+lists as they come instead of building a list of all of them. Photos'
+`whose id is in {...}` is not supported (error -1700). Run AppleScript's text
+must be plain: with a Shortcuts variable in it the script doesn't compile and
+the action silently returns nothing, so values go in through the action's input
+(`item 1 of input`), and `item 1 of selection` must be read from a variable
+(`set sel to selection`), not from `selection` directly. What the Mac doesn't
+do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the shortcut
+an `NSItemProvider` with a file URL of a JPEG export that Shortcuts' extension
+can't represent
 (`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
 `public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
 picker; and Delete Photos isn't registered in the share extension at all, and

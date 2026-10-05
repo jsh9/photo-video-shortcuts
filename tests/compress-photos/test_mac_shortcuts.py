@@ -264,7 +264,10 @@ def test_delete_flag_only_read_by_the_import_script(gen, shortcuts):
         and ph.params(a).get('WFMatchTextPattern') == '^delete$'
     ]
     script = gen.applescript_text('import')
-    assert 'if flag is "delete" then set end of toCollect to origId' in script
+    assert (
+        'if (item i of flags) is "delete" then set end of toCollect to origId'
+        in script
+    )
 
 
 def test_picker_route_leaves_the_originals_alone(gen, shortcuts):
