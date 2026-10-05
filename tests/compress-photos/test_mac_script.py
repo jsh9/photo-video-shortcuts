@@ -68,6 +68,9 @@ class Mac:
         self.icloud.mkdir(parents=True)
         self.work = self.icloud / 'compress-photos-macos'
         self.work_files = self.tmp / 'compress-photos-macos'
+        # the selection route's: in ~/Pictures, where Photos' sandbox reaches
+        self.selection_work = self.home / 'Pictures' / '.compress-photos-macos'
+        (self.selection_work / 'in').mkdir(parents=True)
         self.jxlbatch = jxlbatch
 
     def env(self, jxlbatch=None):
@@ -78,16 +81,43 @@ class Mac:
             HOME=str(self.home),
         )
 
+    # what the main script of each route contains
+    MARKERS = {
+        'photos': 'for f in "$@"; do',  # the picker route (files as input)
+        'selection': 'in/*(.N)',  # the photos selected in Photos
+        'files': 'paths=(',  # the Finder shortcut
+    }
+
     def scripts(self, shortcut, quality='83', lines='', skipped=''):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
-            self.shortcuts[shortcut],
+            self.shortcuts['photos' if shortcut == 'selection' else shortcut],
             {
                 'Matches': quality,
                 'Combined Text': lines,
                 'Skipped Echo': skipped,
+                'AppleScript Result': lines,  # the selection route's IDS
             },
         )
+
+    def main_script(self, shortcut, **values):
+        """The route's conversion script."""
+        found = [
+            s
+            for s in self.scripts(shortcut, **values)
+            if self.MARKERS[shortcut] in s
+        ]
+        assert len(found) == 1
+        return found[0]
+
+    def follow_ups(self, shortcut):
+        """The route's log script and cleanup script, in order."""
+        work = '/Pictures/.' if shortcut == 'selection' else 'iCloud~'
+        return [
+            s
+            for s in self.scripts(shortcut)
+            if s.startswith(('cat ', 'rm -rf ')) and work in s
+        ]
 
     def run(self, script, *args, jxlbatch=None):
         """Runs a script as Shortcuts does: zsh, the files as arguments."""
@@ -99,8 +129,8 @@ class Mac:
         )
 
     def batch(self, shortcut, *args, **values):
-        """The shortcut's main script (the one with the photos as input)."""
-        result = self.run(self.scripts(shortcut, **values)[0], *args)
+        """Runs the route's conversion script."""
+        result = self.run(self.main_script(shortcut, **values), *args)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ''
         return result.stdout
@@ -152,7 +182,7 @@ def test_photos_prints_one_line_per_result_with_the_path(mac):
 def test_photos_follow_up_scripts_read_the_log_and_clean_up(mac):
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     mac.batch('photos', a)
-    _, show_log, cleanup = mac.scripts('photos')
+    show_log, cleanup = mac.follow_ups('photos')
     assert mac.run(show_log).stdout == mac.log
     assert mac.run(cleanup).returncode == 0
     assert not mac.work.exists()
@@ -205,7 +235,7 @@ def test_warnings_pattern(gen):
 
 def test_encoder_missing_is_reported_in_the_log(mac):
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
-    result = mac.run(mac.scripts('photos')[0], a, jxlbatch='/nonexistent')
+    result = mac.run(mac.main_script('photos'), a, jxlbatch='/nonexistent')
     assert (result.returncode, result.stdout, result.stderr) == (0, '', '')
     assert 'ERROR: jxlbatch is not installed' in mac.log
     assert '~/.local/bin/jxlbatch' in mac.log
@@ -217,9 +247,79 @@ def test_encoder_of_another_version_is_noted(mac):
     fake.write_text('#!/bin/sh\necho "jxlbatch 0.0.1 (fake)"\n')
     fake.chmod(0o755)
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
-    result = mac.run(mac.scripts('photos')[0], a, jxlbatch=fake)
+    result = mac.run(mac.main_script('photos'), a, jxlbatch=fake)
     assert result.returncode == 0
     assert f'! {fake} is not jxlbatch {VERSION}' in mac.log
+
+
+def exported(mac, fixture, name):
+    """A file as Photos exports it into the selection route's work folder."""
+    return photo(mac.selection_work / 'in', fixture, name)
+
+
+def test_selection_converts_exported_originals(mac):
+    # Photos exported the originals; IDS maps file names to photo ids. A
+    # Live Photo is a photo plus a .mov with the same name (skipped, as on
+    # the iPhone), a video alone is skipped, other files are left to
+    # jxlbatch.
+    exported(mac, 'hdr/o1.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/not_used_color.heic', 'IMG_0002.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0003.HEIC')
+    (mac.selection_work / 'in' / 'IMG_0003.mov').write_text('video')
+    (mac.selection_work / 'in' / 'clip.MOV').write_text('video')
+    (mac.selection_work / 'in' / 'notes.txt').write_text('not a photo')
+    out = mac.batch(
+        'selection',
+        lines='A1|IMG_0001.HEIC\nA2|IMG_0002.HEIC\nA3|IMG_0003.HEIC\nA4|clip.MOV\n',
+    )
+    folder = mac.selection_work / 'out'
+    assert out.splitlines() == [
+        f'{folder}/IMG_0001.jxl|A1|delete|IMG_0001.jxl',
+        f'{folder}/IMG_0002.jxl|A2|keep|IMG_0002.jxl',
+    ]
+    assert sorted(p.name for p in folder.iterdir()) == [
+        'IMG_0001.jxl',
+        'IMG_0002.jxl',
+    ]
+    log = (mac.selection_work / 'jxl_log.txt').read_text()
+    assert log.startswith(
+        'Skipped 1 Live Photo(s), 1 video(s): only still photos are converted.'
+    )
+    assert '[3/3] notes.txt' in log and 'unsupported format' in log
+    assert 'IMG_0003' not in (mac.selection_work / 'jxl_job.txt').read_text()
+    # the exported originals are untouched for Photos' sake
+    assert (mac.selection_work / 'in' / 'IMG_0001.HEIC').exists()
+
+
+def test_selection_unknown_id_and_export_error(mac, gen):
+    exported(mac, 'hdr/srgb.heic', 'IMG_0007 (1).HEIC')
+    out = mac.batch('selection', lines='ERROR: Photos could not export\n')
+    assert out.splitlines() == [
+        f'{mac.selection_work}/out/IMG_0007 (1).jxl||delete|IMG_0007 (1).jxl'
+    ]
+    log = (mac.selection_work / 'jxl_log.txt').read_text()
+    assert log.startswith('ERROR: Photos could not export')
+    assert re.search(gen.WARNINGS, log)
+
+
+def test_selection_nothing_exported(mac, gen):
+    assert mac.batch('selection', lines='') == ''
+    assert (
+        'ERROR: no photos to convert.'
+        in (mac.selection_work / 'jxl_log.txt').read_text()
+    )
+
+
+def test_selection_follow_up_scripts(mac):
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    mac.batch('selection', lines='A1|IMG_0001.HEIC\n')
+    show_log, cleanup = mac.follow_ups('selection')
+    assert (
+        mac.run(show_log).stdout
+        == (mac.selection_work / 'jxl_log.txt').read_text()
+    )
+    assert mac.run(cleanup).returncode == 0
+    assert not mac.selection_work.exists()
 
 
 def test_files_next_to_originals_folders_and_fallback(mac):

@@ -495,16 +495,21 @@ class Builder:
             'Shell Script Result',
         )
 
-    def run_applescript(self, *script):
+    def run_applescript(self, script, input_ref=None):
         """
-        Run AppleScript. Its result is coerced to Shortcuts items: a file
-        (``POSIX file "..."``) becomes a File item.
+        Run AppleScript. ``script`` is plain text: a Shortcuts variable inside
+        the script text keeps the script from compiling (it then produces no
+        output, without an error). Values go in through ``input_ref``, which
+        the script reads as ``input`` in ``on run {input, parameters}`` (a
+        list; a text item arrives as text). The result comes back as text; a
+        file result comes back as nothing (checked on macOS 26).
         """
+        params = {'Script': script}
+        if input_ref is not None:
+            params['Input'] = attachment(input_ref)
+
         return output_of(
-            self.add(
-                'is.workflow.actions.runapplescript',
-                {'Script': plain_or_text(*script)},
-            ),
+            self.add('is.workflow.actions.runapplescript', params),
             'AppleScript Result',
         )
 

@@ -6,15 +6,18 @@ encoder. Every release includes the current files of all shortcuts.
 ## [Compress Photos 0.4.0] - 2026-10-04
 
 - Added
-  - Mac shortcuts. *Compress Photos (macOS)* converts photos from the Photos
-    library (the Share menu in Photos, or a photo picker), saves the JPEG XL
-    copies to Photos in the same albums, and offers to delete the originals,
-    from the Share menu too. *Compress Photo Files (macOS)* converts image
-    files and folders from Finder's Quick Actions, writing each `.jxl` next to
-    its original. Both run `jxlbatch` through Shortcuts' Run Shell Script
-    action, with no a-Shell, no helper shortcut and no handoff, and show the
-    encoder's log in Quick Look when it notes anything. See
-    `shortcuts/compress-photos/README-mac.md`.
+  - Mac shortcuts. *Compress Photos (macOS)* converts the photos selected in
+    Photos (Share menu, right-click ▸ Shortcuts, or the menu bar while Photos
+    is in front): Photos exports the original files, the JPEG XL copies are
+    imported into the originals' albums, and the originals whose copy has
+    everything they have are collected in the album "Compressed to JPEG XL" for
+    you to delete. Started elsewhere, it shows a photo picker, saves the copies
+    to Photos in the originals' albums and offers to delete the originals.
+    *Compress Photo Files (macOS)* converts image files and folders from
+    Finder's Quick Actions, writing each `.jxl` next to its original. Both run
+    `jxlbatch` through Shortcuts' Run Shell Script action, with no a-Shell, no
+    helper shortcut and no handoff, and show the encoder's log in Quick Look
+    when it notes anything. See `shortcuts/compress-photos/README-mac.md`.
   - `jxlbatch-macos`: a native, statically linked build of the encoder for
     Apple silicon Macs running macOS 14 or later, with the same libraries and
     settings as `jxlbatch.wasm`, so its files are byte for byte the same, and

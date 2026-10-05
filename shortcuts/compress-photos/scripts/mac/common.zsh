@@ -2,8 +2,6 @@
 # with jxlbatch. Help: @HELP_URL@
 setopt extendedglob
 @WORK_SETUP@
-rm -rf "$WORK"
-mkdir -p "$WORK"
 LOG="$WORK/jxl_log.txt"
 : > "$LOG"
 @WORK_CHECK@

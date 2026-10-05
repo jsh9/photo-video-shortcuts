@@ -116,10 +116,28 @@ qualities, with the same visual quality (SSIMULACRA2).
 
 ```
 Compress Photos (macOS)                      (shortcut)
-   photos: from the Share menu in Photos, or else picked in its own photo picker
-   keeps the still photos (same as the iPhone), asks for a quality preset,
-   collects the photos' names, then Run Shell Script (/bin/zsh, the photos
-   passed as files, "$@"):
+   photos: the shortcut's input if any (never on the Mac, see below); else,
+   if Photos is in front with photos selected (Share menu, right-click >
+   Shortcuts, menu bar), that selection, through AppleScript (the "selection
+   route"); else its own photo picker (the "picker route")
+
+   selection route: asks for a quality preset; Run Shell Script empties
+   ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
+   Run AppleScript (mac/export.applescript, input: that folder) has Photos
+   export the originals into its in/ and returns "id|filename" lines; Run
+   Shell Script (common.zsh + selection.zsh, IDS = those lines) stages in/*
+   (a photo plus a .mov of the same name is a Live Photo: skipped; a video
+   alone: skipped), runs jxlbatch, renames each result to out/Name.jxl and
+   prints "path|id|delete or keep|Name.jxl"; Run AppleScript
+   (mac/import.applescript, input: those lines) has Photos import each file,
+   add it to every album its original is in (one pass over all albums,
+   nested ones too), and add the "delete" originals to the album
+   "Compressed to JPEG XL" (a script can't delete photos); returns
+   "imported=N", "collected=M" and "! ..." lines, which join the log
+
+   picker route: keeps the still photos (same as the iPhone), asks for a
+   quality preset, collects the photos' names, then Run Shell Script
+   (/bin/zsh, the photos passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
      /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
      writes jxl_job.txt in compress-photos-macos/ inside Shortcuts' iCloud
@@ -173,11 +191,19 @@ What the Mac shortcuts rely on, to confirm on a Mac when a Shortcuts version
 changes (see `docs/compress-photos-mac-design.md`, section 5): the plist keys
 of Run Shell Script (`Script`, `Shell`, `Input`, `InputMode` with
 `as arguments`; confirmed on macOS 26) and Get File (`WFGetFilePath`,
-`WFFileStorageService` iCloud Drive; confirmed), and that Save to Photo Album
-accepts a `.jxl` File and adds it to albums by name (confirmed). What the Mac
-doesn't do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the
-shortcut an `NSItemProvider` with a file URL of a JPEG export that Shortcuts'
-extension can't represent
+`WFFileStorageService` iCloud Drive; confirmed), that Save to Photo Album
+accepts a `.jxl` File and adds it to albums by name (confirmed), and Photos'
+AppleScript interface (`selection`, `export ... with using originals`,
+`import ... skip check duplicates`, `albums`, `folders`, `add`; confirmed: the
+originals export in well under a second, an import keeps the file name, and one
+album scan of 151 albums takes about 3 s). Run AppleScript's text must be
+plain: with a Shortcuts variable in it the script doesn't compile and the
+action silently returns nothing, so values go in through the action's input
+(`item 1 of input`), and `item 1 of selection` must be read from a variable
+(`set sel to selection`), not from `selection` directly. What the Mac doesn't
+do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the shortcut
+an `NSItemProvider` with a file URL of a JPEG export that Shortcuts' extension
+can't represent
 (`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
 `public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
 picker; and Delete Photos isn't registered in the share extension at all, and

@@ -5,6 +5,8 @@ AppleScript actions, the quality presets, and the file names and lines they
 share with jxlbatch. The script itself runs for real in test_mac_script.py.
 """
 
+import pathlib
+
 import photo_helpers as ph
 import pytest
 
@@ -13,6 +15,13 @@ FILES = 'Compress Photo Files (macOS)'
 RUN_SHELL = 'is.workflow.actions.runshellscript'
 RUN_APPLESCRIPT = 'is.workflow.actions.runapplescript'
 GET_FILE = 'is.workflow.actions.documentpicker.open'
+# values for every variable the shortcuts' texts can mention
+VALUES = {
+    'Matches': '83',
+    'Combined Text': 'IMG_0001.HEIC',
+    'Skipped Echo': '',
+    'AppleScript Result': 'ID|IMG_0001.HEIC',
+}
 
 
 @pytest.fixture(scope='module')
@@ -131,7 +140,14 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
     assert ph.render(
         p['WFGetFilePath'], {'Item from List': 'jxl_out_1.jxl'}
     ) == (f'{gen.WORK_NAME}/jxl_out_1.jxl')
-    assert not [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
+    # the picker route (the Otherwise branch of "If Selection") runs no
+    # AppleScript; the selection route does (see its own test)
+    for action, inside in ph.inside_if_on(actions, "'Selection'"):
+        if ph.ident(action) == RUN_APPLESCRIPT:
+            assert (
+                inside or 'is Photos in front' in ph.params(action)['Script']
+            )
+
     idents = [ph.ident(a) for a in actions]
     assert (
         idents.index(GET_FILE)
@@ -141,9 +157,13 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
         < idents.index('is.workflow.actions.savetocameraroll')
     )
     # the script's work folder is that folder, and the follow-up scripts use it
-    for text in ph.shell_scripts(
-        actions, {'Matches': '', 'Combined Text': '', 'Skipped Echo': ''}
-    ):
+    picker_texts = [
+        text
+        for text in ph.shell_scripts(actions, VALUES)
+        if '/Pictures/.' not in text
+    ]
+    assert len(picker_texts) == 3  # the batch, the log, the cleanup
+    for text in picker_texts:
         assert 'iCloud~is~workflow~my~workflows/Documents' in text
         assert gen.WORK_NAME in text
 
@@ -182,24 +202,27 @@ def test_photos_delete_prompt_only_with_originals_to_delete(shortcuts):
 
 
 def test_photos_log_shown_only_with_warnings(gen, shortcuts):
-    # Quick Look runs inside "If (log matches WARNINGS) has any value", and
-    # before the delete prompt.
+    # In each route, Quick Look runs inside "If (log matches WARNINGS) has
+    # any value", and before the delete prompt.
     actions = shortcuts[PHOTOS]
-    warn = [
+    warns = [
         ph.params(a)['UUID']
         for a in actions
         if ph.ident(a) == 'is.workflow.actions.text.match'
         and ph.params(a).get('WFMatchTextPattern') == gen.WARNINGS
     ]
-    assert len(warn) == 1
-    looks = [
-        (i, inside)
-        for i, (action, inside) in enumerate(ph.inside_if_on(actions, warn[0]))
-        if ph.ident(action) == 'is.workflow.actions.previewdocument'
-    ]
-    assert looks and all(inside for _, inside in looks)
+    assert len(warns) == 2  # the selection route and the picker route
     idents = [ph.ident(a) for a in actions]
-    assert looks[0][0] < idents.index('is.workflow.actions.deletephotos')
+    looks = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.previewdocument'
+    ]
+    assert len(looks) == 2
+    for warn, look in zip(warns, looks, strict=True):
+        flags = [inside for _, inside in ph.inside_if_on(actions, warn)]
+        assert flags[look]
+        assert look < idents.index('is.workflow.actions.deletephotos')
 
 
 def test_files_shortcut_never_touches_photos(shortcuts):
@@ -273,10 +296,7 @@ def test_notes_show_version(gen, shortcuts):
         assert f'{name} {version}' in first
         assert 'Allow Running Scripts' in first
 
-    for text in ph.shell_scripts(
-        shortcuts[PHOTOS],
-        {'Matches': '', 'Combined Text': '', 'Skipped Echo': ''},
-    ):
+    for text in ph.shell_scripts(shortcuts[PHOTOS], VALUES):
         if 'VERSION=' in text:
             assert f"VERSION='{version}'" in text
 
@@ -345,3 +365,94 @@ def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
         and "'Saved Photos'" in repr(ph.params(a)['Input'])
     ]
     assert len(counts) == 1
+
+
+def test_photos_selection_route_through_applescript(gen, shortcuts):
+    # Started while Photos is in front with photos selected, the shortcut
+    # converts that selection: a probe (Run AppleScript) decides, Photos
+    # exports the originals (export.applescript, input: the work folder),
+    # the script converts them, and Photos imports the results
+    # (import.applescript, input: the script's output lines).
+    actions = shortcuts[PHOTOS]
+    scripts = [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
+    assert [ph.params(a)['Script'][:40] for a in scripts] == [
+        gen.applescript_text(n)[:40] for n in ('probe', 'export', 'import')
+    ]
+    # Plain text only: a Shortcuts variable in the script text keeps a Run
+    # AppleScript from compiling (seen on macOS 26); values go in as input.
+    for a in scripts:
+        assert isinstance(ph.params(a)['Script'], str)
+
+    probe, export, imp = scripts
+    assert 'Input' not in ph.params(probe)
+    assert 'Input' in ph.params(export) and 'Input' in ph.params(imp)
+    # the export's input is the prepare script's output (the work folder),
+    # the import's input the selection script's output (the plan lines)
+    ids = {ph.params(a)['UUID']: a for a in actions if 'UUID' in ph.params(a)}
+    for a, marker in ((export, 'mkdir -p "$W/in"'), (imp, 'in/*(.N)')):
+        ref = next(ph.references(ph.params(a)['Input']))
+        source = ph.params(ids[ref['OutputUUID']])['Script']
+        assert marker in ph.render(source, VALUES)
+
+    # the probe's SELECTION answer selects the route
+    matches = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == '^SELECTION'
+    ]
+    assert len(matches) == 1
+    # the selection route's scripts work in ~/Pictures (Photos' sandbox
+    # reaches it), the picker route's in the iCloud Drive folder
+    texts = ph.shell_scripts(actions, VALUES)
+    selection = [t for t in texts if 'in/*(.N)' in t]
+    assert len(selection) == 1
+    assert '"$HOME/Pictures/.compress-photos-macos"' in selection[0]
+    assert 'rm -rf "$WORK"' not in selection[0]  # Photos exported into it
+    assert gen.ORIGINALS_ALBUM in gen.applescript_text('import')
+
+
+def test_photos_selection_route_notifies_without_a_picker(shortcuts):
+    # In the selection branch there is no Select Photos and no Delete Photos
+    # (a script can't delete; the originals are collected in an album).
+    actions = shortcuts[PHOTOS]
+    probe_uuid = next(
+        ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == '^SELECTION'
+    )
+    pickers = [
+        inside
+        for action, inside in ph.inside_if_on(actions, probe_uuid)
+        if ph.ident(action) == 'is.workflow.actions.selectphoto'
+    ]
+    assert pickers == [False]  # the picker is in the Otherwise branch
+    for action, inside in ph.inside_if_on(actions, "'Selection'"):
+        if ph.ident(action) in (
+            'is.workflow.actions.deletephotos',
+            'is.workflow.actions.selectphoto',
+            'is.workflow.actions.savetocameraroll',
+            GET_FILE,
+        ):
+            assert not inside, ph.ident(action)
+
+
+def test_applescripts_compile(gen):
+    # osacompile reads Photos' dictionary without launching it.
+    import shutil
+    import subprocess
+    import tempfile
+
+    ph.need(shutil.which('osacompile'), 'osacompile is needed')
+    with tempfile.TemporaryDirectory() as folder:
+        for name in ('probe', 'export', 'import'):
+            src = pathlib.Path(folder) / f'{name}.applescript'
+            src.write_text(gen.applescript_text(name))
+            result = subprocess.run(
+                ['osacompile', '-o', str(src.with_suffix('.scpt')), str(src)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            assert result.returncode == 0, (name, result.stderr)

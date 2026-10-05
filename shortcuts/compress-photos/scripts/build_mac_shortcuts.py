@@ -76,6 +76,13 @@ WORK_PHOTOS = f'{SHORTCUTS_FOLDER}/{WORK_NAME}'
 # Compress Photo Files (macOS) needs no bridge: the user's temporary folder
 # (TMPDIR ends with a slash on macOS).
 WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
+# Compress Photos (macOS) on the photos selected in Photos: Photos itself
+# exports the originals into this folder and imports the results from it
+# (AppleScript), and its sandbox reaches ~/Pictures but not the folders above.
+WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
+# The album that collects the originals whose JPEG XL has everything they have
+# (the selection route can't delete photos; the user deletes them from there).
+ORIGINALS_ALBUM = 'Compressed to JPEG XL'
 # Where the file shortcut saves when it can't write next to the original.
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
@@ -99,18 +106,23 @@ SLOTS = {
 
 def work_setup(work):
     """
-    The script lines that set WORK. For the Photos shortcut they also note,
-    before the folder is created, whether Shortcuts' iCloud Drive folder is
-    missing (iCloud Drive off for Shortcuts): Get File then finds nothing and
-    the shortcut reports every photo as not saved.
+    The script lines that set WORK and start it empty. The selection route
+    keeps the folder: Photos has already exported the originals into it. The
+    Photos shortcut's picker route also notes, before the folder is created,
+    whether Shortcuts' iCloud Drive folder is missing (iCloud Drive off for
+    Shortcuts): Get File then finds nothing and the shortcut reports every
+    photo as not saved.
     """
+    if work == WORK_SELECTION:
+        return f'WORK={work}\nmkdir -p "$WORK"'
+
+    fresh = f'WORK={work}\nrm -rf "$WORK"\nmkdir -p "$WORK"'
     if work != WORK_PHOTOS:
-        return f'WORK={work}'
+        return fresh
 
     return (
         f"icloud_missing=''\n"
-        f'[ -d {SHORTCUTS_FOLDER} ] || icloud_missing=1\n'
-        f'WORK={work}'
+        f'[ -d {SHORTCUTS_FOLDER} ] || icloud_missing=1\n' + fresh
     )
 
 
@@ -153,6 +165,19 @@ def script_text(name, body, label, work):
     return text
 
 
+def applescript_text(name):
+    """
+    mac/<name>.applescript, with @ORIGINALS_ALBUM@ filled in. Plain text: a
+    Shortcuts variable inside a Run AppleScript's text keeps it from compiling
+    (it then produces no output and no error; seen on macOS 26), so values go
+    in through the action's input (``wf.Builder.run_applescript``).
+    """
+    text = (MAC / f'{name}.applescript').read_text()
+    text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
+    assert not re.findall('@[A-Z_]+@', text), name
+    return text
+
+
 def script(name, body, label, work, quality, lines):
     """The Run Shell Script text parts: strings and the three variables."""
     refs = {
@@ -183,17 +208,104 @@ def build_photos(sample):
         f'{NAME_PHOTOS} {VERSION}. '
         'Converts photos to JPEG XL with jxlbatch (Run Shell Script), keeping their '
         'metadata. Only still photos are converted: Live Photos and videos are '
-        'skipped. From the Share menu in Photos or from a photo picker, it saves the '
-        "JPEG XL copies to Photos, adds each to its original's albums, and offers to "
-        'delete the originals (those whose JPEG XL has everything they have). Needs '
-        'jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts ▸ Settings ▸ '
+        'skipped. Started while Photos is in front with photos selected (Share menu, '
+        'right-click > Shortcuts, menu bar), it converts that selection: Photos '
+        "exports the originals, the JPEG XL copies are imported into the originals' "
+        f'albums, and the originals whose copy has everything they have go into the album "{ORIGINALS_ALBUM}" '
+        'for you to delete. Started any other way, it shows a photo picker, saves the '
+        "copies to Photos in the originals' albums, and offers to delete the originals. "
+        'Needs jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
         f'Advanced. Setup and help: {HELP_URL}'
     )
+
+    # Where the photos come from: the shortcut's input (never on the Mac:
+    # Photos' Share menu passes a JPEG that Shortcuts can't read), else the
+    # photos selected in Photos when Photos is in front, else a picker.
+    def without_input():
+        probe = b.run_applescript(applescript_text('probe'))
+        b.if_has_value(
+            b.match_text(probe, '^SELECTION'),
+            lambda: b.set_variable('Selection', probe),
+            lambda: b.set_variable('Photos', b.select_photos()),
+        )
+
     b.if_has_value(
         SHORTCUT_INPUT,
         lambda: b.set_variable('Photos', SHORTCUT_INPUT),
-        lambda: b.set_variable('Photos', b.select_photos()),
+        without_input,
     )
+    b.if_has_value(
+        variable('Selection'),
+        lambda: selection_route(b),
+        lambda: picker_route(b),
+    )
+    return b.actions
+
+
+def selection_route(b):
+    """
+    The photos selected in Photos, through AppleScript (see mac/*.applescript):
+    Photos exports their originals into WORK_SELECTION/in, the script converts
+    them, and Photos imports the results into the originals' albums and
+    collects the originals to delete in ORIGINALS_ALBUM.
+    """
+    quality = choose_quality(b)
+    count = b.match_text(variable('Selection'), r'\d+')
+    b.notification(
+        'JPEG XL',
+        'Converting ',
+        count,
+        ' photo(s) selected in Photos… A notification follows when they are saved.',
+    )
+    # An empty work folder; its path is the export script's input.
+    work = b.run_shell_script(
+        f'W={WORK_SELECTION}; rm -rf "$W"; mkdir -p "$W/in"; printf "%s" "$W"'
+    )
+    ids = b.run_applescript(applescript_text('export'), input_ref=work)
+    result = b.run_shell_script(
+        *script(
+            NAME_PHOTOS, 'selection.zsh', 'IDS', WORK_SELECTION, quality, ids
+        )
+    )
+    # "imported=N", "collected=M", then "! ..." problem lines.
+    outcome = b.run_applescript(applescript_text('import'), input_ref=result)
+    lines = b.split(outcome, '\n')
+    imported = b.match_text(b.item_at_index(lines, 1), r'\d+')
+    collected = b.match_text(b.item_at_index(lines, 2), r'\d+')
+    log = b.text(
+        b.run_shell_script(
+            f'cat {WORK_SELECTION}/jxl_log.txt 2>/dev/null || true'
+        ),
+        '\n',
+        outcome,
+    )
+    b.if_has_value(
+        b.match_text(log, WARNINGS), lambda: b.quick_look(log), lambda: None
+    )
+    b.run_shell_script(f'rm -rf {WORK_SELECTION}')
+    b.if_has_value(
+        b.match_text(b.item_at_index(lines, 2), '^collected=[1-9]'),
+        lambda: b.notification(
+            'JPEG XL',
+            'Saved ',
+            imported,
+            ' photo(s) to Photos. ',
+            collected,
+            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to delete.',
+        ),
+        lambda: b.notification(
+            'JPEG XL', 'Saved ', imported, ' photo(s) to Photos.'
+        ),
+    )
+
+
+def picker_route(b):
+    """
+    The photos in the variable Photos (the picker's, or the shortcut's input):
+    Shortcuts passes them to the script as files, reads the results back with
+    Get File from WORK_PHOTOS, saves them to Photos and offers to delete the
+    originals.
+    """
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
@@ -295,7 +407,6 @@ def build_photos(sample):
         lambda: b.delete_photos(variable('Converted')),
         lambda: None,
     )
-    return b.actions
 
 
 def build_files(sample):
