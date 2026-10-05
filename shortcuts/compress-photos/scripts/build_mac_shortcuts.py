@@ -81,8 +81,11 @@ WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
 # (AppleScript), and its sandbox reaches ~/Pictures but not the folders above.
 WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
 # The album that collects the originals whose JPEG XL has everything they have
-# (the selection route can't delete photos; the user deletes them from there).
-ORIGINALS_ALBUM = 'Compressed to JPEG XL'
+# (a script can't delete photos; the user deletes them from there). Only the
+# selection route collects, by photo id; the picker route has no ids and
+# leaves the originals alone (a lookup by file name could pick the wrong
+# photo).
+ORIGINALS_ALBUM = 'Compressed to JXL'
 # Where the file shortcut saves when it can't write next to the original.
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
@@ -178,6 +181,25 @@ def applescript_text(name):
     return text
 
 
+def finish_script(work):
+    """
+    The last Run Shell Script of a Photos route (input: the outcome, to stdin):
+    appends it and "Done" to the log, so the progress window (a Terminal
+    following the log, see run.zsh) shows it and ends, and removes the work
+    folder.
+    """
+    return (
+        f'W={work}\n'
+        '{ echo; cat; echo; } >> "$W/jxl_log.txt"\n'
+        'if [ -e "$W/progress.command" ]; then\n'
+        '  echo "Done. You can close this window." >> "$W/jxl_log.txt"\n'
+        '  sleep 1\n'
+        "  pkill -f 'tail -n [+]1 -f .*compress-photos-macos/jxl_log.txt' 2>/dev/null\n"
+        'fi\n'
+        'rm -rf "$W"'
+    )
+
+
 def script(name, body, label, work, quality, lines):
     """The Run Shell Script text parts: strings and the three variables."""
     refs = {
@@ -213,7 +235,7 @@ def build_photos(sample):
         "exports the originals, the JPEG XL copies are imported into the originals' "
         f'albums, and the originals whose copy has everything they have go into the album "{ORIGINALS_ALBUM}" '
         'for you to delete. Started any other way, it shows a photo picker, saves the '
-        "copies to Photos in the originals' albums, and collects those originals in the same album. "
+        "copies to Photos in the originals' albums, and leaves the originals alone. "
         'Needs jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
         f'Advanced. Setup and help: {HELP_URL}'
     )
@@ -282,7 +304,9 @@ def selection_route(b):
     b.if_has_value(
         b.match_text(log, WARNINGS), lambda: b.quick_look(log), lambda: None
     )
-    b.run_shell_script(f'rm -rf {WORK_SELECTION}')
+    b.run_shell_script(
+        finish_script(WORK_SELECTION), input_ref=outcome, as_arguments=False
+    )
     b.if_has_value(
         b.match_text(b.item_at_index(lines, 2), '^collected=[1-9]'),
         lambda: b.notification(
@@ -303,10 +327,10 @@ def picker_route(b):
     """
     The photos in the variable Photos (the picker's, or the shortcut's input):
     Shortcuts passes them to the script as files, reads the results back with
-    Get File from WORK_PHOTOS, saves them to Photos, and has Photos collect the
-    originals to delete in ORIGINALS_ALBUM (collect.applescript, by file name:
-    a Shortcuts photo has no id. Delete Photos needs a prompt the Shortcuts app
-    often can't show on macOS 26).
+    Get File from WORK_PHOTOS and saves them to Photos. The originals are left
+    alone: Shortcuts' Delete Photos needs a prompt the Shortcuts app often
+    can't show on macOS 26, and without photo ids they can't be collected in
+    ORIGINALS_ALBUM safely.
     """
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
@@ -350,23 +374,13 @@ def picker_route(b):
             file = b.get_file_from_shortcuts_folder(f'{WORK_NAME}/', file_name)
             saved = b.save_to_photos(b.set_name(file, photo_name))
 
-            # Only a photo that is in Photos now counts, joins its original's
-            # albums, and lets the original be collected for deletion: a save
-            # that produced nothing (for example because the file could not
-            # be read) must never lead to a deletion.
+            # Only a photo that is in Photos now counts and joins its
+            # original's albums: a save that produced nothing (for example
+            # because the file could not be read) is reported instead.
             def when_saved():
                 b.append_variable('Saved Photos', saved)
                 index = b.item_at_index(parts, 2)
                 original = b.item_at_index(photos, index)
-                # "keep" means the JPEG XL lacks the original's HDR.
-                delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
-                b.if_has_value(
-                    delete,
-                    lambda: b.append_variable(
-                        'Converted Names', b.text(b.get_name(original))
-                    ),
-                    lambda: None,
-                )
                 b.repeat_each(
                     b.photo_albums(original),
                     lambda: b.save_to_album(saved, REPEAT_ITEM_2),
@@ -388,23 +402,6 @@ def picker_route(b):
         lambda: b.set_variable('Saved', b.count(variable('Saved Photos'))),
         lambda: None,
     )
-    # The originals to delete go into ORIGINALS_ALBUM (Photos, by name):
-    # "collected=N", then "! ..." problem lines.
-    b.set_variable('Collected', b.text('collected=0'))
-    b.if_has_value(
-        variable('Converted Names'),
-        lambda: b.set_variable(
-            'Collected',
-            b.run_applescript(
-                applescript_text('collect'),
-                input_ref=b.combine(variable('Converted Names'), '\n'),
-            ),
-        ),
-        lambda: None,
-    )
-    collected = b.match_text(
-        b.item_at_index(b.split(variable('Collected'), '\n'), 1), r'\d+'
-    )
     # The log: shown when it has a note, an error, a failed photo or a copy
     # that didn't reach Photos (what the iPhone user reads in a-Shell).
     log = b.text(
@@ -413,26 +410,21 @@ def picker_route(b):
         ),
         '\n',
         b.combine(variable('Not Saved'), '\n'),
-        '\n',
-        variable('Collected'),
     )
     b.if_has_value(
         b.match_text(log, WARNINGS), lambda: b.quick_look(log), lambda: None
     )
-    b.run_shell_script(f'rm -rf {WORK_PHOTOS}')
-    b.if_has_value(
-        b.match_text(variable('Collected'), '^collected=[1-9]'),
-        lambda: b.notification(
-            'JPEG XL',
-            'Saved ',
-            variable('Saved'),
-            ' photo(s) to Photos. ',
-            collected,
-            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to delete.',
-        ),
-        lambda: b.notification(
-            'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
-        ),
+    outcome = b.text(
+        'Saved ',
+        variable('Saved'),
+        ' photo(s) to Photos.\n',
+        b.combine(variable('Not Saved'), '\n'),
+    )
+    b.run_shell_script(
+        finish_script(WORK_PHOTOS), input_ref=outcome, as_arguments=False
+    )
+    b.notification(
+        'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
     )
 
 

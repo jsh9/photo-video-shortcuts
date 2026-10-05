@@ -73,13 +73,25 @@ class Mac:
         (self.selection_work / 'in').mkdir(parents=True)
         self.jxlbatch = jxlbatch
 
-    def env(self, jxlbatch=None):
-        return dict(
+    def env(self, jxlbatch=None, watch=False):
+        env = dict(
             os.environ,
             JXLBATCH=str(jxlbatch or self.jxlbatch),
             TMPDIR=f'{self.tmp}/',
             HOME=str(self.home),
+            WATCH='1' if watch else '0',  # the Terminal progress window
         )
+        if watch:
+            # a fake `open` first on PATH records what the script opens
+            fake = self.root / 'bin'
+            fake.mkdir(exist_ok=True)
+            (fake / 'open').write_text(
+                f'#!/bin/sh\nprintf \'%s\\n\' "$@" >> "{self.root}/opened.txt"\n'
+            )
+            (fake / 'open').chmod(0o755)
+            env['PATH'] = f'{fake}:{env["PATH"]}'
+
+        return env
 
     # what the main script of each route contains
     MARKERS = {
@@ -111,19 +123,24 @@ class Mac:
         return found[0]
 
     def follow_ups(self, shortcut):
-        """The route's log script and cleanup script, in order."""
+        """The route's log script and finish script, in order."""
         work = '/Pictures/.' if shortcut == 'selection' else 'iCloud~'
         return [
             s
             for s in self.scripts(shortcut)
-            if s.startswith(('cat ', 'rm -rf ')) and work in s
+            if work in s
+            and (s.startswith('cat ') or 'Done. You can close' in s)
         ]
 
-    def run(self, script, *args, jxlbatch=None):
-        """Runs a script as Shortcuts does: zsh, the files as arguments."""
+    def run(self, script, *args, jxlbatch=None, stdin='', watch=False):
+        """
+        Runs a script as Shortcuts does: zsh, the files as arguments (or
+        ``stdin`` for a script that reads its input).
+        """
         return subprocess.run(
             ['zsh', '-c', script, 'zsh', *map(str, args)],
-            env=self.env(jxlbatch),
+            env=self.env(jxlbatch, watch),
+            input=stdin,
             capture_output=True,
             text=True,
         )
@@ -182,9 +199,9 @@ def test_photos_prints_one_line_per_result_with_the_path(mac):
 def test_photos_follow_up_scripts_read_the_log_and_clean_up(mac):
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     mac.batch('photos', a)
-    show_log, cleanup = mac.follow_ups('photos')
+    show_log, finish = mac.follow_ups('photos')
     assert mac.run(show_log).stdout == mac.log
-    assert mac.run(cleanup).returncode == 0
+    assert mac.run(finish, stdin='outcome line').returncode == 0
     assert not mac.work.exists()
     # the log script after cleanup: nothing, and no error
     result = mac.run(show_log)
@@ -313,13 +330,74 @@ def test_selection_nothing_exported(mac, gen):
 def test_selection_follow_up_scripts(mac):
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     mac.batch('selection', lines='A1|IMG_0001.HEIC\n')
-    show_log, cleanup = mac.follow_ups('selection')
+    show_log, finish = mac.follow_ups('selection')
     assert (
         mac.run(show_log).stdout
         == (mac.selection_work / 'jxl_log.txt').read_text()
     )
-    assert mac.run(cleanup).returncode == 0
+    assert mac.run(finish, stdin='outcome line').returncode == 0
     assert not mac.selection_work.exists()
+
+
+def test_progress_window_follows_the_log_and_ends_with_done(mac):
+    # With WATCH=1 (the default), the script writes progress.command (a
+    # `tail -f` of the log) and opens it in Terminal; the finish script
+    # appends the outcome and "Done" and ends the tail.
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    result = mac.run(mac.main_script('photos'), a, watch=True)
+    assert result.returncode == 0, result.stderr
+    command = (mac.work / 'progress.command').read_text()
+    assert command.startswith('#!/bin/zsh\nexec tail -n +1 -f ')
+    # zsh's (q) quoting escapes spaces and tildes
+    assert str(mac.work / 'jxl_log.txt') in command.replace('\\', '')
+    assert (mac.root / 'opened.txt').read_text().splitlines() == [
+        '-a',
+        'Terminal',
+        str(mac.work / 'progress.command'),
+    ]
+    # a real tail, as the Terminal window would run it
+    tail = subprocess.Popen(
+        ['tail', '-n', '+1', '-f', str(mac.work / 'jxl_log.txt')],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        finish = mac.follow_ups('photos')[1]
+        assert (
+            mac.run(finish, stdin='Saved 1 photo(s) to Photos.').returncode
+            == 0
+        )
+        shown, _ = tail.communicate(timeout=10)
+    finally:
+        tail.kill()
+
+    assert shown.rstrip().endswith(
+        'Saved 1 photo(s) to Photos.\nDone. You can close this window.'
+    )
+    assert 'Done: 1 of 1 converted' in shown
+    assert not mac.work.exists()
+
+
+def test_no_progress_window_when_off(mac):
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    mac.batch('photos', a)
+    assert not (mac.work / 'progress.command').exists()
+    assert not (mac.root / 'opened.txt').exists()
+
+
+def test_files_progress_window_ends_in_the_script(mac):
+    album = mac.root / 'Pictures'
+    a = photo(album, 'hdr/srgb.heic', 'a.heic')
+    result = mac.run(mac.main_script('files', lines=f'{a}\n'), a, watch=True)
+    assert result.returncode == 0, result.stderr
+    assert (mac.root / 'opened.txt').read_text().splitlines()[-1] == str(
+        mac.work_files / 'progress.command'
+    )
+    # the log ended with the count and "Done" before the folder went away
+    assert 'Wrote 1 JPEG XL file(s).\nDone. You can close this window.' in (
+        result.stdout
+    )
+    assert not (mac.work_files / 'jxl_log.txt').exists()
 
 
 def test_files_next_to_originals_folders_and_fallback(mac):

@@ -9,9 +9,10 @@ iPhone's [Compress Photos](README.md):
   picker. Pick a quality preset (83 is the everyday choice). JPEG XL copies are
   saved to Photos, into the same albums as the originals, keeping the
   original's metadata (capture date, location, camera, lens, exposure, maker
-  notes, XMP) and its HDR. The originals whose JPEG XL has everything they have
-  are then collected in the album *Compressed to JPEG XL* for you to delete.
-  Only still photos are converted; Live Photos and videos are skipped.
+  notes, XMP) and its HDR. From Photos, the originals whose JPEG XL has
+  everything they have are then collected in the album *Compressed to JXL* for
+  you to delete; from the picker, the originals are left alone. Only still
+  photos are converted; Live Photos and videos are skipped.
 - **Compress Photo Files (macOS)**: select image files or folders in Finder ▸
   right-click ▸ Quick Actions ▸ *Compress Photo Files (macOS)*. Each `.jxl` is
   written next to its original, under the original's name. Nothing is deleted,
@@ -104,8 +105,8 @@ iPhone's need a-Shell, these need Run Shell Script.
   - Photos exports the **original files** (the HEIC as it was imported, with
     its HDR), the copies are imported into the originals' albums, and the
     originals whose JPEG XL has everything they have go into the album
-    **Compressed to JPEG XL**. Review that album and delete its photos when you
-    are done (a shortcut cannot delete photos on this path). The album stays,
+    **Compressed to JXL**. Review that album and delete its photos when you are
+    done (a shortcut cannot delete photos on this path). The album stays,
     empty, for the next run.
   - An **edited photo** is converted from its unedited original on this path:
     the edits aren't applied. To convert the edited version, use the picker.
@@ -115,9 +116,9 @@ iPhone's need a-Shell, these need Run Shell Script.
 - **From the Shortcuts app** (or the menu bar, if you pin it, or a keyboard
   shortcut you give it) while Photos is not in front: a photo picker opens,
   without videos. Pick the photos there. This path converts each photo as it
-  looks now (edits applied), saves the copies to Photos, and collects the
-  originals in the album *Compressed to JPEG XL* too, found by their file name:
-  a photo whose name several photos share is left out, with a note in the log.
+  looks now (edits applied) and saves the copies to Photos. The originals are
+  left alone: Shortcuts gives the shortcut no way to point at them afterwards
+  that is safe, so delete them yourself if you want to.
 - Only still photos are converted, screenshots included; Live Photos and videos
   in the selection are skipped and a notification counts them. To convert the
   still image of a Live Photo, duplicate it as a still photo first.
@@ -132,13 +133,22 @@ iPhone's need a-Shell, these need Run Shell Script.
 - If the encoder noted anything (an HDR photo converted as SDR, a photo that
   failed, an error), its log opens in a Quick Look window first, so you can
   read it before deciding about the originals. Close it to continue.
-- The originals whose JPEG XL has everything they have (the same rule as on the
-  iPhone, see [HDR photos](README.md#31-hdr-photos)) are collected in the album
-  *Compressed to JPEG XL*. Nothing is deleted by the shortcut: review the
-  album, select all, delete. (Shortcuts' Delete Photos action needs a prompt
-  the Shortcuts app usually can't show on macOS 26, so the Mac shortcut doesn't
-  use it.) The first time, macOS asks whether Shortcuts may control Photos:
-  choose Always Allow, or it asks on every run.
+- From Photos, the originals whose JPEG XL has everything they have (the same
+  rule as on the iPhone, see [HDR photos](README.md#31-hdr-photos)) are
+  collected in the album *Compressed to JXL*, found by their photo id. Nothing
+  is deleted by the shortcut: review the album, select all, delete. (Shortcuts'
+  Delete Photos action needs a prompt the Shortcuts app usually can't show on
+  macOS 26, so the Mac shortcut doesn't use it.) The first time, macOS asks
+  whether Shortcuts may control Photos: choose Always Allow, or it asks on
+  every run.
+- **Progress:** a Terminal window opens and follows the conversion, photo by
+  photo, as a-Shell shows it on the iPhone. When everything is done it ends
+  with "Done. You can close this window." (Terminal may close it by itself,
+  depending on its "When the shell exits" setting.) To do without it, open the
+  shortcut in Shortcuts, find the Run Shell Script action whose script starts
+  with `# Compress Photos (macOS)`, and change its line `WATCH=${WATCH:-1}` to
+  `WATCH=0`. The log also opens in Quick Look when it has a note, an error or a
+  failed photo.
 - If Photos is set not to copy imported items into the library (Photos ▸
   Settings ▸ General ▸ Importing), don't use the selection path: it removes its
   work files after the import, and a referenced file would be gone. Deleted
@@ -161,9 +171,9 @@ iPhone's need a-Shell, these need Run Shell Script.
   replaced: if `Name.jxl` exists, the result is `Name 2.jxl`. If the folder
   can't be written, or Shortcuts didn't say where a file came from, the result
   goes to `~/Pictures/JPEG XL`.
-- The log opens in Quick Look when something was noted or failed; a
-  notification says how many files were written. The originals are never
-  touched.
+- A Terminal window follows the progress (as above); the log opens in Quick
+  Look when something was noted or failed; a notification says how many files
+  were written. The originals are never touched.
 
 ## 4. What is and isn't kept
 

@@ -6,6 +6,7 @@ LOG="$WORK/jxl_log.txt"
 : > "$LOG"
 @WORK_CHECK@
 VERSION='@VERSION@'
+WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
 QUALITY='@QUALITY@'
 # @LABEL@: one per input file, in the same order (see the shortcut)
 @LABEL@=$(cat <<'JXL_LINES'

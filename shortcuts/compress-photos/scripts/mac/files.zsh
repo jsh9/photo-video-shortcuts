@@ -47,6 +47,13 @@ if [ -f "$WORK/jxl_done.txt" ]; then
     [ -n "$file" ] && move "$WORK/$file" "${dests[$idx]}" "$name"
   done < "$WORK/jxl_done.txt"
 fi
+# The log ends with the count; the progress window, if any, with "Done".
+{ echo; echo "Wrote $wrote JPEG XL file(s)."; } >> "$LOG"
+if [ -e "$WORK/progress.command" ]; then
+  echo "Done. You can close this window." >> "$LOG"
+  sleep 1
+  pkill -f 'tail -n [+]1 -f .*compress-photos-macos/jxl_log.txt' 2>/dev/null
+fi
 # The output: the log, then the count.
 cat "$LOG"
 echo

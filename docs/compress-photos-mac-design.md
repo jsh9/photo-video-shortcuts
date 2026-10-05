@@ -57,13 +57,16 @@ disallowed-directory or sandbox check), so the input is empty. Instead, the
 shortcut asks Photos for its selection through AppleScript when Photos is in
 front: Photos exports the originals (sub-second), imports the results by name,
 and adds them to albums; a script can't delete photos, so the originals to
-delete are collected in an album, on the picker route too: Delete Photos'
-permission prompt fails with "Presenter connection failed" in most runs, so the
-Mac shortcut doesn't use it (decision 3 revised 2026-10-04). Save to Photo
-Album accepts a `.jxl` file and Photos shows it. Run AppleScript only compiles
-plain script text (no Shortcuts variables); values go in through its input.
-Written 2026-10-04 against Compress Photos 0.3.1 on macOS 27.0 (Shortcuts 8);
-decisions settled the same day (section 7).
+delete are collected in an album, by photo id, on the selection route only:
+Delete Photos' permission prompt fails with "Presenter connection failed" in
+most runs, so the Mac shortcut doesn't use it, and the picker route, which has
+no photo ids, leaves the originals alone rather than look them up by file name
+(decision 3 revised 2026-10-04). Progress is shown in a Terminal window that
+follows the log (section 4.4's optional idea, now the default, `WATCH=0` turns
+it off). Save to Photo Album accepts a `.jxl` file and Photos shows it. Run
+AppleScript only compiles plain script text (no Shortcuts variables); values go
+in through its input. Written 2026-10-04 against Compress Photos 0.3.1 on macOS
+27.0 (Shortcuts 8); decisions settled the same day (section 7).
 
 ## 1. Verdict
 

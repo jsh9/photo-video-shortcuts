@@ -132,7 +132,7 @@ Compress Photos (macOS)                      (shortcut)
    (mac/import.applescript, input: those lines) has Photos import each file,
    add it to every album its original is in (one pass over all albums,
    nested ones too), and add the "delete" originals to the album
-   "Compressed to JPEG XL" (a script can't delete photos); returns
+   "Compressed to JXL" (a script can't delete photos); returns
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
    picker route: keeps the still photos (same as the iPhone), asks for a
@@ -146,18 +146,22 @@ Compress Photos (macOS)                      (shortcut)
        jxlbatch -q 83 -e 7 -C "$WORK" jxl_job.txt   (log in jxl_log.txt)
      and prints jxl_done.txt's lines:
        jxl_out_N.jxl|N|delete or keep|Name.jxl
-      then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
+         then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
    to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
-   and saved to Photos and added to the original's albums; only when the
-   save produced a photo does a "delete" line's original name join Converted
-   Names, which Run AppleScript (mac/collect.applescript) turns into the
-   photos (by file name, only when exactly one photo has it) and adds to the
-   album "Compressed to JPEG XL"
-      the log is shown in Quick Look if it has a "!" note, an error or a failed
-   photo; the work folder is removed; a notification counts the saved photos
-   and the collected originals (Delete Photos isn't used: its prompt is one
-   the Shortcuts app often can't show on macOS 26, "Presenter connection
+   and saved to Photos and added to the original's albums; the originals are
+   left alone (no ids to collect them by; a lookup by file name could pick
+   the wrong photo)
+         the log is shown in Quick Look if it has a "!" note, an error or a failed
+   photo; the finish script appends the outcome and "Done" to the log (for
+   the progress window) and removes the work folder; a notification counts
+   the saved photos (Delete Photos isn't used: its prompt is one the
+   Shortcuts app often can't show on macOS 26, "Presenter connection
    failed", and it isn't available from the Share menu at all)
+
+   both routes, and the Finder shortcut: run.zsh opens a Terminal window
+   (`open -a Terminal progress.command`, an `exec tail -f` of the log) that
+   follows jxlbatch's output, unless WATCH=0; jxlbatch runs with --mac, which
+   drops its hints about the iPhone's share sheet
 
 Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
    files and folders from Finder; each input's File Path; a quality preset;

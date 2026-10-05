@@ -56,6 +56,7 @@ typedef struct {
   const char *dir;
   int retry;  // --retry: skip a batch that a run already started
   int sdr;    // --sdr: HDR photos as SDR
+  int mac;    // --mac: for the Mac shortcuts; no hints about the iPhone's share sheet
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -710,7 +711,10 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     // gain map isn't converted.
     if (orig_format == FMT_JPEG && jpeg_has_gain_map(orig, orig_len)) {
       hdr.has_gain_map = 1;
-      if (!opt->sdr) say_wrap("  ", "! HDR not kept (JPEG with a gain map; send as Current to keep it)");
+      if (!opt->sdr) {
+        say_wrap("  ", opt->mac ? "! HDR not kept (JPEG with a gain map)"
+                                : "! HDR not kept (JPEG with a gain map; send as Current to keep it)");
+      }
     }
     const meta_t *pm = decode_orig ? &mo : &mp;
     if (stb_decode(decode_orig ? orig : png, decode_orig ? orig_len : png_len, &img, err, sizeof err) != 0) {
@@ -1000,7 +1004,9 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     say_wrap("", "%zu HDR photo%s saved as SDR (not an iPhone camera photo); %s offered for deletion.",
              batch.not_iphone, one ? "" : "s", one ? "its original is" : "their originals are");
   }
-  if (batch.apple_jpegs) {
+  // On the Mac the shortcuts hand over the library's files as they are, so a
+  // JPEG is the original; the hint is about the iPhone's share sheet.
+  if (batch.apple_jpegs && !opt->mac) {
     const int one = batch.apple_jpegs == 1;
     say("\n");
     say_wrap("", "Note: Photos sent %s iPhone photo%s as JPEG, so the sizes compare against %s, not the "
@@ -1253,18 +1259,19 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [--retry] [--sdr] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
+  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-C DIR] JOBFILE\n"
       "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
       "  -C  folder holding JOBFILE and the jxl_in_* files\n"
       "  --retry  do nothing if a run already started this batch\n"
-      "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n");
+      "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
+      "  --mac    for the Mac shortcuts: no hints about the iPhone's share sheet\n");
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0, 0};
+  options_t opt = {83.0f, 7, NULL, 0, 0, 0};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
@@ -1297,6 +1304,8 @@ int main(int argc, char **argv) {
       opt.retry = 1;
     } else if (!strcmp(a, "--sdr")) {
       opt.sdr = 1;
+    } else if (!strcmp(a, "--mac")) {
+      opt.mac = 1;
     } else if (!strcmp(a, "--selftest")) {
       mode = 1;
     } else if (!strcmp(a, "--memtest")) {
