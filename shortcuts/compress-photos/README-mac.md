@@ -22,7 +22,8 @@ On the Mac, Shortcuts runs the encoder itself: its Run Shell Script action runs
 `jxlbatch`, a native build of the same encoder a-Shell runs on the iPhone, and
 waits for it. There is no a-Shell, no *JXL-Import*, and nothing to keep in the
 foreground. The results are byte for byte the iPhone's (same libjxl, same
-settings), and the Mac uses all of its cores.
+settings), and the Mac can use all of its cores, converting several photos at a
+time.
 
 <!--TOC-->
 
@@ -70,7 +71,10 @@ ______________________________________________________________________
    know where it is) and runs its self-test, which should end with "Self-test
    passed". `curl` doesn't mark the download as quarantined, so macOS runs it
    without a Gatekeeper prompt. If you downloaded it with a browser instead,
-   run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch` once.
+   the file is neither executable nor trusted: run
+   `chmod +x ~/.local/bin/jxlbatch` and
+   `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch` once (until then the
+   shortcuts report the encoder as not installed).
 
 2. **Allow scripts.** In Shortcuts ▸ Settings ▸ Advanced, turn on **Allow
    Running Scripts**. Without it, the shortcuts fail at their Run Shell Script
@@ -131,6 +135,12 @@ iPhone's need a-Shell, these need Run Shell Script.
   still image of a Live Photo, duplicate it as a still photo first.
 - Pick a quality (see [Quality presets](README.md#21-quality-presets); they are
   the same as on the iPhone).
+- Then pick how to use the Mac's cores. *All cores (fast)*, the usual choice,
+  converts several photos at a time, each with a share of the cores (two at a
+  time on an 8-core Mac, three on 14 cores or more, fewer with little memory).
+  *One core (keeps the Mac responsive)* converts one photo at a time on one
+  thread, for a big batch while you keep working. The files are the same either
+  way.
 - A notification says the conversion has started. It runs in the background:
   about a second per 12 MP photo on an M1, longer for 48 MP. A notification
   says how many were saved.
@@ -149,7 +159,8 @@ iPhone's need a-Shell, these need Run Shell Script.
   whether Shortcuts may control Photos: choose Always Allow, or it asks on
   every run.
 - **Progress:** a Terminal window opens and follows the conversion, photo by
-  photo, as a-Shell shows it on the iPhone (the log it follows is in
+  photo, as a-Shell shows it on the iPhone; with *All cores*, a photo's lines
+  appear once the photos before it are done (the log it follows is in
   `~/Library/Caches/compress-photos-macos`, one per route, so Terminal needs no
   access to iCloud Drive or Pictures). When everything is done it ends with
   "Done. You can close this window." The last run's log stays in that folder
@@ -176,8 +187,9 @@ iPhone's need a-Shell, these need Run Shell Script.
 ### 3.2. Compress Photo Files (macOS)
 
 - Select files or folders in Finder, right-click ▸ Quick Actions ▸ *Compress
-  Photo Files (macOS)*, and pick a quality. For a folder, its image files
-  (HEIF, JPEG, PNG) are converted; subfolders aren't entered.
+  Photo Files (macOS)*, and pick a quality and how to use the cores (as above).
+  For a folder, its image files (HEIF, JPEG, PNG) are converted; subfolders
+  aren't entered.
 - Each result is written next to its original as `Name.jxl`. A file is never
   replaced: if `Name.jxl` exists, the result is `Name 2.jxl`. If the folder
   can't be written, or Shortcuts didn't say where a file came from, the result
@@ -203,17 +215,17 @@ check the encoder's version and note a mismatch in the log.
 
 ## 6. Troubleshooting
 
-| Symptom                                                                                | Fix                                                                                                                                                                                                                                         |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The shortcut stops at Run Shell Script with an error about scripts                     | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                                                                            |
-| Quick Look shows `ERROR: jxlbatch is not installed`                                    | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.                                                                                      |
-| `"jxlbatch" cannot be opened because the developer cannot be verified`                 | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch`, or install it with the `curl` command instead.                                                                           |
-| `! … is not jxlbatch <version>` in the log                                             | The encoder and the shortcuts are from different releases. Update the older one (see [Updating](#5-updating)).                                                                                                                              |
-| The shortcut isn't in Photos' Share menu                                               | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                                                                      |
-| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions                         | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                                                                             |
-| Notification "Saved 0 photo(s)" and Quick Look shows the log                           | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                                                                        |
-| `! not saved to Photos: <name>` in the log                                             | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing.                                                  |
-| Run from Photos' Share menu, but asked to pick photos                                  | Photos wasn't in front with a selection when the shortcut asked it (the shortcut gets nothing through the Share menu itself: Photos passes a JPEG copy that Shortcuts can't read). Select the photos in Photos and run it again from there. |
-| "Shortcuts is not allowed to send keystrokes" or Photos not responding to the shortcut | Allow Shortcuts to control Photos: System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.                                                                                                                                  |
-| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. They decide which originals are offered for deletion.                                                                                            |
-| Results in `~/Pictures/JPEG XL` instead of next to the files                           | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                 |
+| Symptom                                                                                | Fix                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The shortcut stops at Run Shell Script with an error about scripts                     | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                                                                                                                                                                             |
+| Quick Look shows `ERROR: jxlbatch is not installed`                                    | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin` for an executable file named `jxlbatch`: a file downloaded with a browser isn't executable until you run `chmod +x ~/.local/bin/jxlbatch` (and `xattr -d com.apple.quarantine` on it). |
+| `"jxlbatch" cannot be opened because the developer cannot be verified`                 | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch`, or install it with the `curl` command instead.                                                                                                                                                                            |
+| `! … is not jxlbatch <version>` in the log, or `usage: jxlbatch …`                     | The encoder and the shortcuts are from different releases (an older encoder doesn't know the shortcuts' options and prints its usage instead of converting). Update the older one (see [Updating](#5-updating)).                                                                                                                             |
+| The shortcut isn't in Photos' Share menu                                               | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                                                                                                                                                                       |
+| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions                         | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                                                                                                                                                                              |
+| Notification "Saved 0 photo(s)" and Quick Look shows the log                           | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                                                                                                                                                                         |
+| `! not saved to Photos: <name>` in the log                                             | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing.                                                                                                                                                   |
+| Run from Photos' Share menu, but asked to pick photos                                  | Photos wasn't in front with a selection when the shortcut asked it (the shortcut gets nothing through the Share menu itself: Photos passes a JPEG copy that Shortcuts can't read). Select the photos in Photos and run it again from there.                                                                                                  |
+| "Shortcuts is not allowed to send keystrokes" or Photos not responding to the shortcut | Allow Shortcuts to control Photos: System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.                                                                                                                                                                                                                                   |
+| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. They decide which originals are offered for deletion.                                                                                                                                                                                             |
+| Results in `~/Pictures/JPEG XL` instead of next to the files                           | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                                                                                                                  |

@@ -373,6 +373,33 @@ class Builder:
             {'WFVariableName': name, 'WFInput': attachment(ref)},
         )
 
+    def choose_from_menu(self, prompt, cases):
+        """
+        Choose from Menu: ``cases`` maps each item's title to a function that
+        adds the actions run when it is chosen, in the menu's order. Format as
+        Shortcuts writes it (WFChooseFromMenuAction): a start with the prompt
+        and the titles, one case per item carrying its title, and an end, all
+        sharing a GroupingIdentifier.
+        """
+        group = new_uuid()
+
+        def mark(mode, extra):
+            self.actions.append({
+                'WFWorkflowActionIdentifier': 'is.workflow.actions.choosefrommenu',
+                'WFWorkflowActionParameters': {
+                    'GroupingIdentifier': group,
+                    'WFControlFlowMode': mode,
+                    **extra,
+                },
+            })
+
+        mark(0, {'WFMenuPrompt': prompt, 'WFMenuItems': list(cases)})
+        for title, body in cases.items():
+            mark(1, {'WFMenuItemTitle': title})
+            body()
+
+        mark(2, {'UUID': new_uuid()})
+
     def select_photos(self):
         # Images only: the picker hides videos (Live Photos are images).
         a = self.add(

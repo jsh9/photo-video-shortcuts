@@ -1,9 +1,10 @@
 """
 The Mac shortcuts' shell script (scripts/mac/*.zsh, as Run Shell Script gets
 it), run for real with zsh and a jxlbatch build: staging, the result lines the
-Photos shortcut saves, the files the Finder shortcut writes, the log, and the
-encoder checks. Also that the macOS encoder's output is byte for byte the
-WebAssembly build's.
+Photos shortcut saves, the files the Finder shortcut writes, the log, the
+encoder checks, and the cores choice becoming jxlbatch's -j and -t. Also that
+the macOS encoder's output is byte for byte the WebAssembly build's, also with
+two photos at a time.
 """
 
 import os
@@ -104,12 +105,15 @@ class Mac:
         'files': 'paths=(',  # the Finder shortcut
     }
 
-    def scripts(self, shortcut, quality='83', lines='', skipped=''):
+    def scripts(
+            self, shortcut, quality='83', lines='', skipped='', cores='all'
+    ):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
             self.shortcuts['photos' if shortcut == 'selection' else shortcut],
             {
                 'Matches': quality,
+                'Cores': cores,  # the cores menu's value
                 'Combined Text': lines,
                 'Skipped Echo': skipped,
                 'AppleScript Result': lines,  # the selection route's IDS
@@ -280,13 +284,59 @@ def test_encoder_missing_is_reported_in_the_log(mac):
 
 
 def test_encoder_of_another_version_is_noted(mac):
-    fake = mac.root / 'jxlbatch'
-    fake.write_text('#!/bin/sh\necho "jxlbatch 0.0.1 (fake)"\n')
-    fake.chmod(0o755)
+    fake = fake_jxlbatch(mac, version='0.0.1')
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     result = mac.run(mac.main_script('photos'), a, jxlbatch=fake)
     assert result.returncode == 0
     assert f'! {fake} is not jxlbatch {VERSION}' in mac.log
+
+
+def fake_jxlbatch(mac, version=VERSION):
+    """
+    A stand-in for jxlbatch that answers --version with ``version`` (the
+    shortcut's own by default, so the script's check passes) and records its
+    arguments in <root>/args.txt instead of converting.
+    """
+    fake = mac.root / 'jxlbatch'
+    fake.write_text(
+        '#!/bin/sh\n'
+        'case "$1" in\n'
+        f'  --version) echo "jxlbatch {version} (fake)";;\n'
+        f'  *) printf \'%s\\n\' "$@" > "{mac.root}/args.txt";;\n'
+        'esac\n'
+    )
+    fake.chmod(0o755)
+    return fake
+
+
+@pytest.mark.parametrize(
+    ('cores', 'options'),
+    [
+        ('all', ['-j', '0']),  # several photos at a time, every core
+        ('one', ['-j', '1', '-t', '1']),  # one photo at a time, one thread
+        ('', ['-j', '0']),  # anything else: all cores
+    ],
+)
+def test_cores_choice_becomes_jxlbatch_options(mac, cores, options):
+    # The shortcut's second question (All cores / One core) reaches the
+    # script as CORES; run.zsh turns it into jxlbatch's -j and -t.
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script('photos', cores=cores), a, jxlbatch=fake_jxlbatch(mac)
+    )
+    assert result.returncode == 0, result.stderr
+    args = (mac.root / 'args.txt').read_text().splitlines()
+    assert args == [
+        '--mac',
+        '-q',
+        '83',
+        '-e',
+        '7',
+        *options,
+        '-C',
+        str(mac.work),
+        'jxl_job.txt',
+    ]
 
 
 def exported(mac, fixture, name):
@@ -523,7 +573,8 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
     """
     Same libraries, same settings: the Mac shortcuts' encoder writes the same
     bytes as the iPhone's, HDR included (libjxl's output doesn't depend on the
-    thread count).
+    thread count), also converting two photos at a time (-j 2, as the
+    shortcuts' "All cores" may).
     """
     fixtures = [
         FIXTURES / 'hdr' / 'o1.heic',
@@ -533,15 +584,22 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
         FIXTURES / 'heif' / 'rotate_then_crop.heic',
     ]
     results = {}
-    for encoder in (wasm, macos):
-        folder = tmp_path / encoder.name
+    for label, encoder, args in (
+        ('wasm', wasm, []),
+        ('macos', macos, []),
+        ('macos-j2', macos, ['-j', '2']),
+    ):
+        folder = tmp_path / label
         folder.mkdir()
         ph.stage(folder, fixtures)
-        result = encoder.run(['-q', '83', '-e', '7', 'jxl_job.txt'], folder)
+        result = encoder.run(
+            ['-q', '83', '-e', '7', *args, 'jxl_job.txt'], folder
+        )
         assert result.returncode == 0, result.stdout
-        results[encoder.name] = {
+        results[label] = {
             p.name: p.read_bytes() for p in folder.glob('jxl_out_*.jxl')
         } | {'done': (folder / 'jxl_done.txt').read_text()}
 
-    assert len(results[wasm.name]) == len(fixtures) + 1
-    assert results[wasm.name] == results[macos.name]
+    assert len(results['wasm']) == len(fixtures) + 1
+    for label, got in results.items():
+        assert got == results['wasm'], label

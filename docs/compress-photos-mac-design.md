@@ -555,21 +555,37 @@ themselves reuse most of `build_shortcuts.py`.
 ## 7. Decisions taken (2026-10-04)
 
 1. **Names**: *Compress Photos (macOS)* and *Compress Photo Files (macOS)*.
+
 2. **Two shortcuts**: the Photos one is the core; the Finder one is a small
    add-on sharing the script core, with a different output policy (files, not
    Photos).
+
 3. **Deletion**: Compress Photos (macOS) offers to delete the originals from
    both entry points, Share menu and picker, with the iOS `delete`/`keep`
    rules. Compress Photo Files (macOS) never deletes anything.
+
 4. **Same tool folder and version** as the iPhone shortcuts (4.7).
+
 5. **arm64 only**, macOS 14 or later. The release file stays `jxlbatch-macos`,
    without an architecture suffix, so a later universal build keeps the link.
+
 6. **Encoder location**: `~/.local/bin/jxlbatch`, with `~/bin`,
    `/usr/local/bin` and `/opt/homebrew/bin` as fallbacks (4.5).
 
+7. **Parallel conversion** (0.5.0, 2026-10-05): the Mac shortcuts ask *All
+   cores (fast)* or *One core (keeps the Mac responsive)* after the quality;
+   the encoder gets `-j` (photos at a time; 0: from the cores and the memory)
+   and `-t` (threads per photo), with each worker thread owning a libjxl pool
+   and the output and `jxl_done.txt` kept in job order, so they read as before.
+   Measured first: one photo alone keeps about half of 14 cores busy; 18 photos
+   took 10.5 s one at a time and 7 s with 2, 3 or 4 at a time (within half a
+   second of each other), so `-j 0` picks one per 5 cores, at most 3, and one
+   per 4 GB of memory. Splitting the job file across two `jxlbatch` processes
+   in the shell was rejected: interleaved logs and competing thread pools.
+
 Still open:
 
-7. **Auto-download of the encoder** in the shortcut: phase 6 or never.
+8. **Auto-download of the encoder** in the shortcut: phase 6 or never.
 
 ## 8. Risks
 

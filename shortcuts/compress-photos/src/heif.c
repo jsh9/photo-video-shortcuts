@@ -15,7 +15,58 @@
 
 void heif_decoder_version(char *buf, size_t len) { snprintf(buf, len, "libheif %s", heif_get_version()); }
 
-static void release_heif_image(void *owner) { heif_image_release((struct heif_image *)owner); }
+// A decoded image and the context it was decoded from. libheif counts an
+// image's memory under its context, in a table keyed by the context's
+// address, so the context must outlive its images: released first, a later
+// context at the same address would be charged for the image (with several
+// photos decoding at a time, jxlbatch -j, that failed photos with "Security
+// limit exceeded"). The context goes with its last hold: heif_decode's own,
+// the photo's, the gain map's.
+typedef struct {
+  struct heif_context *ctx;
+  int holds;
+} heif_source_t;
+
+typedef struct {
+  struct heif_image *image;
+  heif_source_t *source;
+} heif_owned_t;
+
+static heif_source_t *source_new(struct heif_context *ctx) {
+  heif_source_t *s = (heif_source_t *)malloc(sizeof *s);
+  if (s) {
+    s->ctx = ctx;
+    s->holds = 1;
+  }
+  return s;
+}
+
+static void source_release(heif_source_t *s) {
+  if (--s->holds == 0) {
+    heif_context_free(s->ctx);
+    free(s);
+  }
+}
+
+static void release_heif_image(void *owner) {
+  heif_owned_t *o = (heif_owned_t *)owner;
+  heif_image_release(o->image);
+  source_release(o->source);
+  free(o);
+}
+
+// Makes `img` own `image`, with a hold on its context. Returns 0, or -1 if
+// out of memory (img then owns nothing).
+static int hold_image(heif_source_t *source, struct heif_image *image, image_t *img) {
+  heif_owned_t *o = (heif_owned_t *)malloc(sizeof *o);
+  if (!o) return -1;
+  o->image = image;
+  o->source = source;
+  source->holds++;
+  img->owner = o;
+  img->owner_free = release_heif_image;
+  return 0;
+}
 
 // Finds the 'tmap' item derived from `primary` and its gain map. libheif
 // doesn't read 'tmap' items itself. Returns 1 if found, 0 if there is none,
@@ -268,8 +319,9 @@ static int alpha_is_plain(struct heif_context *ctx, const uint8_t *buf, size_t l
 
 // Decodes the gain map, upright, and the part of it that covers the upright
 // photo.
-static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *primary, heif_item_id id,
+static int decode_gain_map(heif_source_t *source, struct heif_image_handle *primary, heif_item_id id,
                            hdr_parts_t *parts, char *note, size_t note_len) {
+  struct heif_context *ctx = source->ctx;
   image_t *gm = &parts->gain_map;
   struct heif_image_handle *handle = NULL;
   struct heif_image *image = NULL;
@@ -310,8 +362,11 @@ static int decode_gain_map(struct heif_context *ctx, struct heif_image_handle *p
   gm->channels = mono ? 1 : 3;
   gm->bits = heif_image_get_bits_per_pixel_range(image, channel);
   gm->bytes_per_sample = gm->bits > 8 ? 2 : 1;
-  gm->owner = image;
-  gm->owner_free = release_heif_image;
+  if (hold_image(source, image, gm) != 0) {
+    memset(gm, 0, sizeof *gm);  // nothing to free in gm; `image` is released below
+    snprintf(note, note_len, "not enough memory");
+    goto done;
+  }
   // Monochrome values are as coded: full or limited range, as signaled by
   // the colr box or else the HEVC stream. RGB comes out full range.
   parts->gain_map_full_range = 1;
@@ -352,8 +407,9 @@ done:
 // Replaces the decoded SDR image with its HDR rendition when the file has a
 // gain map (see hdr.h): an ISO 21496-1 one, or else Apple's older one.
 // Otherwise leaves it, with a note if the gain map can't be used.
-static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t len, int sdr, int own_transforms,
+static void apply_gain_map(heif_source_t *source, const uint8_t *buf, size_t len, int sdr, int own_transforms,
                            struct heif_image_handle *primary, image_t *img, color_t *color, hdr_info_t *hdr) {
+  struct heif_context *ctx = source->ctx;
   hdr_parts_t parts;
   memset(&parts, 0, sizeof parts);
   const heif_item_id primary_id = heif_image_handle_get_item_id(primary);
@@ -399,7 +455,7 @@ static void apply_gain_map(struct heif_context *ctx, const uint8_t *buf, size_t 
         n ? gainmap_icc_cicp_primaries(&profile) : heif_item_nclx_primaries(buf, len, tmap_id);
   }
   const int primaries = hdr_check(color, &parts.meta, hdr);
-  if (!primaries || decode_gain_map(ctx, primary, gain_map_id, &parts, hdr->note, sizeof hdr->note) != 0) {
+  if (!primaries || decode_gain_map(source, primary, gain_map_id, &parts, hdr->note, sizeof hdr->note) != 0) {
     return;
   }
   // Apple's HDR profile: ISO 21496-1 puts it on the 'tmap' item; it is looked
@@ -439,7 +495,15 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
     snprintf(err, err_len, "out of memory");
     return -1;
   }
-  struct heif_error e = heif_context_read_from_memory_without_copy(ctx, buf, len, NULL);
+  heif_source_t *source = source_new(ctx);  // this call's hold; the images take their own
+  if (!source) {
+    heif_context_free(ctx);
+    snprintf(err, err_len, "out of memory");
+    return -1;
+  }
+  // A copy of the file: the context outlives this call (and the caller's
+  // buffer) as long as its images do.
+  struct heif_error e = heif_context_read_from_memory(ctx, buf, len, NULL);
   if (e.code != heif_error_Ok) {
     snprintf(err, err_len, "unreadable HEIF (%s)", e.message);
     goto done;
@@ -507,15 +571,18 @@ int heif_decode(const uint8_t *buf, size_t len, int sdr, image_t *img, color_t *
   img->channels = alpha ? 4 : 3;
   img->bytes_per_sample = wide ? 2 : 1;
   img->bits = wide ? bits : 8;
-  img->owner = image;  // the decoded image outlives the context
-  img->owner_free = release_heif_image;
+  if (hold_image(source, image, img) != 0) {  // the image outlives this call, with the context
+    memset(img, 0, sizeof *img);
+    snprintf(err, err_len, "out of memory");
+    goto done;
+  }
   image = NULL;
   const int t = own_transforms ? apply_transforms(ctx, photo, (int)img->w, (int)img->h, img, NULL, NULL) : 0;
   if (t != 0) {
     snprintf(err, err_len, t == -2 ? "HEIF decoding failed (invalid crop)" : "out of memory");
     goto done;
   }
-  apply_gain_map(ctx, buf, len, sdr, own_transforms, handle, img, color, hdr);
+  apply_gain_map(source, buf, len, sdr, own_transforms, handle, img, color, hdr);
   rc = 0;
 
 done:
@@ -526,6 +593,6 @@ done:
   heif_decoding_options_free(options);
   if (image) heif_image_release(image);
   if (handle) heif_image_handle_release(handle);
-  heif_context_free(ctx);
+  source_release(source);  // frees the context unless an image still holds it
   return rc;
 }

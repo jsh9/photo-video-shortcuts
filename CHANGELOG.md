@@ -3,6 +3,45 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.5.0] - 2026-10-05
+
+- Added
+  - The Mac shortcuts ask, after the quality, how to use the Mac's cores. *All
+    cores (fast)* converts several photos at a time, each with a share of the
+    cores: two at a time on an 8-core Mac, three on 14 cores or more, fewer
+    with less than 8 GB of memory; a batch of 18 photos took 7 s instead of
+    10.5 s on a 14-core Mac. *One core (keeps the Mac responsive)* converts one
+    photo at a time on one thread. The files are the same bytes either way, and
+    the log and `jxl_done.txt` read as before, photo by photo in order (a
+    photo's lines appear once the photos before it are done).
+  - `jxlbatch -j N` converts N photos at a time (`-j 0`: from the cores and the
+    memory) and `-t T` sets the threads per photo, in the builds with threads
+    (`jxlbatch-macos`, `build-native.sh`); the WebAssembly build accepts both
+    and converts one photo at a time, as before. The default is unchanged: one
+    photo at a time with all the cores.
+- Fixed
+  - *Compress Photos (macOS)* from Photos spent longer after the conversion
+    than on it with a large library: collecting the originals looked each one
+    up with a `whose id is` filter, which scans the whole library (about 1.6 s
+    per photo in a library of 58,000 items), and the album pass asked Photos
+    for each album separately (about 17 ms each, 12 s for 689 albums). The
+    originals are now referenced by id directly, the files are imported in one
+    call instead of one per file (about 0.5 s each), and the albums' contents
+    are read one folder at a time: for 37 photos in that library, Photos' part
+    went from 88 s to 19 s (10 s importing, 9 s for 689 albums). The log's last
+    lines now say how long Photos took for each of these steps, and the
+    progress window says when Photos' part begins.
+  - With several HEIF photos decoding at a time, libheif's memory accounting
+    could fail one of them with "Security limit exceeded" (it counts a
+    context's images in a table keyed by the context's address, and `jxlbatch`
+    released a decoded image after its context). The context now stays until
+    its images are released.
+- Changed
+  - Update the Mac shortcuts and `jxlbatch-macos` together: the shortcuts pass
+    the new options, which an older encoder rejects (the log then shows its
+    usage text and the version note). The iPhone shortcuts and `jxlbatch.wasm`
+    only carry the new version number; iPhone users don't need to update.
+
 ## [Compress Photos 0.4.0] - 2026-10-04
 
 - Added

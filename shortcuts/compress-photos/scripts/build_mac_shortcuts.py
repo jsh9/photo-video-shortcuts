@@ -105,18 +105,30 @@ ROUTES = {
 FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
 WARNINGS = r'(^|\n) *(!|ERROR|[0-9]+ failed)'
+# The question after the quality: how the Mac's cores are used, as a menu
+# (two short choices; the first is the usual one). Each title's value is what
+# the script reads in CORES (run.zsh): "all" converts several photos at a
+# time with all the cores (jxlbatch -j 0), "one" converts one photo at a time
+# on one thread (-j 1 -t 1), leaving the Mac free for other work.
+CORES_PROMPT = 'Cores to use'
+CORES_CHOICES = [
+    ('All cores (fast)', 'all'),
+    ('One core (keeps the Mac responsive)', 'one'),
+]
 
 # ---------------------------------------------------------------------------
 # The shell script (zsh): scripts/mac/*.zsh, with @PLACEHOLDERS@
 
 MAC = HERE / 'mac'
 # The placeholders that become Shortcuts variables, and the variable each one
-# is in the shortcut: the chosen quality (Match Text's Matches), the lines of
-# NAMES or PATHS (Combine Text), and Skipped Echo (an echo of what the
-# shortcut skipped; empty when nothing was, which leaves ">> $LOG" alone, a
-# command that only touches the log).
+# is in the shortcut: the chosen quality (Match Text's Matches), the cores
+# choice (the variable Cores, see choose_cores), the lines of NAMES or PATHS
+# (Combine Text), and Skipped Echo (an echo of what the shortcut skipped;
+# empty when nothing was, which leaves ">> $LOG" alone, a command that only
+# touches the log).
 SLOTS = {
     '@QUALITY@': 'Matches',
+    '@CORES@': 'Cores',
     '@LINES@': 'Combined Text',
     '@SKIPPED@': 'Skipped Echo',
 }
@@ -159,7 +171,7 @@ def work_check(work):
 
 def script_text(name, body, label, work):
     """
-    The script as one text with the three @SLOTS@ still in it: common.zsh, then
+    The script as one text with the four @SLOTS@ still in it: common.zsh, then
     ``body`` (photos.zsh or files.zsh) with run.zsh at its @RUN@.
     """
     text = (MAC / 'common.zsh').read_text() + (MAC / body).read_text()
@@ -223,16 +235,17 @@ def finish_script(work):
     )
 
 
-def script(name, body, label, work, quality, lines):
-    """The Run Shell Script text parts: strings and the three variables."""
+def script(name, body, label, work, quality, cores, lines):
+    """The Run Shell Script text parts: strings and the four variables."""
     refs = {
         '@QUALITY@': quality,
+        '@CORES@': cores,
         '@LINES@': lines,
         '@SKIPPED@': variable('Skipped Echo'),
     }
     parts = []
     for piece in re.split(
-        '(@QUALITY@|@LINES@|@SKIPPED@)',
+        '(@QUALITY@|@CORES@|@LINES@|@SKIPPED@)',
         script_text(name, body, label, work),
     ):
         if piece in refs:
@@ -241,6 +254,21 @@ def script(name, body, label, work, quality, lines):
             parts.append(piece)
 
     return parts
+
+
+def choose_cores(b):
+    """
+    Asks how to use the Mac's cores (CORES_CHOICES, a Choose from Menu) and
+    returns the variable Cores, set to the chosen value for the script.
+    """
+
+    def choose(value):
+        return lambda: b.set_variable('Cores', b.text(value))
+
+    b.choose_from_menu(
+        CORES_PROMPT, {title: choose(value) for title, value in CORES_CHOICES}
+    )
+    return variable('Cores')
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +334,7 @@ def selection_route(b):
     collects the originals to delete in ORIGINALS_ALBUM.
     """
     quality = choose_quality(b)
+    cores = choose_cores(b)
     count = b.match_text(variable('Selection'), r'\d+')
     b.notification(
         'JPEG XL',
@@ -320,7 +349,13 @@ def selection_route(b):
     ids = b.run_applescript(applescript_text('export'), input_ref=work)
     result = b.run_shell_script(
         *script(
-            NAME_PHOTOS, 'selection.zsh', 'IDS', WORK_SELECTION, quality, ids
+            NAME_PHOTOS,
+            'selection.zsh',
+            'IDS',
+            WORK_SELECTION,
+            quality,
+            cores,
+            ids,
         )
     )
     # "imported=N", "collected=M", then "! ..." problem lines.
@@ -370,6 +405,7 @@ def picker_route(b):
     # job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
     quality = choose_quality(b)
+    cores = choose_cores(b)
     b.notification(
         'JPEG XL',
         'Converting ',
@@ -389,6 +425,7 @@ def picker_route(b):
             'NAMES',
             WORK_PHOTOS,
             quality,
+            cores,
             b.combine(variable('Names'), '\n'),
         ),
         input_ref=photos,
@@ -483,6 +520,7 @@ def build_files(sample):
 
     b.if_has_value(SHORTCUT_INPUT, lambda: None, no_input)
     quality = choose_quality(b)
+    cores = choose_cores(b)
     b.notification(
         'JPEG XL',
         'Converting ',
@@ -505,6 +543,7 @@ def build_files(sample):
             'PATHS',
             WORK_FILES,
             quality,
+            cores,
             b.combine(variable('Paths'), '\n'),
         ),
         input_ref=SHORTCUT_INPUT,

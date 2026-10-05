@@ -49,6 +49,9 @@ skipped=''
 [ "$videos" -gt 0 ] && skipped="${skipped:+$skipped, }$videos video(s)"
 [ -n "$skipped" ] && echo "Skipped $skipped: only still photos are converted." >> "$LOG"
 @RUN@
+# What follows is Photos' work (import.applescript), which the progress window
+# would otherwise show nothing of.
+[ -f "$WORK/jxl_done.txt" ] && { echo; echo "Now Photos imports the files, adds them to their albums and collects the originals..."; } >> "$LOG"
 # Each result becomes <work>/out/Name.jxl (never replacing a file), and one
 # output line per result, "path|original id|delete or keep|Name.jxl", for
 # import.applescript. Nothing when nothing was converted.
