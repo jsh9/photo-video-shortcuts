@@ -343,8 +343,9 @@ def test_picker_shows_images_only(compress):
 
 def test_only_stills_used_after_sorting(compress):
     # Photos (the share sheet's items or the picked photos) is read once, by
-    # the sorting loop; staging, album files and saving the results (whose
-    # job indices are positions in the list) all use Stills.
+    # the sorting loop; staging, album files, collecting the originals in the
+    # album (share sheet) and saving the results (whose job indices are
+    # positions in the list) all use Stills.
     readers = [
         a
         for a in compress
@@ -363,7 +364,7 @@ def test_only_stills_used_after_sorting(compress):
         and ph.params(a)['WFControlFlowMode'] == 0
         and a is not readers[0]
     ]
-    assert loops.count('Stills') == 2  # staging, album files
+    assert loops.count('Stills') == 3  # staging, album files, collection
     originals = [
         ph.params(a)['WFInput']['Value'].get('VariableName')
         for a in compress
