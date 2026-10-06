@@ -514,11 +514,12 @@ int mp4meta_log(const char *path, char *out, size_t out_len, char *err, size_t e
   if (r != 0) return -1;
   box_t entry, logs;
   r = video_sample_entry(moov, moov_len, &entry);
-  // A visual sample entry: its header, 78 bytes of fields (size, depth,
-  // compressor...), then its boxes: colr, fiel, logs...
-  const size_t start = entry.pos + entry.header + 78, end = entry.pos + entry.size;
-  if (r == 1)
+  if (r == 1) {
+    // A visual sample entry: its header, 78 bytes of fields (size, depth,
+    // compressor...), then its boxes: colr, fiel, logs...
+    const size_t start = entry.pos + entry.header + 78, end = entry.pos + entry.size;
     r = start <= end ? find_child(moov, start, end, FOURCC('l', 'o', 'g', 's'), &logs) : -1;
+  }
   if (r == 1) {
     size_t len = logs.size - logs.header;
     const char *name = (const char *)moov + logs.pos + logs.header;
