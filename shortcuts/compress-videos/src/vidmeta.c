@@ -8,10 +8,12 @@
 // ffmpeg can't do this itself: it writes the movie's keys back as unnamed text
 // entries, and drops the video track's. `vidmeta key` prints one of the
 // movie's keys, which ffprobe can misread (it reads an iPhone's 8-byte
-// integers as 0).
+// integers as 0); `vidmeta log` prints the video's log transfer function
+// (Apple Log), which ffprobe doesn't show at all.
 //
 // Usage: vidmeta copy ORIGINAL CONVERTED   (CONVERTED must end with its moov)
 //        vidmeta key FILE KEY              (exit status 1: no such key)
+//        vidmeta log FILE                  (exit status 1: not a log recording)
 //        vidmeta --version
 //        vidmeta --selftest
 #include <stdint.h>
@@ -30,6 +32,7 @@ static int usage(void) {
   fprintf(stderr,
           "usage: vidmeta copy ORIGINAL CONVERTED\n"
           "       vidmeta key FILE KEY\n"
+          "       vidmeta log FILE\n"
           "       vidmeta --version\n"
           "       vidmeta --selftest\n");
   return 2;
@@ -55,6 +58,17 @@ static int key(const char *path, const char *name) {
   if (found < 0) fprintf(stderr, "vidmeta: %s\n", err);
   if (found <= 0) return 1;
   printf("%s\n", value);
+  return 0;
+}
+
+// Prints the name of the video's log transfer function; nothing, and exit
+// status 1, when it has none.
+static int log_function(const char *path) {
+  char name[256], err[512] = "";
+  const int found = mp4meta_log(path, name, sizeof name, err, sizeof err);
+  if (found < 0) fprintf(stderr, "vidmeta: %s\n", err);
+  if (found <= 0) return 1;
+  printf("%s\n", name);
   return 0;
 }
 
@@ -351,5 +365,6 @@ int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--selftest") == 0) return selftest();
   if (argc == 4 && strcmp(argv[1], "copy") == 0) return copy(argv[2], argv[3]);
   if (argc == 4 && strcmp(argv[1], "key") == 0) return key(argv[2], argv[3]);
+  if (argc == 3 && strcmp(argv[1], "log") == 0) return log_function(argv[2]);
   return usage();
 }

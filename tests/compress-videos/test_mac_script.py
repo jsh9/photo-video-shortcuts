@@ -38,7 +38,8 @@ case " $* " in
     print -l "Codecs:" " D..... = Decoding supported" " -------" \
       " DEV.LS hevc   H.265 (encoders: libx265)" " D.V.LS h264   H.264" \
       " DEV.L. av1    AV1 (decoders: libdav1d) (encoders: libsvtav1)" \
-      " ..VIL. prores Apple ProRes" " D.A.L. aac    AAC" " D.AIL. alac   ALAC" \
+      " D.VIL. prores Apple ProRes" " ..VIL. dnxhd  VC3/DNxHD" " D.A.L. aac    AAC" \
+      " D.AIL. alac   ALAC" " D.A..S pcm_s16le PCM signed 16-bit little-endian" \
       " ..A..S apple_apac Apple Positional Audio Codec"
     exit 0;;
   *" -h "*)
@@ -73,7 +74,7 @@ cat "$probe"
 """
 FAKE_VIDMETA = r"""#!/bin/zsh
 # Stands in for vidmeta; its keys: the playback intent the test wrote
-# (probes/NAME.intent), if any.
+# (probes/NAME.intent), if any; its log curve: probes/NAME.log, if any.
 dir=${0:A:h}
 case $1 in
   --version) print -r -- "vidmeta ${FAKE_VIDMETA_VERSION:-@VERSION@}";;
@@ -81,6 +82,9 @@ case $1 in
     [ "$3" = com.apple.quicktime.full-frame-rate-playback-intent ] || exit 1
     [ -f "$dir/probes/${2:t}.intent" ] || exit 1
     cat "$dir/probes/${2:t}.intent";;
+  log)
+    [ -f "$dir/probes/${2:t}.log" ] || exit 1
+    cat "$dir/probes/${2:t}.log";;
   copy)
     print -r -- "copy $2 $3" >> "$dir/vidmeta.txt"
     if [ -n "${FAKE_VIDMETA_FAIL-}" ]; then
@@ -163,14 +167,18 @@ class Fake:
     def tools(self):
         return {n: self.bin / n for n in ('ffmpeg', 'ffprobe', 'vidmeta')}
 
-    def describe(self, name, intent=None, **probe):
+    def describe(self, name, intent=None, log=None, **probe):
         """
-        What ffprobe says of a video, and its playback intent key as vidmeta
-        reads it (``intent``: '1' full frame rate, '0' slo-mo, None: no key).
+        What ffprobe says of a video, and what vidmeta reads: its playback
+        intent key (``intent``: '1' full frame rate, '0' slo-mo, None: no key)
+        and its log curve (``log``: Apple Log's name, None: not a log video).
         """
         (self.bin / 'probes' / f'{name}.txt').write_text(probe_text(**probe))
         if intent is not None:
             (self.bin / 'probes' / f'{name}.intent').write_text(f'{intent}\n')
+
+        if log is not None:
+            (self.bin / 'probes' / f'{name}.log').write_text(f'{log}\n')
 
     def output(
             self,
@@ -591,11 +599,18 @@ def test_slo_mo_rule(mac, fake, rate, avg, intent, env, skipped):
 
 @pytest.mark.parametrize(
     ('vcodec', 'converted'),
-    [('hevc', True), ('h264', True), ('av1', True), ('prores', False)],
+    [
+        ('hevc', True),
+        ('h264', True),
+        ('av1', True),
+        ('prores', True),
+        ('dnxhd', False),  # not in our build
+    ],
 )
 def test_video_this_ffmpeg_cant_decode(mac, fake, vcodec, converted):
     # The picture's codec must be one ffmpeg -codecs says it decodes (AV1:
-    # with libdav1d); else the video is skipped, not failed in ffmpeg.
+    # with libdav1d; ProRes: FFmpeg's own decoder); else the video is
+    # skipped, not failed in ffmpeg.
     video(mac, fake, 'IMG_0001.MOV', vcodec=vcodec)
     lines = mac.convert('A1|IMG_0001.MOV')
     assert len(lines) == (1 if converted else 0)
@@ -607,6 +622,92 @@ def test_video_this_ffmpeg_cant_decode(mac, fake, vcodec, converted):
         )
         assert mac.skipped == "Skipped 1 video(s) this ffmpeg can't decode."
         assert '!' not in mac.log
+
+
+def test_prores_converts_like_any_video(mac, fake):
+    # An iPhone's ProRes 422 HQ: 10-bit 4:2:2 HLG with LPCM sound. The same
+    # command as for HEVC: -pix_fmt yuv420p10le makes it 4:2:0.
+    video(
+        mac,
+        fake,
+        'IMG_0001.MOV',
+        vcodec='prores',
+        profile='HQ',
+        pix='yuv422p10le',
+        audio=(('pcm_s16le', 2),),
+    )
+    lines = mac.convert('A1|IMG_0001.MOV')
+    assert len(lines) == 1
+    assert fake.calls() == [
+        expected(
+            mac,
+            fake,
+            'IMG_0001.MOV',
+            1,
+            'h265',
+            'medium',
+            'none',
+            24,
+            '2K',
+            160,
+        )
+    ]
+    assert '3840×2160 30 fps HLG 10-bit, 1 KB → H.265' in mac.log
+
+
+APPLE_LOG = 'com.apple.rec2020.apple-log'
+
+
+@pytest.mark.parametrize(
+    ('vcodec', 'transfer', 'log', 'skipped'),
+    [
+        ('prores', 'unknown', APPLE_LOG, 'Apple Log'),
+        (
+            'prores',
+            'unknown',
+            'com.apple.apple-wide-gamut.apple-log',  # Apple Log 2
+            'Apple Log',
+        ),
+        ('hevc', 'unknown', APPLE_LOG, 'Apple Log'),  # whatever the codec
+        (
+            'prores',
+            'unknown',
+            None,
+            'perhaps a log recording (ProRes with no known color transfer)',
+        ),
+        (
+            'prores',
+            '',
+            None,
+            'perhaps a log recording (ProRes with no known color transfer)',
+        ),
+        (
+            'prores',
+            'unknown',
+            'com.example.log',
+            'a log recording (com.example.log)',
+        ),
+        ('prores', 'bt709', None, None),
+        ('prores', 'arib-std-b67', None, None),
+        ('hevc', 'unknown', None, None),  # only ProRes is guessed at
+    ],
+)
+def test_log_recordings(mac, fake, vcodec, transfer, log, skipped):
+    # Apple Log is a flat picture meant for a LUT: by the log curve vidmeta
+    # reads, or, for ProRes, by a missing color transfer.
+    video(mac, fake, 'IMG_0001.MOV', vcodec=vcodec, transfer=transfer, log=log)
+    lines = mac.convert('A1|IMG_0001.MOV')
+    if skipped:
+        assert lines == []
+        assert (
+            f'Skipped IMG_0001.MOV: {skipped}, which needs a LUT; a copy would '
+            'look flat'
+        ) in mac.log
+        assert mac.skipped == 'Skipped 1 Apple Log video(s).'
+        assert fake.calls() == []
+    else:
+        assert len(lines) == 1
+        assert 'LUT' not in mac.log
 
 
 def test_without_ids_a_photo_and_its_mov_are_a_live_photo(mac, fake):

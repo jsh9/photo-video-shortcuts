@@ -1,13 +1,19 @@
 // Writes a test video with Apple's AVAssetWriter, the way an iPhone records
-// one: a QuickTime movie with HEVC video (8-bit SDR, or 10-bit HLG), AAC sound,
+// one: a QuickTime movie with HEVC video (8-bit SDR, or 10-bit HLG) or Apple
+// ProRes 422 HQ (10-bit 4:2:2: SDR, HLG or Apple Log), AAC sound,
 // a rotation flag, and Apple's metadata keys on the movie and on the video
 // track, each with the data type an iPhone 17 Pro writes (see
 // docs/compress-videos-mac-design.md, 4.5).
 //
 // usage: make_video OUT.mov [--size WxH] [--seconds S] [--fps F] [--hlg]
 //                   [--rotate 0|90|180|270] [--audio stereo|none|surround,stereo]
-//                   [--slomo] [--no-keys]
+//                   [--slomo] [--prores] [--apple-log] [--no-keys]
 //
+// --prores writes ProRes 422 HQ, as an iPhone Pro records it; --apple-log
+// writes ProRes in Apple Log, as the Camera does: BT.2020 primaries and
+// matrix, no transfer function, and the log curve's name
+// (kCVImageBufferLogTransferFunctionKey), which the movie keeps in a `logs`
+// box of the video's sample description.
 // --slomo marks the video as an iPhone marks a slo-mo (its key
 // full-frame-rate-playback-intent is 0 instead of 1).
 // The picture is a gradient with a square moving across it, so that a copy
@@ -36,6 +42,8 @@ var rotate = 0
 var audio = ["stereo"]
 var keys = true
 var slomo = false
+var prores = false
+var appleLog = false
 while !args.isEmpty {
   let a = args.removeFirst()
   switch a {
@@ -51,6 +59,8 @@ while !args.isEmpty {
     let list = args.removeFirst()
     audio = list == "none" ? [] : list.split(separator: ",").map(String.init)
   case "--slomo": slomo = true
+  case "--prores": prores = true
+  case "--apple-log": (prores, appleLog) = (true, true)
   case "--no-keys": keys = false
   default: fail("unknown option \(a)")
   }
@@ -98,6 +108,7 @@ var compression: [String: Any] = [
   AVVideoExpectedSourceFrameRateKey: fps,
 ]
 if hlg { compression[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main10_AutoLevel as String }
+let tenBit = hlg || prores
 let color: [String: Any] = hlg
   ? [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
      AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
@@ -105,17 +116,21 @@ let color: [String: Any] = hlg
   : [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
      AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
      AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
-let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
-  AVVideoCodecKey: AVVideoCodecType.hevc,
+var settings: [String: Any] = [
+  AVVideoCodecKey: prores ? AVVideoCodecType.proRes422HQ : AVVideoCodecType.hevc,
   AVVideoWidthKey: width,
   AVVideoHeightKey: height,
-  AVVideoCompressionPropertiesKey: compression,
-  AVVideoColorPropertiesKey: color,
-])
+]
+if !prores { settings[AVVideoCompressionPropertiesKey] = compression }
+// Apple Log's colors come from each frame's attachments (frame(_:)): the
+// writer's color properties must name a transfer function, which Log has not.
+if !appleLog { settings[AVVideoColorPropertiesKey] = color }
+let video = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
 video.expectsMediaDataInRealTime = false
 video.transform = CGAffineTransform(rotationAngle: CGFloat(rotate) * .pi / 180)
 if keys { video.metadata = trackKeys }
-let format = hlg ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+let format = prores ? kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange
+  : hlg ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
   : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
 let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video,
   sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: format,
@@ -170,7 +185,7 @@ func frame(_ i: Int) -> CVPixelBuffer {
         } else {
           v = 128 + ((x / 2 + y) % 32) - 16
         }
-        if hlg {
+        if tenBit {
           base.advanced(by: y * stride + x * 2).assumingMemoryBound(to: UInt16.self).pointee =
             UInt16(v << 2) << 6
         } else {
@@ -180,6 +195,15 @@ func frame(_ i: Int) -> CVPixelBuffer {
     }
   }
   CVPixelBufferUnlockBaseAddress(pixels, [])
+  if appleLog {
+    for (key, value) in [
+      (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020),
+      (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+      (kCVImageBufferLogTransferFunctionKey, kCVImageBufferLogTransferFunction_AppleLog),
+    ] {
+      CVBufferSetAttachment(pixels, key, value, .shouldPropagate)
+    }
+  }
   return pixels
 }
 

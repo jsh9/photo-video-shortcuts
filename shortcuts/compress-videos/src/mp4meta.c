@@ -470,6 +470,73 @@ int mp4meta_key(const char *path, const char *key, char *out, size_t out_len, ch
   return found;
 }
 
+// The first sample description of the first video track in a moov: 1 and
+// *entry, 0 if there is none, -1 if a box on the way is damaged.
+static int video_sample_entry(const uint8_t *data, size_t len, box_t *entry) {
+  box_t top, b, mdia, minf, stbl, stsd;
+  size_t pos = 0;
+  int r;
+  if (next_box(data, &pos, len, &top) != 1) return -1;
+  pos = top.header;
+  while ((r = next_box(data, &pos, len, &b)) == 1) {
+    if (b.type != FOURCC('t', 'r', 'a', 'k') ||
+        handler_type(data, &b) != FOURCC('v', 'i', 'd', 'e'))
+      continue;
+    if (find_child(data, b.pos + b.header, b.pos + b.size, FOURCC('m', 'd', 'i', 'a'), &mdia) !=
+            1 ||
+        find_child(data, mdia.pos + mdia.header, mdia.pos + mdia.size, FOURCC('m', 'i', 'n', 'f'),
+                   &minf) != 1 ||
+        find_child(data, minf.pos + minf.header, minf.pos + minf.size, FOURCC('s', 't', 'b', 'l'),
+                   &stbl) != 1 ||
+        find_child(data, stbl.pos + stbl.header, stbl.pos + stbl.size, FOURCC('s', 't', 's', 'd'),
+                   &stsd) != 1)
+      return 0;
+    // stsd: version and flags, the number of entries, then the entries.
+    size_t epos = stsd.pos + stsd.header + 8;
+    if (epos > stsd.pos + stsd.size) return -1;
+    return next_box(data, &epos, stsd.pos + stsd.size, entry);
+  }
+  return r;
+}
+
+int mp4meta_log(const char *path, char *out, size_t out_len, char *err, size_t err_len) {
+  FILE *f = fopen(path, "rb");
+  if (!f) {
+    set_err(err, err_len, "can't open %s", path);
+    return -1;
+  }
+  uint8_t *moov = NULL;
+  size_t moov_len = 0;
+  long long offset;
+  int at_end;
+  int r = read_moov(f, &moov, &moov_len, &offset, &at_end, err, err_len);
+  fclose(f);
+  if (r != 0) return -1;
+  box_t entry, logs;
+  r = video_sample_entry(moov, moov_len, &entry);
+  // A visual sample entry: its header, 78 bytes of fields (size, depth,
+  // compressor...), then its boxes: colr, fiel, logs...
+  const size_t start = entry.pos + entry.header + 78, end = entry.pos + entry.size;
+  if (r == 1)
+    r = start <= end ? find_child(moov, start, end, FOURCC('l', 'o', 'g', 's'), &logs) : -1;
+  if (r == 1) {
+    size_t len = logs.size - logs.header;
+    const char *name = (const char *)moov + logs.pos + logs.header;
+    while (len > 0 && name[len - 1] == '\0') len--;  // a terminating NUL, if any
+    if (len >= out_len) {
+      set_err(err, err_len, "the log transfer function's name is too long");
+      r = -1;
+    } else {
+      memcpy(out, name, len);
+      out[len] = '\0';
+    }
+  } else if (r < 0) {
+    set_err(err, err_len, "damaged moov box in %s", path);
+  }
+  free(moov);
+  return r;
+}
+
 int mp4meta_append(const char *path, const uint8_t *box, size_t len, char *err, size_t err_len) {
   // Keep the file's own meta/udta boxes: pass them along with the new box.
   FILE *f = fopen(path, "rb");

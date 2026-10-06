@@ -130,10 +130,17 @@ Kept, as Photos shows them:
 
 Not converted at all (counted as skipped): slo-mo videos (the slow part is an
 edit that a copy would lose: it would play at normal speed), spatial videos
-(one view would be kept), videos whose picture or sound ffmpeg can't read (our
-ffmpeg reads H.265, H.264 and AV1 videos, not Apple ProRes), and photos and
-Live Photos. An AV1 or H.265 video, a copy this shortcut made for example, is
-converted again like any other.
+(one view would be kept), Apple Log videos (a flat picture meant to be graded
+with a LUT: a copy would look washed out), videos whose picture or sound ffmpeg
+can't read, and photos and Live Photos. Our ffmpeg reads H.265, H.264, AV1 and
+Apple ProRes videos: an iPhone Pro's ProRes recordings, the largest files an
+iPhone makes, are converted like any other, and so is an AV1 or H.265 video, a
+copy this shortcut made for example.
+
+Which videos count as Apple Log (iPhone 15 Pro and later): those whose file
+names the Apple Log curve, as Apple's video framework records it, and, to be
+safe, any ProRes video without a known color transfer (the file doesn't say how
+its brightness is coded).
 
 Which videos count as slo-mo: those recorded at more than 61 frames per second
 that the iPhone marked as slo-mo. Recent iPhones mark every video, so a video
@@ -150,6 +157,9 @@ Not kept in the copies:
 
 - spatial audio: an iPhone's 4-channel spatial sound track; the stereo track is
   kept;
+- ProRes's full color resolution: its 4:2:2 color becomes 4:2:0, as in every
+  H.265 and AV1 video (the iPhone's own H.265 included); the brightness keeps
+  its full resolution and 10 bits;
 - edits: the original recording is converted, without trims or filters made in
   Photos;
 - Cinematic mode's focus changes, and other timed data tracks (the copy is the

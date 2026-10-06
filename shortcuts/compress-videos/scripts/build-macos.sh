@@ -13,9 +13,9 @@
 # ad-hoc signed.
 #
 # FFmpeg is configured with --disable-everything plus what the shortcut's
-# commands use: MOV/MP4 in, MP4 out, HEVC, H.264, AAC, ALAC, PCM and Opus
-# decoding, scaling and resampling, and four libraries linked in statically:
-# x265 (H.265: the 8-bit library with the 10-bit one linked in, so it encodes
+# commands use: MOV/MP4 in, MP4 out, HEVC, H.264, Apple ProRes, AAC, ALAC, PCM
+# and Opus decoding, scaling and resampling, and four libraries linked in
+# statically: x265 (H.265: the 8-bit library with the 10-bit one linked in, so it encodes
 # Main and Main 10), SVT-AV1 (AV1) and libopus (Opus), and dav1d, which decodes
 # AV1. All of it runs on the CPU: no hardware encoder or decoder is built in.
 # x265 makes the build GPL, as this repository is. --extra-version puts
@@ -170,7 +170,8 @@ ninja -C "$dav1d_dir" install >>"$(log dav1d)" 2>&1 || fail dav1d
 echo "== FFmpeg $FFMPEG_VERSION"
 # Only what the shortcut's ffmpeg and ffprobe commands use:
 # - in: the file protocol and the MOV/MP4 demuxer; the video and audio codecs
-#   of iPhone and camera videos (HEVC, H.264, AAC, ALAC, PCM, Opus), and AV1
+#   of iPhone and camera videos (HEVC, H.264, Apple ProRes, AAC, ALAC, PCM,
+#   Opus; ProRes needs no parser, each packet being a whole frame), and AV1
 #   with dav1d (also for ffprobe: the script checks an AV1 copy is 10-bit);
 # - out: the MP4 muxer, x265, SVT-AV1 and libopus; pipe: for -progress pipe:1;
 # - between: scale (the size limit, and 10-bit conversion) and aresample
@@ -200,7 +201,7 @@ if [ "$(cat "$ffdir/configured" 2>/dev/null || true)" != "$stamp" ]; then
       --enable-gpl --enable-libx265 --enable-libsvtav1 --enable-libopus --enable-libdav1d \
       --enable-protocol=file,pipe \
       --enable-demuxer=mov --enable-muxer=mp4 \
-      --enable-decoder='hevc,h264,libdav1d,aac,alac,opus,pcm_*' \
+      --enable-decoder='hevc,h264,prores,libdav1d,aac,alac,opus,pcm_*' \
       --enable-parser=hevc,h264,aac,opus,av1 \
       --enable-encoder=libx265,libsvtav1,libopus \
       --enable-filter=scale,aresample,format,aformat,null,anull

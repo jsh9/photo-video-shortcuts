@@ -221,7 +221,7 @@ def test_selftest(vidmeta, vidmeta_release):
 
 
 @pytest.mark.parametrize(
-    'args', [[], ['copy'], ['copy', 'a'], ['key', 'a'], ['--help']]
+    'args', [[], ['copy'], ['copy', 'a'], ['key', 'a'], ['log'], ['--help']]
 )
 def test_usage(vidmeta, args):
     result = run(vidmeta, *args)
@@ -505,3 +505,89 @@ def test_key_of_a_missing_file(vidmeta, tmp_path):
     result = run(vidmeta, 'key', tmp_path / 'nothing.MOV', INTENT)
     assert result.returncode == 1
     assert "can't open" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# vidmeta log
+
+APPLE_LOG = b'com.apple.rec2020.apple-log'
+
+
+def logs_file(*traks):
+    return (
+        FTYP + FRAMES + box(b'moov', timed(b'mvhd', 0, ORIGINAL_TIMES), *traks)
+    )
+
+
+def described_trak(handler, entry):
+    """A track whose stsd holds ``entry``."""
+    stsd = box(b'stsd', struct.pack('>II', 0, 1), entry)
+    return box(
+        b'trak',
+        timed(b'tkhd', 0, ORIGINAL_TIMES),
+        box(
+            b'mdia',
+            timed(b'mdhd', 0, ORIGINAL_TIMES),
+            hdlr(handler),
+            box(b'minf', box(b'stbl', stsd)),
+        ),
+    )
+
+
+def prores_entry(*children):
+    """A ProRes 422 HQ sample entry: 78 bytes of fields, then its boxes."""
+    return box(b'apch', bytes(78), *children)
+
+
+COLR = box(b'colr', b'nclc', struct.pack('>HHH', 9, 2, 9))
+FIEL = box(b'fiel', b'\x01\x00')
+
+
+@pytest.mark.parametrize(
+    'name',
+    [APPLE_LOG, b'com.apple.apple-wide-gamut.apple-log', APPLE_LOG + b'\0'],
+)
+def test_log_curve(vidmeta, tmp_path, name):
+    # As AVFoundation writes Apple Log (make_video.swift --apple-log): colr
+    # with no transfer, fiel, then logs with the curve's name.
+    data = logs_file(
+        trak(b'soun', 0, ORIGINAL_TIMES),
+        described_trak(b'vide', prores_entry(COLR, FIEL, box(b'logs', name))),
+    )
+    path = tmp_path / 'IMG_0001.MOV'
+    path.write_bytes(data)
+    result = run(vidmeta, 'log', path)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        name.rstrip(b'\0').decode() + '\n',
+        '',
+    )
+
+
+@pytest.mark.parametrize(
+    'traks',
+    [
+        [described_trak(b'vide', prores_entry(COLR, FIEL))],  # not log
+        [described_trak(b'vide', prores_entry())],
+        [trak(b'vide', 0, ORIGINAL_TIMES)],  # no sample description
+        [described_trak(b'soun', prores_entry(box(b'logs', APPLE_LOG)))],
+        [],
+    ],
+    ids=['no-logs', 'no-boxes', 'no-stsd', 'audio-only', 'no-tracks'],
+)
+def test_no_log_curve(vidmeta, tmp_path, traks):
+    path = tmp_path / 'IMG_0001.MOV'
+    path.write_bytes(logs_file(*traks))
+    result = run(vidmeta, 'log', path)
+    assert (result.returncode, result.stdout, result.stderr) == (1, '', '')
+
+
+def test_log_of_a_damaged_sample_description(vidmeta, tmp_path):
+    # The sample entry claims more bytes than its stsd has.
+    entry = bytearray(prores_entry(box(b'logs', APPLE_LOG)))
+    struct.pack_into('>I', entry, 0, len(entry) + 100)
+    path = tmp_path / 'IMG_0001.MOV'
+    path.write_bytes(logs_file(described_trak(b'vide', bytes(entry))))
+    result = run(vidmeta, 'log', path)
+    assert result.returncode == 1
+    assert 'damaged moov box' in result.stderr

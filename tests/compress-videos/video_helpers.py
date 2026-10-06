@@ -43,6 +43,8 @@ VIDEOS = {
     'hlg': ['--hlg'],  # 10-bit HLG (and Dolby Vision 8.4 on macOS 27)
     'slomo': ['--fps', '120', '--seconds', '1', '--slomo'],  # marked slo-mo
     'fast': ['--fps', '120', '--seconds', '1'],  # 120 fps, played at that rate
+    'prores': ['--prores', '--hlg', '--seconds', '1'],  # 4:2:2 10-bit HLG
+    'applelog': ['--apple-log', '--seconds', '0.5'],  # ProRes in Apple Log
     'two': ['--audio', 'surround,stereo', '--seconds', '1'],
     'silent': ['--audio', 'none', '--seconds', '1'],
     'big': ['--size', '1920x1080', '--seconds', '1', '--rotate', '90'],

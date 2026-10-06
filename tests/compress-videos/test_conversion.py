@@ -28,7 +28,10 @@ NAMES = {
     'ntsc': 'IMG_0008.MOV',
     'bare': 'IMG_0009.MOV',
     'fast': 'IMG_0010.MOV',
+    'prores': 'IMG_0012.MOV',
+    'applelog': 'IMG_0013.MOV',
 }
+SKIPPED = ('slomo', 'applelog')
 # Quick settings: the copies are checked, not the encoders' quality.
 SETTINGS = {
     'h265': {'Codec': 'h265', 'Preset': 'fast', 'Tune': 'none', 'RF': '28'},
@@ -68,15 +71,22 @@ def probe(tools, path):
     return video[0], audio
 
 
-def test_everything_but_the_slo_mo_converted(run):
+def test_everything_but_the_slo_mo_and_apple_log_converted(run):
     # The slo-mo is skipped as its file marks it; the 120 fps video that is
-    # marked to play at its full rate is converted.
-    assert sorted(run.copies) == sorted(k for k in NAMES if k != 'slomo')
+    # marked to play at its full rate is converted; ProRes is converted, but
+    # not in Apple Log (the log curve AVFoundation wrote, as the Camera does).
+    assert sorted(run.copies) == sorted(k for k in NAMES if k not in SKIPPED)
     log = run.mac.log
     assert 'Skipped IMG_0005.MOV: slo-mo (120 fps on average)' in log
-    assert 'Done: 9 of 9 converted in' in log
+    assert (
+        'Skipped IMG_0013.MOV: Apple Log, which needs a LUT; a copy would look '
+        'flat'
+    ) in log
+    assert 'Done: 10 of 10 converted in' in log
     assert '!' not in log
-    assert run.mac.skipped == 'Skipped 1 slo-mo video(s).'
+    assert run.mac.skipped == (
+        'Skipped 1 slo-mo video(s), 1 Apple Log video(s).'
+    )
 
 
 def test_codec_container_and_sound(run, tools):
@@ -128,23 +138,26 @@ def test_size_limit_and_rotation(run, tools):
     assert sizes['big'] == (1280, 720, -90)  # shown 720x1280
     assert sizes['four_three'] == (1280, 960, 0)
     assert sizes['sdr'] == (320, 180, -90)
-    for key in ('hlg', 'two', 'silent', 'ntsc', 'bare', 'fast'):
+    for key in ('hlg', 'two', 'silent', 'ntsc', 'bare', 'fast', 'prores'):
         assert sizes[key] == (320, 180, 0), key
 
 
 def test_color_tags(run, tools):
-    hlg, _ = probe(tools, run.copies['hlg'])
-    assert (
-        hlg['color_primaries'],
-        hlg['color_transfer'],
-        hlg['color_space'],
-        hlg['color_range'],
-    ) == (
-        'bt2020',
-        'arib-std-b67',
-        'bt2020nc',
-        'tv',
-    )
+    # HLG, from HEVC and from ProRes (4:2:2, made 4:2:0 by -pix_fmt)
+    for key in ('hlg', 'prores'):
+        hlg, _ = probe(tools, run.copies[key])
+        assert (
+            hlg['color_primaries'],
+            hlg['color_transfer'],
+            hlg['color_space'],
+            hlg['color_range'],
+        ) == (
+            'bt2020',
+            'arib-std-b67',
+            'bt2020nc',
+            'tv',
+        ), key
+
     sdr, _ = probe(tools, run.copies['sdr'])
     assert (
         sdr['color_primaries'],
@@ -296,7 +309,7 @@ def luma(ffmpeg, path, size, frames=10):
     )
 
 
-@pytest.mark.parametrize('key', ['sdr', 'big', 'hlg'])
+@pytest.mark.parametrize('key', ['sdr', 'big', 'hlg', 'prores'])
 def test_the_picture(run, tools, key):
     # PSNR of the luma against the original scaled to the copy's size.
     ffmpeg = vh.homebrew('ffmpeg')

@@ -101,8 +101,9 @@ nice -n 10 ffmpeg -hide_banner -nostdin -v warning -nostats -progress pipe:1 -y 
 - The size limit fits the stored frame in an L×L box: the long edge is at most
   L whatever the orientation, never enlarged, even sizes for 4:2:0.
   `-noautorotate` keeps the frame as stored and its rotation flag.
-- 10-bit for every video, as HandBrake's 10-bit encoders; frame rate as
-  recorded (`passthrough`); the color tags come from the stream.
+- 10-bit 4:2:0 for every video, as HandBrake's 10-bit encoders (ProRes's 4:2:2
+  too: `-pix_fmt yuv420p10le` converts it); frame rate as recorded
+  (`passthrough`); the color tags come from the stream.
 - x265: `keyint` 10 × the rounded average frame rate, `min-keyint` the rate,
   `-tune grain` when chosen, `hvc1` (Apple needs it). SVT-AV1:
   `-svtav1-params tune=0:enable-variance-boost=1:film-grain=8` (HandBrake's VQ
@@ -144,7 +145,12 @@ two small MP4 files, copies one's metadata onto the other and reads it back.
 `vidmeta key FILE KEY` prints one of the movie's keys (UTF-8 text, or an
 integer in decimal; exit status 1 when the file doesn't have it): the script
 reads the slo-mo mark with it (1.3), since ffprobe reads an iPhone's 8-byte
-integers as 0.
+integers as 0. `vidmeta log FILE` prints the name of the first video track's
+log curve, the `logs` box of its sample description (Apple Log:
+`com.apple.rec2020.apple-log`, Apple Log 2:
+`com.apple.apple-wide-gamut.apple-log`), which AVFoundation writes from the
+frames' `kCVImageBufferLogTransferFunctionKey`; ffprobe shows only an unknown
+transfer.
 
 ### 1.3. What is skipped
 
@@ -153,14 +159,13 @@ Before any video is converted, from the exported files and ffprobe:
 - photos, and Live Photos (a photo plus a `.mov` that isn't an item of its own;
   when Photos' export lists no items, any photo with a `.mov` of its name);
 - a video whose picture this ffmpeg can't decode: its codec isn't among those
-  `ffmpeg -codecs` marks `D` (our build decodes HEVC, H.264 and AV1, not Apple
-  ProRes);
+  `ffmpeg -codecs` marks `D` (our build decodes HEVC, H.264, ProRes and AV1);
 - slo-mo (with `SLOMO=1`, the default): Photos exports the recording at its
   capture rate (a 240 fps slo-mo averages 177) and the slow part is an edit, so
   a copy would play at normal speed. A video averaging above 61 fps is skipped
-  unless its movie key `com.apple.quicktime.full-frame-rate-playback- intent`
-  is 1. Recent iPhones write it on every video (seen on an iPhone 17 Pro): 0
-  for a slo-mo, 1 for the others, which play at their full rate, so a 4K video
+  unless its movie key `com.apple.quicktime.full-frame-rate-playback-intent` is
+  1\. Recent iPhones write it on every video (seen on an iPhone 17 Pro): 0 for a
+  slo-mo, 1 for the others, which play at their full rate, so a 4K video
   recorded at 120 fps (not slo-mo) is converted. Without the key (older
   iPhones, other cameras), a fast video is skipped as "perhaps slo-mo";
   `SLOMO=0` converts it. The average, not ffprobe's `r_frame_rate`: a
@@ -168,6 +173,12 @@ Before any video is converted, from the exported files and ffprobe:
   Photo's video that averages 28);
 - spatial video: "Stereo 3D" side data or a Multiview profile (not yet seen on
   a real spatial video);
+- a log recording (Apple Log): `vidmeta log` names a log curve, or the video is
+  ProRes with no known color transfer (`unknown`, missing or `reserved`), in
+  case a recording lacks the `logs` box. Apple Log is flat, meant to be graded
+  with a LUT, so a copy would look washed out. The rule was made from files
+  AVFoundation writes in Apple Log (`make_video.swift --apple-log`), not from a
+  real iPhone recording;
 - sound none of whose tracks ffmpeg can read (the copy would be silent);
 - Dolby Vision, when the ffmpeg in use has no `-dolbyvision` option.
 
@@ -177,7 +188,7 @@ Before any video is converted, from the exported files and ffprobe:
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `release.json`                   | the release files: `ffmpeg-macos`, `ffprobe-macos`, `vidmeta-macos` and the Mac shortcut                                                                  |
 | `VERSION`                        | the version, shared by the shortcut, `vidmeta` and our ffmpeg's version line                                                                              |
-| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy, and reading a key)                                                                    |
+| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy, and reading a key or the log curve)                                                   |
 | `scripts/build-macos.sh`         | builds `dist/ffmpeg-macos`, `dist/ffprobe-macos`, `dist/vidmeta-macos` and `build/vidmeta` (with the sanitizers, for the tests)                           |
 | `scripts/vf.py`                  | the questions (titles, descriptions, defaults) and their builders; re-exports `lib/wfkit.py`                                                              |
 | `scripts/build_mac_shortcuts.py` | generates and signs `dist/Compress Videos (macOS).shortcut`                                                                                               |

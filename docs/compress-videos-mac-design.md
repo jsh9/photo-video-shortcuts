@@ -91,8 +91,16 @@ written before the work; what the implementation and the spikes of 5.2 changed
   through a hardware accelerator, so an AV1 video in failed. Nothing uses the
   Mac's media engines (the user's requirement): no VideoToolbox in the build,
   and `-hwaccel none` in the command for Homebrew's ffmpeg too. A video whose
-  picture ffmpeg can't decode (`ffmpeg -codecs`; ProRes with our build) is
-  skipped and counted.
+  picture ffmpeg can't decode (`ffmpeg -codecs`) is skipped and counted.
+- **Apple ProRes** is decoded too (FFmpeg's own decoder, software, no library):
+  an iPhone Pro's ProRes 422 HQ, 10-bit 4:2:2, is converted to 4:2:0 by the
+  same command. **Apple Log** is skipped: AVFoundation stores the log curve's
+  name in a `logs` box of the video's sample description
+  (`com.apple.rec2020.apple-log`, or `com.apple.apple-wide-gamut.apple-log` for
+  Apple Log 2), with a `colr` whose transfer is 2, unspecified, which ffprobe
+  shows as `unknown`. `vidmeta log` reads the box; ProRes with no known
+  transfer is skipped as well, in case a recording lacks it. Found by writing
+  Apple Log ProRes with AVAssetWriter, not yet on a real recording.
 - **Free space** is checked twice: before Photos exports anything, at 500 MB
   per selected item (the count is all the shortcut knows then), and after the
   export, against the exported files' size, as 3.4 planned.

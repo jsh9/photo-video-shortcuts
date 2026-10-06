@@ -3,8 +3,9 @@
 # selected item (or "ERROR: ..."). Only videos are converted. Photos are
 # skipped, and so are Live Photos (a photo whose .mov of the same name is not
 # an item of its own), videos whose picture this ffmpeg can't decode, and the
-# videos a copy would lose something of: slo-mo, spatial video, sound this
-# ffmpeg can't read, Dolby Vision it can't carry.
+# videos a copy would lose something of: slo-mo, spatial video, log
+# recordings (Apple Log), sound this ffmpeg can't read, Dolby Vision it can't
+# carry.
 # Everything skipped is counted (vid_skipped.txt, for the notification) and
 # named in the log, before any video is converted.
 setopt nullglob
@@ -90,7 +91,7 @@ probe() {
   return 0
 }
 typeset -A J  # the videos to convert: J[N,key]
-njobs=0 unreadable=0 photos=0 live=0 novideo=0 slomo=0 spatial=0 noaudio=0 dolby=0 others=0 total_in=0
+njobs=0 unreadable=0 photos=0 live=0 novideo=0 slomo=0 spatial=0 logvideos=0 noaudio=0 dolby=0 others=0 total_in=0
 for f in "$WORK"/in/*(.N); do
   name=${f:t}
   if is_video "$name"; then
@@ -151,6 +152,23 @@ for f in "$WORK"/in/*(.N); do
     echo "Skipped $name: spatial video; a copy would keep one view only" >> "$LOG"
     continue
   fi
+  # A log recording (Apple Log: iPhone 15 Pro and later, in ProRes) is a flat
+  # picture meant to be graded with a LUT; a copy would look washed out. The
+  # video's sample description names its log curve (a `logs` box, which
+  # vidmeta reads; ffprobe shows only an unknown transfer). A ProRes video
+  # with no known transfer is taken for one too, in case a recording lacks
+  # the box.
+  curve=$("$vidmeta" log "$f" 2>/dev/null)
+  if [ -n "$curve" ] || { [ "$p_vcodec" = prores ] && [[ $p_transfer == (|unknown|reserved) ]]; }; then
+    logvideos=$((logvideos + 1))
+    case $curve in
+      *apple-log) what="Apple Log";;
+      '') what="perhaps a log recording (ProRes with no known color transfer)";;
+      *) what="a log recording ($curve)";;
+    esac
+    echo "Skipped $name: $what, which needs a LUT; a copy would look flat" >> "$LOG"
+    continue
+  fi
   # The sound: the first track with at most 2 channels this ffmpeg can read
   # (iPhones: the stereo AAC, before the 4-channel spatial audio, Apple's
   # APAC, which ffmpeg can't read); else the first readable one, mixed down
@@ -192,6 +210,7 @@ skipped=()
 (( novideo )) && skipped+=("$novideo video(s) this ffmpeg can't decode")
 (( slomo )) && skipped+=("$slomo slo-mo video(s)")
 (( spatial )) && skipped+=("$spatial spatial video(s)")
+(( logvideos )) && skipped+=("$logvideos Apple Log video(s)")
 (( noaudio )) && skipped+=("$noaudio video(s) whose sound can't be read")
 (( dolby )) && skipped+=("$dolby Dolby Vision video(s)")
 (( others )) && skipped+=("$others other file(s)")
