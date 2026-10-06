@@ -160,11 +160,12 @@ iPhone's need a-Shell, these need Run Shell Script.
 - The converted originals are collected in the album *Compressed to JXL* (from
   Photos, found by their photo id; from the picker, by the photos themselves),
   whether or not their JPEG XL has their HDR: the log says which don't
-  (`! HDR gain map not used`, or every one with *Drop HDR*). Nothing is deleted
-  by the shortcut: review the album, select all, delete. (Shortcuts' Delete
-  Photos action needs a prompt the Shortcuts app usually can't show on macOS
-  26, so the Mac shortcut doesn't use it.) The first time, macOS asks whether
-  Shortcuts may control Photos: choose Always Allow, or it asks on every run.
+  (`! HDR gain map not used`; with *Drop HDR*, none has it, and the log's
+  `HEIF` lines show no `HDR`). Nothing is deleted by the shortcut: review the
+  album, select all, delete. (Shortcuts' Delete Photos action needs a prompt
+  the Shortcuts app usually can't show on macOS 26, so the Mac shortcut doesn't
+  use it.) The first time, macOS asks whether Shortcuts may control Photos:
+  choose Always Allow, or it asks on every run.
 - **Progress:** a Terminal window opens and follows the conversion, photo by
   photo, as a-Shell shows it on the iPhone; with *All cores*, a photo's lines
   appear once the photos before it are done (the log it follows is in

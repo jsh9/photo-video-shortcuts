@@ -188,6 +188,16 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     ]
     assert saves[0] < runs[0], 'the share-sheet route collects before a-Shell'
     assert saves[1] > runs[-1], 'the picker route collects after the save'
+    # The share-sheet route writes the originals' album lists (for
+    # JXL-Import) before collecting them, or a re-converted photo's new copy
+    # would join the review album.
+    album_files = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and 'jxl_albums_' in repr(ph.params(a)['WFName'])
+    ]
+    assert album_files and max(album_files) < saves[0]
     # JXL-Import saves copies into their originals' albums only
     importer = shortcuts['JXL-Import']
     assert 'is.workflow.actions.deletephotos' not in [

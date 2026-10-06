@@ -87,11 +87,10 @@ WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
 # exports the originals into this folder and imports the results from it
 # (AppleScript), and its sandbox reaches ~/Pictures but not the folders above.
 WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
-# The album that collects the originals whose JPEG XL has everything they have
-# (a script can't delete photos; the user deletes them from there). Only the
-# selection route collects, by photo id; the picker route has no ids and
-# leaves the originals alone (a lookup by file name could pick the wrong
-# photo).
+# The converted originals are collected in the album wf.ORIGINALS_ALBUM (a
+# script can't delete photos; the user deletes them from there): the
+# selection route by photo id (import.applescript), the picker route by the
+# photos themselves (wf.collect_in_album).
 # Where every route keeps its log and the progress window's script: a plain
 # folder, so that Terminal (the progress window) never needs access to
 # iCloud Drive or Pictures (common.zsh sets the same path). Each route has its
@@ -276,34 +275,30 @@ def script(name, body, label, work, quality, cores, hdr, lines):
     return parts
 
 
-def choose_cores(b):
+def choose_value(b, prompt, choices, name):
     """
-    Asks how to use the Mac's cores (CORES_CHOICES, a Choose from Menu) and
-    returns the variable Cores, set to the chosen value for the script.
+    A Choose from Menu with ``prompt`` and ``choices`` ((title, value) pairs)
+    whose cases set the variable ``name`` to the chosen value, for the script;
+    returns the variable.
     """
 
     def choose(value):
-        return lambda: b.set_variable('Cores', b.text(value))
+        return lambda: b.set_variable(name, b.text(value))
 
     b.choose_from_menu(
-        CORES_PROMPT, {title: choose(value) for title, value in CORES_CHOICES}
+        prompt, {title: choose(value) for title, value in choices}
     )
-    return variable('Cores')
+    return variable(name)
+
+
+def choose_cores(b):
+    """Asks how to use the Mac's cores (CORES_CHOICES); the variable Cores."""
+    return choose_value(b, CORES_PROMPT, CORES_CHOICES, 'Cores')
 
 
 def choose_hdr(b):
-    """
-    Asks whether to keep HDR (HDR_CHOICES, a Choose from Menu) and returns the
-    variable HDR, set to the chosen value for the script.
-    """
-
-    def choose(value):
-        return lambda: b.set_variable('HDR', b.text(value))
-
-    b.choose_from_menu(
-        HDR_PROMPT, {title: choose(value) for title, value in HDR_CHOICES}
-    )
-    return variable('HDR')
+    """Asks whether to keep HDR (HDR_CHOICES); the variable HDR."""
+    return choose_value(b, HDR_PROMPT, HDR_CHOICES, 'HDR')
 
 
 # ---------------------------------------------------------------------------
@@ -493,8 +488,9 @@ def picker_route(b):
                 b.append_variable('Saved Photos', saved)
                 index = b.item_at_index(parts, 2)
                 original = b.item_at_index(photos, index)
-                copy_to_albums(b, saved, b.photo_albums(original))
-                collect_in_album(b, original, album)
+                albums = b.photo_albums(original)
+                copy_to_albums(b, saved, albums)
+                collect_in_album(b, original, album, albums)
 
             def not_saved():
                 b.append_variable(

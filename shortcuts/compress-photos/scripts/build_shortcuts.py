@@ -229,8 +229,9 @@ def save_results(b, originals=None, album=None):
 
         if originals:
             original = b.item_at_index(originals, index)
-            add_to_albums(b.photo_albums(original))
-            collect_in_album(b, original, album)
+            albums = b.photo_albums(original)
+            add_to_albums(albums)
+            collect_in_album(b, original, album, albums)
         else:
             albums_file = b.ashell_get_file(
                 'jxl_albums_', index, '.txt', error_if_missing=False

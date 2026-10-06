@@ -47,7 +47,9 @@ See [Installation](../../README.md#1-installation) in the main README.
     already in it isn't added twice). Review that album and delete its photos
     when you are done; the shortcut deletes nothing.
     - The first time, iOS asks whether the shortcut may save to a photo album:
-      allow it.
+      allow it. Don't Allow stops the run (from the share sheet, before the
+      conversion; from the picker, after the first copy is saved); run it again
+      and allow.
     - a-Shell's output says which copies lack their original's HDR
       (`! HDR gain map not used`, see [HDR photos](#31-hdr-photos)): those
       originals are in the album too, so look at the output before deleting.

@@ -216,11 +216,12 @@ def copy_to_albums(b, copy, albums):
     b.repeat_each(albums, per_album)
 
 
-def collect_in_album(b, photo, album):
+def collect_in_album(b, photo, album, albums=None):
     """
     Adds the library photo ``photo`` to ``album`` (a text ref holding
     ORIGINALS_ALBUM) unless it is already in it, and appends it to the variable
-    Collected.
+    Collected. ``albums``: the photo's album names if already read (Get Details
+    of Images ▸ Album), else they are read here.
 
     Save to Photo Album adds a photo that is already in the library to the
     album as it is (no copy) when it isn't in that album yet; one that is would
@@ -229,9 +230,10 @@ def collect_in_album(b, photo, album):
     diagnostic shortcut (2026-10-06): no copies, and the one-time permission
     prompt works there too.
     """
-    already = b.match_text(
-        b.photo_albums(photo), f'(^|\\n){ORIGINALS_ALBUM}($|\\n)'
-    )
+    if albums is None:
+        albums = b.photo_albums(photo)
+
+    already = b.match_text(albums, f'(^|\\n){ORIGINALS_ALBUM}($|\\n)')
 
     def add():
         b.save_to_album(photo, album)
