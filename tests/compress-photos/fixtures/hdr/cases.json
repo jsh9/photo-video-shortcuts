@@ -227,6 +227,10 @@
     "peak": 3.491194551155358,
     "primaries": "p3"
   },
+  "sky": {
+    "banding": true,
+    "primaries": "p3"
+  },
   "srgb": {
     "headroom": 3.4911454078807904,
     "peak": 3.491194551155358,

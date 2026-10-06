@@ -118,4 +118,5 @@ def test_hdr_sample_is_about_as_large_as_sdr(
     )
     assert result.returncode == 0, result.stdout
     sdr_jxl = tmp_path / 'jxl_out_1.jxl'
-    assert hdr_jxl.stat().st_size <= 1.25 * sdr_jxl.stat().st_size
+    # about 1.25 without the grain the HDR output gets against banding
+    assert hdr_jxl.stat().st_size <= 1.5 * sdr_jxl.stat().st_size

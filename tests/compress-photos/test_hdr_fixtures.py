@@ -25,7 +25,9 @@ import pytest
 
 FIXTURES = ph.HERE / 'fixtures' / 'hdr'
 CASES = json.loads((FIXTURES / 'cases.json').read_text())
-HDR = sorted(n for n, c in CASES.items() if 'note' not in c)
+HDR = sorted(
+    n for n, c in CASES.items() if 'note' not in c and 'banding' not in c
+)
 NOT_USED = sorted(n for n, c in CASES.items() if 'note' in c)
 # a sample for each build: rotation, crop, older gain map, 10-bit, channels,
 # edited in Photos

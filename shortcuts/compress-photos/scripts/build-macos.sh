@@ -123,7 +123,7 @@ ninja -C "$bdir/jxl" jxl jxl_cms jxl_threads >"$bdir/jxl.ninja.log" 2>&1 || { ta
 objdir="$bdir/jxlbatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
-for src in jxlbatch meta pixels heif gainmap hdr; do
+for src in jxlbatch meta pixels heif gainmap hdr grain; do
   # shellcheck disable=SC2086
   cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS \
     -DJXLBATCH_VERSION="\"$VERSION\"" \

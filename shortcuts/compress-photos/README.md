@@ -237,6 +237,15 @@ brighter, for a heavily edited photo (at full brightness they match). a-Shell
 then says `! Apple's HDR profile not found` (except for photos taken before iOS
 18, which never have one).
 
+Grain: an HDR JXL gets a little fine grain in its smooth areas (skies, walls,
+out-of-focus backgrounds), which makes it about 15-20% larger than it would be
+without. Apple draws the SDR version of an HDR JXL with half the levels an
+ordinary photo has, so a smooth sky would show stripes (a lossless file too);
+the grain hides them, as the camera's own grain does in the original. It's only
+visible zoomed far in. Photos converted by earlier versions keep their stripes;
+converting the original again fixes it. `jxlbatch --grain 0 --grain-coarse 0`
+turns the grain off (see [DEVELOPING.md](DEVELOPING.md)).
+
 Size: with a smooth gain map, like an iPhone's, an HDR JXL is about as large as
 the same photo converted as SDR (in tests, 4% smaller to 14% larger). A gain
 map with fine, noisy detail costs more (up to about 1.5× in tests). To convert
