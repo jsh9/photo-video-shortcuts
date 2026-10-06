@@ -44,24 +44,27 @@ def pq_green(jxl, ppm):
 
 @pytest.fixture(scope='module')
 def references(wasm, tmp_path_factory):
-    """The sky's lossless HDR picture (PQ) and its SDR picture (green)."""
+    """
+    The sky's lossless HDR picture (PQ), its SDR picture (green), and its q83
+    output without grain.
+    """
     folder = tmp_path_factory.mktemp('sky-reference')
     jxl, _ = convert(wasm, folder, '-q', '100', SKY)
+    pq = pq_green(jxl, folder / 'reference.ppm')
     sdr = mk.sky_scene(1024, 768)[..., 1].astype(np.float32)
-    return pq_green(jxl, folder / 'reference.ppm'), sdr
+    plain_folder = tmp_path_factory.mktemp('sky-plain')
+    jxl, output = convert(wasm, plain_folder, '-q', '83', *NO_GRAIN, SKY)
+    assert 'grain' not in output
+    return pq_green(jxl, plain_folder / 'plain.ppm'), pq, sdr
 
 
-def test_sky_bands_without_grain(wasm, references, tmp_path):
+def test_sky_bands_without_grain(references):
     # The problem the grain solves: through Apple's 8-bit PQ step, the sky
     # shows wide steps that its SDR picture doesn't, at both viewing scales.
-    jxl, output = convert(wasm, tmp_path, '-q', '83', *NO_GRAIN, SKY)
-    assert 'grain' not in output
-    ok, scores = banding.passes(
-        pq_green(jxl, tmp_path / 'out.ppm'), *references
-    )
-    assert not ok, scores
-    for ours, theirs in scores.values():
-        assert ours > theirs + 0.2, scores
+    plain, pq, sdr = references
+    for scale in (banding.MAC_FIT, banding.PHONE_FIT):
+        ours, theirs = banding.score(plain, pq, sdr, scale)
+        assert ours > theirs + 0.2, (ours, theirs)
 
 
 def test_sky_does_not_band_with_the_default_grain(wasm, references, tmp_path):
@@ -78,7 +81,7 @@ def test_grain_grows_as_quality_drops(wasm, tmp_path, quality):
     # Lower qualities remove more of the grain, so they get more (grain_auto).
     _, output = convert(wasm, tmp_path, '-q', quality, SKY)
     fine, coarse = map(int, re.search(r'grain (\d+)\+(\d+)', output).groups())
-    expected = {'88': (67, 41), '83': (80, 50), '72': (110, 68)}[quality]
+    expected = {'88': (50, 33), '83': (60, 40), '72': (82, 54)}[quality]
     assert (fine, coarse) == expected
 
 

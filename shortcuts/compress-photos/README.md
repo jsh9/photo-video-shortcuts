@@ -238,7 +238,7 @@ then says `! Apple's HDR profile not found` (except for photos taken before iOS
 18, which never have one).
 
 Grain: an HDR JXL gets a little fine grain in its smooth areas (skies, walls,
-out-of-focus backgrounds), which makes it about 15-20% larger than it would be
+out-of-focus backgrounds), which makes it about 10-15% larger than it would be
 without. Apple draws the SDR version of an HDR JXL with half the levels an
 ordinary photo has, so a smooth sky would show stripes (a lossless file too);
 the grain hides them, as the camera's own grain does in the original. It's only

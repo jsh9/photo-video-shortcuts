@@ -468,11 +468,11 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   less than a level of 255, none above 2.5 levels (texture hides the steps
   anyway, and grain there would only cost bytes; a night photo's own grain
   counts too), feathered between cells. The amounts are the standard deviation
-  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 67+41 at q88,
-  80+50 at q83, 110+68 at q72, tuned on a sunset skyline in
+  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 50+33 at q88,
+  60+40 at q83, 82+54 at q72, tuned on a sunset skyline in
   `docs/compress-photos-banding-plan.md`), or `--grain FINE` and
-  `--grain-coarse COARSE` (0 for none). The log says `grain 80+50` after the
-  headroom. An HDR file grows by about 15-20%; the encode takes about 4%
+  `--grain-coarse COARSE` (0 for none). The log says `grain 60+40` after the
+  headroom. An HDR file grows by about 10-15%; the encode takes about 4%
   longer. Not grained: SDR outputs, lossless output, `--sdr`, and an HDR photo
   with alpha (computed at once, not region by region). Integer math only, so
   the native and WebAssembly builds still agree byte for byte. Photos converted

@@ -16,7 +16,7 @@ encoder. Every release includes the current files of all shortcuts.
     file through an 8-bit step with half the levels, and a lossy encode had
     removed the grain that would hide the steps). Two layers, fine and coarse,
     weighted by the picture's texture; `jxlbatch --grain` and `--grain-coarse`
-    set the amounts (0: none). HDR files grow by about 15-20%; SDR files are
+    set the amounts (0: none). HDR files grow by about 10-15%; SDR files are
     unchanged. Photos converted earlier keep their banding until converted
     again from their originals.
 - Changed

@@ -24,12 +24,12 @@ SMOOTH_HF = 0.5
 # 24 MP photo fit to the window, and an iPhone's screen (1206 of 5712 px).
 MAC_FIT = 3808 / 5712
 PHONE_FIT = 1206 / 5712
-# Pass: the mean plateau of the smooth blocks within this of the reference's,
-# per viewing scale. The Mac margin is what the default grain achieves on a
-# sunset sky the user judged acceptable (0.43 against 0.30; see the plan,
-# package C); the phone margin is tighter because the coarse grain layer is
-# cheap there.
-MARGINS = {'mac': 0.20, 'phone': 0.15}
+# Pass: of the gap between the output without grain and the reference, the
+# grained output closes at least this share, per viewing scale. The default
+# grain is the lightest of the candidates whose banding the user judged the
+# same on a 16" MacBook Pro (see the plan, package C): it closes about half
+# of the gap at the Mac scale and nearly all of it at the phone scale.
+GAP_CLOSED = {'mac': 0.4, 'phone': 0.8}
 
 
 def shrink(a, width):
@@ -99,15 +99,19 @@ def score(pq_output, pq_reference, sdr_reference, scale):
     return float(ours[mask].mean()), float(theirs[mask].mean())
 
 
-def passes(pq_output, pq_reference, sdr_reference):
-    """Whether the output passes at both viewing scales; with the scores."""
+def passes(pq_output, pq_plain, pq_reference, sdr_reference):
+    """
+    Whether the output passes at both viewing scales, against the same photo's
+    output without grain (``pq_plain``); with the scores {scale: (ours, without
+    grain, reference)}.
+    """
     scales = {'mac': MAC_FIT, 'phone': PHONE_FIT}
-    results = {
-        name: score(pq_output, pq_reference, sdr_reference, scale)
-        for name, scale in scales.items()
-    }
-    ok = all(
-        ours <= theirs + MARGINS[name]
-        for name, (ours, theirs) in results.items()
-    )
+    results, ok = {}, True
+    for name, scale in scales.items():
+        ours, theirs = score(pq_output, pq_reference, sdr_reference, scale)
+        plain, _ = score(pq_plain, pq_reference, sdr_reference, scale)
+        results[name] = (ours, plain, theirs)
+        closed = (plain - ours) / (plain - theirs) if plain > theirs else 1.0
+        ok = ok and closed >= GAP_CLOSED[name]
+
     return ok, results
