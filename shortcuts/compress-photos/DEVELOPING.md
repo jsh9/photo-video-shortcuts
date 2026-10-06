@@ -124,13 +124,13 @@ Compress Photos (macOS)                      (shortcut)
    selection route: asks for a quality preset and how to use the cores (All
    cores / One core); Run Shell Script empties
    ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
-   Run AppleScript (mac/export.applescript, input: that folder) has Photos
+   Run AppleScript (lib/mac/export.applescript, input: that folder) has Photos
    export the originals into its in/ and returns "id|filename" lines; Run
    Shell Script (common.zsh + selection.zsh, IDS = those lines) stages in/*
    (a photo plus a .mov of the same name is a Live Photo: skipped; a video
    alone: skipped), runs jxlbatch, renames each result to out/Name.jxl and
    prints "path|id|delete or keep|Name.jxl"; Run AppleScript
-   (mac/import.applescript, input: those lines) has Photos import each file,
+   (lib/mac/import.applescript, input: those lines) has Photos import each file,
    add it to every album its original is in (the albums' contents read one
    folder at a time, nested ones too), and add the "delete" originals (by
    id reference) to the album
@@ -167,9 +167,10 @@ Compress Photos (macOS)                      (shortcut)
    <route>.log, <route>.command and <route>.pid (routes: photos-selection,
    photos-picker, files), outside iCloud Drive and Pictures, so that Terminal
    needs no access to those and runs of different routes don't clobber each
-   other; run.zsh opens a Terminal window (`open -a Terminal <route>.command`,
-   which records its pid and `exec`s a `tail -f` of the log) that follows
-   jxlbatch's output, unless WATCH=0, and finish.zsh ends exactly that window
+   other; run.zsh (lib/mac/progress.zsh) opens a Terminal window (`open -a
+   Terminal <route>.command`, which records its pid and `exec`s a `tail -f`
+   of the log) that follows jxlbatch's output, unless WATCH=0, and
+   lib/mac/finish.zsh ends exactly that window
    by its pid; jxlbatch runs with --mac, which drops its hints about the
    iPhone's share sheet. The AppleScripts ask Photos only when it is running
    (a tell block would launch it) and wrap Photos' export, import and album
@@ -209,7 +210,8 @@ the job names; the Finder shortcut passes each input's File Path the same way,
 so results land next to the originals even when Shortcuts passed a temporary
 copy. A `JXLBATCH` environment variable overrides the encoder search (the tests
 use it). The script never exits nonzero for a conversion problem: it writes
-`ERROR:` lines to the log instead, which the shortcut then shows.
+`ERROR:` lines to the log instead, which the shortcut then shows. The progress
+window and the finish step are `lib/mac/progress.zsh` and `lib/mac/finish.zsh`.
 
 **Several photos at a time.** The shortcuts' second question, *Cores to use*,
 becomes `jxlbatch -j 0` (*All cores*) or `-j 1 -t 1` (*One core*) in `run.zsh`.
@@ -520,9 +522,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 | `scripts/build-macos.sh`                              | builds `dist/jxlbatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                          |
 | `scripts/build-native.sh`                             | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                                                                                                         |
 | `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI and skcms) and `build-macos.sh` (skcms)                                                                                                                                                                                                                                                     |
-| `scripts/wf.py`                                       | the Shortcuts plist builder shared by both platforms: text and variables, built-in actions, the quality list, the still-photo filter, writing and signing                                                                                                                                                                                                                       |
+| `scripts/wf.py`                                       | what both platforms' shortcuts share: the quality list, the still-photo filter; re-exports `lib/wfkit.py`                                                                                                                                                                                                                                                                       |
 | `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                               |
 | `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `files.zsh`)                                                                                                                                                                                                                                    |
+| `../../lib/`                                          | shared with the other tools' shortcuts: `wfkit.py`, the Shortcuts plist builder (text and variables, built-in actions, writing and signing); `mac/`, the Mac shortcuts' progress window (`progress.zsh`), finish step (`finish.zsh`) and AppleScripts (`probe`, `export`, `import`)                                                                                             |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).
