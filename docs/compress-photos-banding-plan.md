@@ -167,10 +167,15 @@ Single-layer grain can't do both scales cheaply: fine grain alone (size 1)
 fixes the Mac scale, coarse alone (size 4) the phone scale, and size 2 passes
 both only at +32%. The auto curve, `fine = 80 + (83 - q) × 2.7`,
 `coarse = fine × 5/8` (q88: 67+41, q83: 80+50, q72: 110+68), costs about
-+15-20% at each quality; the encode takes 4% longer. The 80 + 50 default is the
-level the user accepted in Photos (test 5: 0.44); the test margin for the Mac
-scale is 0.20 until the user's verdict on the candidates A (80+50), B (60+40)
-and C (100+60) in `~/Desktop/banding-test-2`.
++15-20% at each quality; the encode takes 4% longer. **Verdict (2026-10-06):**
+on a 16" MacBook Pro at fit-to-screen, the candidates A (80+50), B (60+40) and
+C (100+60) all showed the same slight banding near the horizon, far less than
+no grain, so the user chose the least grainy: B. Default curve:
+`fine = 60 + (83 - q) × 2`, `coarse = fine × 2/3` (q88: 50+33, q83: 60+40, q72:
+82+54), about +10-15%. The test's rule is the share of the gap between the
+no-grain output and the reference that the grained output closes: 40% at the
+Mac scale, 80% at the phone scale, which is what this default does on the sky
+fixture (0.63 of 0.92 → 0.32; 0.59 of 0.81 → 0.58).
 
 ## 5. Out of scope
 
