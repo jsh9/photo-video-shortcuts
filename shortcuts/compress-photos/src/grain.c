@@ -1,7 +1,6 @@
 #include "grain.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 #include "gainmap.h"
 
@@ -75,7 +74,8 @@ static int make_weights(grained_t *g, const image_t *base) {
       for (uint32_t y = y0; y < y1; y++) {
         const uint8_t *row8 = base->data + (size_t)y * base->stride;
         const uint16_t *row16 = (const uint16_t *)row8;
-        const uint8_t *next8 = row8 + base->stride;
+        // the row below, only while there is one (no pointer past the buffer)
+        const uint8_t *next8 = y + 1 < y1 ? row8 + base->stride : row8;
         const uint16_t *next16 = (const uint16_t *)next8;
         for (uint32_t x = x0; x < x1; x++) {
           const size_t i = (size_t)x * ch + gc;
@@ -118,8 +118,8 @@ static void make_grid(grid_t *g, int shift, int amount, uint32_t seed) {
 static int32_t noise_at(const grid_t *g, uint32_t x, uint32_t y) {
   if (!g->sigma) return 0;
   const uint32_t gx = x >> g->shift, gy = y >> g->shift;
-  const uint32_t span = 1u << g->shift, fx = (x & (span - 1)) * 256 / span, fy = (y & (span - 1)) * 256 / span;
   if (!g->shift) return noise_point(g->seed, gx, gy) * 256;
+  const uint32_t span = 1u << g->shift, fx = (x & (span - 1)) * 256 / span, fy = (y & (span - 1)) * 256 / span;
   const int32_t top = noise_point(g->seed, gx, gy) * (int32_t)(256 - fx) + noise_point(g->seed, gx + 1, gy) * (int32_t)fx;
   const int32_t bottom =
       noise_point(g->seed, gx, gy + 1) * (int32_t)(256 - fx) + noise_point(g->seed, gx + 1, gy + 1) * (int32_t)fx;
@@ -134,18 +134,18 @@ static int64_t grain_at(const grained_t *g, uint32_t x, uint32_t y) {
 
 // The weight at a pixel, 0 to 255, interpolated between the cells' centres.
 static int32_t weight_at(const grained_t *g, uint32_t x, uint32_t y) {
-  // cell centres are at CELL/2 + k * CELL
-  const int32_t px = (int32_t)x - CELL / 2, py = (int32_t)y - CELL / 2;
-  int32_t cx = px >> CELL_SHIFT, cy = py >> CELL_SHIFT;  // floor
-  const int32_t fx = (px - (cx << CELL_SHIFT)) * 256 / CELL, fy = (py - (cy << CELL_SHIFT)) * 256 / CELL;
-  const int32_t cx1 = cx + 1 < (int32_t)g->cw ? cx + 1 : (int32_t)g->cw - 1;
-  const int32_t cy1 = cy + 1 < (int32_t)g->ch ? cy + 1 : (int32_t)g->ch - 1;
-  if (cx < 0) cx = 0;
-  if (cy < 0) cy = 0;
+  // The cells' centres are at CELL/2 + k * CELL. Measured from CELL/2 before
+  // the first one (no negative numbers to shift), a pixel lies between the
+  // centres of cells k - 1 and k, clamped to the cells there are.
+  const uint32_t ux = x + CELL / 2, uy = y + CELL / 2;
+  const uint32_t fx = (ux % CELL) * 256 / CELL, fy = (uy % CELL) * 256 / CELL;
+  const uint32_t kx = ux / CELL, ky = uy / CELL;
+  const uint32_t cx0 = kx ? kx - 1 : 0, cy0 = ky ? ky - 1 : 0;
+  const uint32_t cx1 = kx < g->cw ? kx : g->cw - 1, cy1 = ky < g->ch ? ky : g->ch - 1;
   const uint8_t *w = g->weight;
-  const int32_t top = w[(size_t)cy * g->cw + cx] * (256 - fx) + w[(size_t)cy * g->cw + cx1] * fx;
-  const int32_t bottom = w[(size_t)cy1 * g->cw + cx] * (256 - fx) + w[(size_t)cy1 * g->cw + cx1] * fx;
-  return (top * (256 - fy) + bottom * fy) >> 16;
+  const uint32_t top = w[(size_t)cy0 * g->cw + cx0] * (256 - fx) + w[(size_t)cy0 * g->cw + cx1] * fx;
+  const uint32_t bottom = w[(size_t)cy1 * g->cw + cx0] * (256 - fx) + w[(size_t)cy1 * g->cw + cx1] * fx;
+  return (int32_t)((top * (256 - fy) + bottom * fy) >> 16);
 }
 
 static int render_grained(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t *out,

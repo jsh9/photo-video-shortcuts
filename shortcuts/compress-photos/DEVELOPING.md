@@ -473,11 +473,12 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   `docs/compress-photos-banding-plan.md`), or `--grain FINE` and
   `--grain-coarse COARSE` (0 for none). The log says `grain 60+40` after the
   headroom. An HDR file grows by about 10-15%; the encode takes about 4%
-  longer. Not grained: SDR outputs, lossless output, `--sdr`, and an HDR photo
-  with alpha (computed at once, not region by region). Integer math only, so
-  the native and WebAssembly builds still agree byte for byte. Photos converted
-  before 0.6.0 keep their banding; only a new conversion from the original gets
-  grain.
+  longer. Not grained: SDR outputs, lossless output, `--sdr`, an HDR photo with
+  alpha (computed at once, not region by region), and PQ pixels that don't come
+  from a gain map (a PNG with a PQ `cICP` chunk): the grain wraps the gain
+  map's renderer only. Integer math only, so the native and WebAssembly builds
+  still agree byte for byte. Photos converted before 0.6.0 keep their banding;
+  only a new conversion from the original gets grain.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an

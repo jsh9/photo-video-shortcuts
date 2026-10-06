@@ -118,5 +118,25 @@ def test_hdr_sample_is_about_as_large_as_sdr(
     )
     assert result.returncode == 0, result.stdout
     sdr_jxl = tmp_path / 'jxl_out_1.jxl'
-    # about 1.25 without the grain the HDR output gets against banding
-    assert hdr_jxl.stat().st_size <= 1.5 * sdr_jxl.stat().st_size
+    # without the grain the HDR output gets against banding (test_banding)
+    plain = tmp_path / 'plain'
+    ph.stage(plain, [sample])
+    result = wasm.run(
+        [
+            '--grain',
+            '0',
+            '--grain-coarse',
+            '0',
+            '-q',
+            '83',
+            '-e',
+            '7',
+            'jxl_job.txt',
+        ],
+        plain,
+    )
+    assert result.returncode == 0, result.stdout
+    plain_jxl = plain / 'jxl_out_1.jxl'
+    assert plain_jxl.stat().st_size <= 1.25 * sdr_jxl.stat().st_size
+    # the grain's cost: about 10-15% on a sky, less with little smooth area
+    assert hdr_jxl.stat().st_size <= 1.35 * plain_jxl.stat().st_size

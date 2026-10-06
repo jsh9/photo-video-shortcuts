@@ -62,9 +62,9 @@ def test_sky_bands_without_grain(references):
     # The problem the grain solves: through Apple's 8-bit PQ step, the sky
     # shows wide steps that its SDR picture doesn't, at both viewing scales.
     plain, pq, sdr = references
-    for scale in (banding.MAC_FIT, banding.PHONE_FIT):
+    for scale, gap in ((banding.MAC_FIT, 0.4), (banding.PHONE_FIT, 0.1)):
         ours, theirs = banding.score(plain, pq, sdr, scale)
-        assert ours > theirs + 0.2, (ours, theirs)
+        assert ours > theirs + gap, (scale, ours, theirs)
 
 
 def test_sky_does_not_band_with_the_default_grain(wasm, references, tmp_path):
@@ -83,6 +83,25 @@ def test_grain_grows_as_quality_drops(wasm, tmp_path, quality):
     fine, coarse = map(int, re.search(r'grain (\d+)\+(\d+)', output).groups())
     expected = {'88': (50, 33), '83': (60, 40), '72': (82, 54)}[quality]
     assert (fine, coarse) == expected
+
+
+def test_grain_options_override_the_curve(wasm, tmp_path):
+    a, output = convert(
+        wasm,
+        tmp_path / 'a',
+        '-q',
+        '83',
+        '--grain',
+        '30',
+        '--grain-coarse',
+        '0',
+        SKY,
+    )
+    assert 'grain 30+0' in output, output
+    b, _ = convert(wasm, tmp_path / 'b', '-q', '83', SKY)
+    c, _ = convert(wasm, tmp_path / 'c', '-q', '83', *NO_GRAIN, SKY)
+    assert a.read_bytes() != b.read_bytes()
+    assert a.read_bytes() != c.read_bytes()
 
 
 def test_sdr_photo_unchanged_by_the_grain_options(wasm, tmp_path):

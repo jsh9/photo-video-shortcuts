@@ -762,7 +762,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   // PNG pixels are as stored, with their orientation in EXIF (or XMP).
   int orient = 1;
   int transposed = 0;  // the stored pixels are turned by a quarter turn
-  int grain = 0;       // the grain added to an HDR output: fine * 100 + coarse, each in percent of an 8-bit PQ step
+  grain_opts_t grain = {0, 0};  // the grain added to an HDR output, for the log
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
     if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, &transposed, err, sizeof err) != 0) goto done;
@@ -779,7 +779,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
         snprintf(err, sizeof err, "out of memory");
         goto done;
       }
-      if (rc == 0) grain = gopts.fine * 100 + gopts.coarse;
+      if (rc == 0) grain = gopts;
     }
   } else {
     // HDR JPEGs (as Photos sends HDR photos with "Send As: Automatic"): the
@@ -881,8 +881,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     char in_s[32], out_s[32], depth[32] = "";
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
-    if (hdr.headroom > 0 && grain > 0) {
-      snprintf(depth, sizeof depth, ", HDR %.1f\u00d7, grain %d+%d", hdr.headroom, grain / 100, grain % 100);
+    if (hdr.headroom > 0 && (grain.fine > 0 || grain.coarse > 0)) {
+      snprintf(depth, sizeof depth, ", HDR %.1f\u00d7, grain %d+%d", hdr.headroom, grain.fine, grain.coarse);
     } else if (hdr.headroom > 0) {
       snprintf(depth, sizeof depth, ", HDR %.1f\u00d7", hdr.headroom);
     } else if (img.bits > 8) {
@@ -1511,8 +1511,9 @@ static void usage(void) {
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
       "  --grain  fine grain added to HDR outputs against banding, in percent of an 8-bit PQ step\n"
-      "           (default: from the quality; 0: none)\n"
-      "  --grain-coarse  the coarse layer, drawn 4 pixels apart (default: from the quality; 0: none)\n"
+      "           (default: from the quality; 0: no fine layer)\n"
+      "  --grain-coarse  the coarse layer, drawn 4 pixels apart (default: from the quality;\n"
+      "           0: no coarse layer; with --grain 0, no grain at all)\n"
       "  --mac    for the Mac shortcuts: no hints about the iPhone's share sheet\n");
 }
 
