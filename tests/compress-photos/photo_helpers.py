@@ -25,7 +25,11 @@ from hdr_reference import (  # noqa: E402
 )
 
 # The helpers every shortcut's tests share, in tests/; re-exported.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_TESTS = str(Path(__file__).resolve().parents[1])
+if _TESTS not in sys.path:
+    sys.path.insert(0, _TESTS)
+
+import shortcut_helpers  # noqa: E402
 from shortcut_helpers import (  # noqa: E402, F401
     CONTROL_FLOW,
     OBJ,
@@ -361,13 +365,7 @@ def load_generator(name='build_shortcuts'):
     """
     scripts/<name>.py (build_shortcuts or build_mac_shortcuts) as a module.
     """
-    import importlib.util
-
-    path = TOOL / 'scripts' / f'{name}.py'
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return shortcut_helpers.load_generator(TOOL / 'scripts', name)
 
 
 def ashell_commands(actions, values):

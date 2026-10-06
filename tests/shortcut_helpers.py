@@ -1,7 +1,8 @@
 """
 Helpers shared by every shortcut's tests: skipping when a tool is missing,
-running commands, compiling the Swift helpers, and reading a generated
-shortcut's actions (control flow, variables, script texts).
+running commands, compiling the Swift helpers, loading a shortcut's generator,
+and reading a generated shortcut's actions (control flow, variables, script
+texts).
 """
 
 import os
@@ -35,6 +36,21 @@ def compile_swift(source, out):
 
 # ---------------------------------------------------------------------------
 # Generated shortcuts
+
+
+def load_generator(scripts_dir, name):
+    """
+    ``scripts_dir``/<name>.py (a shortcut's generator, such as
+    build_mac_shortcuts) as a module.
+    """
+    import importlib.util
+
+    path = scripts_dir / f'{name}.py'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 CONTROL_FLOW = {
     'is.workflow.actions.conditional',

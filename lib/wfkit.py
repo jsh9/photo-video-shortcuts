@@ -15,6 +15,30 @@ import sys
 import urllib.request
 import uuid
 
+# What `from wfkit import *` gives a tool's own module (Compress Photos'
+# scripts/wf.py re-exports it this way).
+__all__ = [
+    'OBJ',
+    'REPEAT_INDEX',
+    'REPEAT_ITEM',
+    'REPEAT_ITEM_2',
+    'SHORTCUT_INPUT',
+    'Builder',
+    'Ref',
+    'Sample',
+    'action',
+    'attachment',
+    'fetch_sample',
+    'guessed_workflow',
+    'new_uuid',
+    'output_of',
+    'plain_or_text',
+    'text',
+    'variable',
+    'workflow',
+    'write',
+]
+
 OBJ = '￼'  # placeholder for a variable inside a text field
 
 

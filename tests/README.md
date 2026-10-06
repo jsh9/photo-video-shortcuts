@@ -48,6 +48,11 @@ A test whose build or tool is missing is skipped on your Mac and fails in CI.
 
 ## 2. What they cover
 
+`shortcut_helpers.py` has the helpers every shortcut's tests share: skipping
+when a tool is missing, running commands, compiling the Swift helpers, loading
+a shortcut's generator, and reading a generated shortcut's actions;
+`compress-photos/photo_helpers.py` re-exports them.
+
 `compress-photos/`:
 
 | File                      | What it checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

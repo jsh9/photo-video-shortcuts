@@ -135,6 +135,7 @@ change only one platform's files.
 | Path                | What it is                                                                                                                  |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `shortcuts/<name>/` | one folder per shortcut: its README (and README-mac.md for the Mac), developer notes, encoder source and build scripts      |
+| `lib/`              | code the shortcuts share: the Shortcuts plist builder, and the Mac shortcuts' AppleScripts, progress window and finish step |
 | `docs/`             | documentation shared by all shortcuts                                                                                       |
 | `tests/`            | tests (see [tests/README.md](tests/README.md)); `tests/samples/` holds your own test photos and videos and is not committed |
 | `licenses/`         | licenses of the third-party libraries built into the release files                                                          |

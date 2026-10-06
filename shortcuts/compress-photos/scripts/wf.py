@@ -11,12 +11,15 @@ file) is lib/wfkit.py, shared with the other shortcuts and re-exported here.
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-TOOL = HERE.parent
-sys.path.insert(0, str(TOOL.parents[1] / 'lib'))
+# the repository's lib/, with the generic builder
+_LIB = str(Path(__file__).resolve().parents[3] / 'lib')
+if _LIB not in sys.path:
+    sys.path.insert(0, _LIB)
 
 from wfkit import *  # noqa: E402, F401, F403
 
+HERE = Path(__file__).resolve().parent
+TOOL = HERE.parent
 # Shared by the shortcuts and jxlbatch; shown in each shortcut's first note.
 VERSION = (TOOL / 'VERSION').read_text(encoding='utf-8').strip()
 EFFORT = 7
