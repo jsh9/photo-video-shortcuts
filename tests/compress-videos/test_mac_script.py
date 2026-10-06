@@ -4,8 +4,9 @@ gets it), run for real with zsh and stand-ins for ffmpeg, ffprobe and vidmeta
 that answer its questions, describe the "videos" (ffprobe's output, written by
 each test) and record their arguments: the exact ffmpeg command for every
 choice the lists allow (HandBrake's settings, the table below), Dolby Vision,
-the frame rate's keyframe interval, the sound track, the skip rules, the checks
-of the copy, the tools and their versions, the free space, the settings, the
+the frame rate's keyframe interval, the sound track, the skip rules (slo-mo as
+the file marks it, or by its frame rate), the checks of the copy, the tools and
+their versions, the free space (before the export and after), the settings, the
 log, the result lines, the progress window and the finish step.
 test_conversion.py runs it with the real tools.
 """
@@ -33,8 +34,12 @@ case " $* " in
       [[ " ${FAKE_NO_ENCODERS-} " == *" $e "* ]] || print -r -- " V....D $e             $e"
     done
     exit 0;;
-  *" -decoders "*)
-    print -l "Decoders:" " V..... = Video" " ------" " V....D hevc   HEVC" " V....D h264   H.264" " A....D aac    AAC" " A....D alac   ALAC"
+  *" -codecs "*)
+    print -l "Codecs:" " D..... = Decoding supported" " -------" \
+      " DEV.LS hevc   H.265 (encoders: libx265)" " D.V.LS h264   H.264" \
+      " DEV.L. av1    AV1 (decoders: libdav1d) (encoders: libsvtav1)" \
+      " ..VIL. prores Apple ProRes" " D.A.L. aac    AAC" " D.AIL. alac   ALAC" \
+      " ..A..S apple_apac Apple Positional Audio Codec"
     exit 0;;
   *" -h "*)
     [ -n "${FAKE_NO_DOVI-}" ] || print -r -- "  -dolbyvision       <boolean>    E..V....... Enable Dolby Vision RPU coding"
@@ -53,11 +58,12 @@ print -r -- "a converted video" > "${@[-1]}"
 """
 FAKE_FFPROBE = r"""#!/bin/zsh
 # Stands in for ffprobe: the description the test wrote (probes/NAME.txt),
-# and for the check of a copy, probes/output.txt or a 10-bit HEVC video.
+# and for the check of a copy, probes/output.txt or a 10-bit 1920x1080 HEVC
+# video.
 dir=${0:A:h}
 if [[ " $* " == *" -select_streams v:0 "* ]]; then
   if [ -f "$dir/probes/output.txt" ]; then cat "$dir/probes/output.txt"
-  else print "codec_name=hevc\npix_fmt=yuv420p10le\nduration=5.000000"
+  else print "codec_name=hevc\npix_fmt=yuv420p10le\nduration=5.000000\nwidth=1920\nheight=1080"
   fi
   exit 0
 fi
@@ -66,10 +72,15 @@ probe="$dir/probes/${@[-1]:t}.txt"
 cat "$probe"
 """
 FAKE_VIDMETA = r"""#!/bin/zsh
-# Stands in for vidmeta.
+# Stands in for vidmeta; its keys: the playback intent the test wrote
+# (probes/NAME.intent), if any.
 dir=${0:A:h}
 case $1 in
   --version) print -r -- "vidmeta ${FAKE_VIDMETA_VERSION:-@VERSION@}";;
+  key)
+    [ "$3" = com.apple.quicktime.full-frame-rate-playback-intent ] || exit 1
+    [ -f "$dir/probes/${2:t}.intent" ] || exit 1
+    cat "$dir/probes/${2:t}.intent";;
   copy)
     print -r -- "copy $2 $3" >> "$dir/vidmeta.txt"
     if [ -n "${FAKE_VIDMETA_FAIL-}" ]; then
@@ -92,6 +103,7 @@ def probe_text(
         transfer='arib-std-b67',
         side=(),
         profile='Main 10',
+        vcodec='hevc',
         audio=(('aac', 2), ('apple_apac', 4)),
         videos=1,
 ):
@@ -104,7 +116,7 @@ def probe_text(
     for _ in range(videos):
         fields = [
             f'index={index}',
-            'codec_name=hevc',
+            f'codec_name={vcodec}',
             f'profile={profile}',
             'codec_type=video',
             f'width={width}',
@@ -151,12 +163,26 @@ class Fake:
     def tools(self):
         return {n: self.bin / n for n in ('ffmpeg', 'ffprobe', 'vidmeta')}
 
-    def describe(self, name, **probe):
+    def describe(self, name, intent=None, **probe):
+        """
+        What ffprobe says of a video, and its playback intent key as vidmeta
+        reads it (``intent``: '1' full frame rate, '0' slo-mo, None: no key).
+        """
         (self.bin / 'probes' / f'{name}.txt').write_text(probe_text(**probe))
+        if intent is not None:
+            (self.bin / 'probes' / f'{name}.intent').write_text(f'{intent}\n')
 
-    def output(self, codec='hevc', pix='yuv420p10le', duration='5.000000'):
+    def output(
+            self,
+            codec='hevc',
+            pix='yuv420p10le',
+            duration='5.000000',
+            width=1920,
+            height=1080,
+    ):
         (self.bin / 'probes' / 'output.txt').write_text(
             f'codec_name={codec}\npix_fmt={pix}\nduration={duration}\n'
+            f'width={width}\nheight={height}\n'
         )
 
     def calls(self):
@@ -185,13 +211,14 @@ def mac(tmp_path, actions, fake):
     return vh.Mac(tmp_path, actions, fake.tools)
 
 
-def video(mac, fake, name, **probe):
+def video(mac, fake, name, intent='1', **probe):
     """
-    A video Photos exported (a stand-in file, and what ffprobe says of it).
+    A video Photos exported (a stand-in file, what ffprobe says of it, and its
+    playback intent key, as a recent iPhone writes it: '1').
     """
     path = mac.work / 'in' / name
     path.write_bytes(b'v' * 1000)
-    fake.describe(name, **probe)
+    fake.describe(name, intent=intent, **probe)
     return path
 
 
@@ -227,6 +254,8 @@ def expected(
         '-progress',
         'pipe:1',
         '-y',
+        '-hwaccel',
+        'none',
         '-noautorotate',
         '-i',
         str(mac.work / 'in' / name),
@@ -318,7 +347,7 @@ def test_command_for_every_choice(mac, fake, choice):
     codec, preset, tune, rf, size, kbps = choice
     video(mac, fake, 'IMG_0001.MOV')
     if codec == 'av1':
-        fake.output(codec='av1', pix='unknown')
+        fake.output(codec='av1')
 
     lines = mac.convert(
         'A1|IMG_0001.MOV',
@@ -348,6 +377,8 @@ def test_command_for_every_choice(mac, fake, choice):
         ('1080p', 3840, 2160, '30/1', 70000),  # 1920x1080: level 4
         ('720p', 3840, 2160, '30/1', 50000),  # 1280x720: level 2
         ('4K', 1920, 1080, '30000/1001', 70000),  # never enlarged: level 4
+        # 1280x722 as ffmpeg rounds it (not 720): just past level 2
+        ('720p', 4096, 2310, '30/1', 70000),
     ],
 )
 def test_dolby_vision_with_hand_brakes_vbv(
@@ -386,7 +417,7 @@ def test_dolby_vision_with_hand_brakes_vbv(
 
 def test_dolby_vision_with_av1_and_switched_off(mac, fake):
     video(mac, fake, 'IMG_0001.MOV', side=[DOVI])
-    fake.output(codec='av1', pix='unknown')
+    fake.output(codec='av1')
     mac.convert('A1|IMG_0001.MOV', Codec='av1', Preset='5', Tune='', RF='30')
     assert fake.calls()[0] == expected(
         mac, fake, 'IMG_0001.MOV', 1, 'av1', '5', '', 30, '2K', 160, dovi=True
@@ -412,6 +443,7 @@ def test_dolby_vision_with_av1_and_switched_off(mac, fake):
         ('24/1', None, 24),
         ('25/1', None, 25),
         ('150/1', '2760/97', 28),  # variable rate: the average counts
+        ('120/1', None, 120),  # 4K at 120 fps, not slo-mo (intent 1)
     ],
 )
 def test_keyframe_interval_from_the_frame_rate(mac, fake, rate, avg, keyint):
@@ -456,8 +488,9 @@ def test_sound_track_choice(mac, fake, audio, mapped, ac2):
 def test_skip_rules(mac, fake):
     # Exported files: a Live Photo (a photo, and a .mov that isn't an item of
     # its own), a photo, a video whose name stem a photo item shares, another
-    # file; probed videos: slo-mo (by its capture rate or its average), spatial,
-    # sound ffmpeg can't read, Dolby Vision this ffmpeg can't carry.
+    # file; probed videos: slo-mo (marked so, or fast and not marked either
+    # way), spatial, sound ffmpeg can't read, Dolby Vision this ffmpeg can't
+    # carry.
     ids = '\n'.join(
         f'{i}|{n}'
         for i, n in enumerate([
@@ -478,8 +511,8 @@ def test_skip_rules(mac, fake):
     (mac.work / 'in' / 'IMG_0002.JPG').write_bytes(b'photo')
     (mac.work / 'in' / 'IMG_0003.HEIC').write_bytes(b'photo')
     video(mac, fake, 'IMG_0003.MOV')
-    video(mac, fake, 'IMG_0004.MOV', rate='240/1', avg='291200/1649')
-    video(mac, fake, 'IMG_0005.MOV', rate='120/1', avg='120/1')
+    video(mac, fake, 'IMG_0004.MOV', '0', rate='240/1', avg='291200/1649')
+    video(mac, fake, 'IMG_0005.MOV', None, rate='120/1', avg='120/1')
     video(mac, fake, 'IMG_0006.MOV', side=['Stereo 3D'])
     video(mac, fake, 'IMG_0007.MOV', audio=(('apple_apac', 4),))
     video(mac, fake, 'IMG_0008.MOV', side=[DOVI])
@@ -499,7 +532,7 @@ def test_skip_rules(mac, fake):
         'Skipped IMG_0002.JPG: a photo',
         'Skipped IMG_0003.HEIC: a photo',
         'Skipped IMG_0004.MOV: slo-mo (177 fps on average); a copy would play at normal speed',
-        'Skipped IMG_0005.MOV: slo-mo (120 fps on average)',
+        "Skipped IMG_0005.MOV: perhaps slo-mo (120 fps on average, and the file doesn't say); SLOMO=0 converts such videos",
         'Skipped IMG_0006.MOV: spatial video; a copy would keep one view only',
         "Skipped IMG_0007.MOV: this ffmpeg can't read its sound; a copy would be silent",
         "Skipped IMG_0008.MOV: Dolby Vision, which this ffmpeg can't carry",
@@ -509,6 +542,71 @@ def test_skip_rules(mac, fake):
         assert line in log, line
 
     assert mac.skipped in log
+
+
+@pytest.mark.parametrize(
+    ('rate', 'avg', 'intent', 'env', 'skipped'),
+    [
+        # Marked as slo-mo by the iPhone (a 240 fps slo-mo averages 177).
+        (
+            '240/1',
+            '291200/1649',
+            '0',
+            {},
+            'slo-mo (177 fps on average); a copy would play at normal speed',
+        ),
+        # Marked to play at its full rate: 4K at 120 fps, converted.
+        ('120/1', None, '1', {}, None),
+        # Not marked either way: taken for slo-mo above 61 fps on average.
+        (
+            '120/1',
+            None,
+            None,
+            {},
+            "perhaps slo-mo (120 fps on average, and the file doesn't say); "
+            'SLOMO=0 converts such videos',
+        ),
+        ('100/1', None, None, {}, 'perhaps slo-mo (100 fps on average'),
+        ('60/1', None, None, {}, None),
+        ('60/1', None, '0', {}, None),  # 60 fps: not slow motion
+        ('150/1', '2760/97', None, {}, None),  # averages 28: a Live Photo's
+        # SLOMO=0: nothing is skipped as slo-mo.
+        ('240/1', '291200/1649', '0', {'SLOMO': '0'}, None),
+        ('120/1', None, None, {'SLOMO': '0'}, None),
+    ],
+)
+def test_slo_mo_rule(mac, fake, rate, avg, intent, env, skipped):
+    video(mac, fake, 'IMG_0001.MOV', intent, rate=rate, avg=avg)
+    lines = mac.convert('A1|IMG_0001.MOV', env=env)
+    if skipped:
+        assert lines == []
+        assert f'Skipped IMG_0001.MOV: {skipped}' in mac.log
+        assert mac.skipped == 'Skipped 1 slo-mo video(s).'
+        assert fake.calls() == []
+    else:
+        assert len(lines) == 1
+        assert 'slo-mo' not in mac.log
+        assert len(fake.calls()) == 1
+
+
+@pytest.mark.parametrize(
+    ('vcodec', 'converted'),
+    [('hevc', True), ('h264', True), ('av1', True), ('prores', False)],
+)
+def test_video_this_ffmpeg_cant_decode(mac, fake, vcodec, converted):
+    # The picture's codec must be one ffmpeg -codecs says it decodes (AV1:
+    # with libdav1d); else the video is skipped, not failed in ffmpeg.
+    video(mac, fake, 'IMG_0001.MOV', vcodec=vcodec)
+    lines = mac.convert('A1|IMG_0001.MOV')
+    assert len(lines) == (1 if converted else 0)
+    assert len(fake.calls()) == (1 if converted else 0)
+    if not converted:
+        assert (
+            f"Skipped IMG_0001.MOV: this ffmpeg can't decode its video ({vcodec})"
+            in mac.log
+        )
+        assert mac.skipped == "Skipped 1 video(s) this ffmpeg can't decode."
+        assert '!' not in mac.log
 
 
 def test_without_ids_a_photo_and_its_mov_are_a_live_photo(mac, fake):
@@ -610,26 +708,20 @@ def test_ffmpeg_and_vidmeta_failures(mac, fake):
     assert not (mac.work / 'vid_out_2.mp4').exists()
 
 
-def test_av1_copy_without_a_pixel_format(mac, fake):
-    # Our ffprobe has no AV1 decoder and can't tell AV1's pixel format.
+@pytest.mark.parametrize(
+    ('pix', 'converted'),
+    [('yuv420p10le', True), ('yuv420p', False), ('unknown', False)],
+)
+def test_av1_copy_must_be_ten_bit(mac, fake, pix, converted):
+    # Our ffprobe reads AV1's pixel format (FFmpeg's AV1 decoder, which
+    # reads the sequence header); "unknown" fails like 8 bits.
     video(mac, fake, 'IMG_0001.MOV')
-    fake.output(codec='av1', pix='unknown')
-    assert (
-        len(
-            mac.convert(
-                'A|IMG_0001.MOV', Codec='av1', Preset='5', Tune='', RF='30'
-            )
-        )
-        == 1
+    fake.output(codec='av1', pix=pix)
+    lines = mac.convert(
+        'A|IMG_0001.MOV', Codec='av1', Preset='5', Tune='', RF='30'
     )
-    fake.output(codec='av1', pix='yuv420p')
-    assert (
-        mac.convert(
-            'A|IMG_0001.MOV', Codec='av1', Preset='5', Tune='', RF='30'
-        )
-        == []
-    )
-    assert '! the copy is not 10-bit (yuv420p)' in mac.log
+    assert len(lines) == (1 if converted else 0)
+    assert (f'! the copy is not 10-bit ({pix})' in mac.log) != converted
 
 
 def without_homebrew(script):
@@ -792,21 +884,63 @@ def test_vidmeta_of_another_version_is_noted(mac, fake):
     )
 
 
+def fake_df(fake, free_kb):
+    """A df that says ``free_kb`` KB are free; returns its folder."""
+    df = fake.bin / 'fakepath' / 'df'
+    df.parent.mkdir(exist_ok=True)
+    df.write_text(
+        '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\n'
+        f'echo "/dev/disk3s5 100 99 {free_kb} 99% /"\n'
+    )
+    df.chmod(0o755)
+    return df.parent
+
+
 def test_free_space(mac, fake, gen):
     # df says 1 KB is free: nothing is converted, and the log says why.
     video(mac, fake, 'IMG_0001.MOV')
-    df = fake.bin / 'fakepath' / 'df'
-    df.parent.mkdir()
-    df.write_text(
-        '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\n'
-        'echo "/dev/disk3s5 100 99 1 99% /"\n'
-    )
-    df.chmod(0o755)
-    assert mac.convert('A|IMG_0001.MOV', path=df.parent) == []
+    folder = fake_df(fake, 1)
+    assert mac.convert('A|IMG_0001.MOV', path=folder) == []
     assert 'ERROR: not enough free space to convert 1 KB of videos' in mac.log
     assert 'Nothing to convert' not in mac.log
     assert fake.calls() == []
     assert re.search(gen.WARNINGS, mac.log)
+
+
+@pytest.mark.parametrize(
+    ('count', 'free_kb', 'room'),
+    [
+        ('3', 10_000_000, True),  # 10 GB free; 1.5 GB is asked for
+        ('40', 10_000_000, False),  # 20 GB is asked for
+        ('1', 400_000, False),  # 0.4 GB free
+        ('0', 1, True),
+    ],
+)
+def test_free_space_before_the_export(mac, fake, gen, count, free_kb, room):
+    # The first script empties the work folder and prints its path, if its
+    # disk has ROOM_PER_ITEM per selected item; else an "ERROR: ..." line,
+    # which the shortcut shows before it stops.
+    (mac.work / 'in' / 'old.MOV').write_bytes(b'a previous run')
+    prepare = next(
+        s
+        for s in mac.scripts(Matches=count)
+        if 'mkdir -p "$W/in"' in s and 'vid_done.txt' not in s
+    )
+    result = mac.run(prepare, path=fake_df(fake, free_kb))
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ''
+    assert not (mac.work / 'in' / 'old.MOV').exists()
+    assert (mac.work / 'in').is_dir()
+    if room:
+        assert result.stdout == str(mac.work)
+    else:
+        need = int(count) * gen.ROOM_PER_ITEM / 1e9
+        assert result.stdout == (
+            f'ERROR: not enough free space for the {count} item(s) selected '
+            f'in Photos: about {need:.1f} GB is needed (the exported originals '
+            f'and their copies), {free_kb * 1024 / 1e9:.1f} GB is free. Select '
+            'fewer videos, or free some space.'
+        )
 
 
 def test_settings_saved_and_reused(mac, fake, vf):
@@ -914,7 +1048,7 @@ def test_log_lines(mac, fake):
     assert log[1].startswith('ffmpeg: ')
     first = log.index(
         '[1/2] IMG_0001.MOV  3840×2160 29.97 fps HLG 10-bit Dolby Vision, 1 KB → '
-        '1920×1080 H.265 medium tune none RF 24, Opus 128 kbps, Dolby Vision kept'
+        'H.265 medium tune none RF 24, Opus 128 kbps, Dolby Vision kept'
     )
     assert (
         log[first + 1] == '  (it has 2 video tracks; the first is converted)'
@@ -929,11 +1063,13 @@ def test_log_lines(mac, fake):
         in log[first + 2]
     )
     assert re.fullmatch(r'   10%  frame 30/300  30 fps.*', log[first + 3])
+    # the copy's size as ffprobe reads it (the stand-in's 1920x1080)
     assert re.fullmatch(
-        r'  1 KB → 0 KB \(\d+%\), 0:0\d at [\d.]+× real time', log[first + 4]
+        r'  1 KB → 0 KB \(\d+%\), 1920×1080, 0:0\d at [\d.]+× real time',
+        log[first + 4],
     )
     assert (
-        '[2/2] IMG_0002.MOV  1920×1080 30 fps, 1 KB → 1920×1080 H.265 medium tune none RF 24, '
+        '[2/2] IMG_0002.MOV  1920×1080 30 fps, 1 KB → H.265 medium tune none RF 24, '
         'Opus 128 kbps (stereo)'
     ) in log
     assert re.search(

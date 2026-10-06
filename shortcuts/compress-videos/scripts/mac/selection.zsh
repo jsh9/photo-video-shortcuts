@@ -2,8 +2,9 @@
 # $WORK/in (see export.applescript), and IDS has one "id|filename" line per
 # selected item (or "ERROR: ..."). Only videos are converted. Photos are
 # skipped, and so are Live Photos (a photo whose .mov of the same name is not
-# an item of its own) and the videos a copy would lose something of: slo-mo,
-# spatial video, sound this ffmpeg can't read, Dolby Vision it can't carry.
+# an item of its own), videos whose picture this ffmpeg can't decode, and the
+# videos a copy would lose something of: slo-mo, spatial video, sound this
+# ffmpeg can't read, Dolby Vision it can't carry.
 # Everything skipped is counted (vid_skipped.txt, for the notification) and
 # named in the log, before any video is converted.
 setopt nullglob
@@ -53,13 +54,14 @@ rate() {
     print 0
   fi
 }
-# probe FILE: what ffprobe reads of the file into p_*: its first video track,
+# probe FILE: what ffprobe reads of the file into p_*: its first video track
+# (p_vcodec: its codec),
 # the number of video tracks, its audio tracks ("index:codec:channels") and
 # its duration. Fails if ffprobe can't read the file.
 probe() {
   local out line field key value sd
   local -A s
-  p_videos=0 p_audio=() p_duration='' p_w='' p_h='' p_pix='' p_transfer='' p_avg='' p_r='' p_frames='' p_sd='' p_profile=''
+  p_videos=0 p_audio=() p_duration='' p_vcodec='' p_w='' p_h='' p_pix='' p_transfer='' p_avg='' p_r='' p_frames='' p_sd='' p_profile=''
   out=$("$ffprobe" -v error -show_entries "format=duration:stream=index,codec_type,codec_name,profile,width,height,pix_fmt,color_transfer,avg_frame_rate,r_frame_rate,nb_frames,duration,channels:stream_side_data=side_data_type" -of compact=p=0 "$1" 2>/dev/null) || return 1
   for line in "${(@f)out}"; do
     s=()
@@ -76,7 +78,7 @@ probe() {
       video)
         p_videos=$((p_videos + 1))
         if (( p_videos == 1 )); then
-          p_w=${s[width]-} p_h=${s[height]-} p_pix=${s[pix_fmt]-} p_profile=${s[profile]-}
+          p_vcodec=${s[codec_name]-} p_w=${s[width]-} p_h=${s[height]-} p_pix=${s[pix_fmt]-} p_profile=${s[profile]-}
           p_transfer=${s[color_transfer]-} p_avg=${s[avg_frame_rate]-} p_r=${s[r_frame_rate]-}
           p_frames=${s[nb_frames]-} p_sd=$sd
           [[ ${s[duration]-} == [0-9.]## ]] && p_duration=${s[duration]}
@@ -88,7 +90,7 @@ probe() {
   return 0
 }
 typeset -A J  # the videos to convert: J[N,key]
-njobs=0 unreadable=0 photos=0 live=0 slomo=0 spatial=0 noaudio=0 dolby=0 others=0 total_in=0
+njobs=0 unreadable=0 photos=0 live=0 novideo=0 slomo=0 spatial=0 noaudio=0 dolby=0 others=0 total_in=0
 for f in "$WORK"/in/*(.N); do
   name=${f:t}
   if is_video "$name"; then
@@ -113,16 +115,35 @@ for f in "$WORK"/in/*(.N); do
     echo "! $name: not a video ffprobe can read (unsupported format)" >> "$LOG"
     continue
   fi
+  # A picture this ffmpeg can't decode (Apple ProRes, say, which our build
+  # leaves out): skipped, rather than failing in ffmpeg.
+  if [ -z "$p_vcodec" ] || ! (( ${+decodable[$p_vcodec]} )); then
+    novideo=$((novideo + 1))
+    echo "Skipped $name: this ffmpeg can't decode its video (${p_vcodec:-unknown codec})" >> "$LOG"
+    continue
+  fi
   avg=$(rate "$p_avg")
   # Slo-mo: Photos exports the recording at its capture rate (240 fps
   # averages 177 on an iPhone 17 Pro); the slow part is an edit, so a copy
-  # would play at normal speed throughout. The average, not ffprobe's
-  # r_frame_rate, which a variable-rate video can put far above its real
-  # rate (150 for a Live Photo's video that averages 28).
-  if (( avg > 61 )); then
-    slomo=$((slomo + 1))
-    echo "Skipped $name: slo-mo ($(printf '%.0f' $avg) fps on average); a copy would play at normal speed" >> "$LOG"
-    continue
+  # would play at normal speed throughout. Recent iPhones say which a fast
+  # video is, in its key full-frame-rate-playback-intent: 0 for slo-mo, 1
+  # for a video that plays at its full rate (4K at 120 fps, say), which is
+  # converted. vidmeta reads the key (ffprobe reads its 8-byte integer as 0).
+  # A video without it (an older iPhone's, another camera's) is taken for
+  # slo-mo above 61 fps on average. The average, not ffprobe's r_frame_rate,
+  # which a variable-rate video can put far above its real rate (150 for a
+  # Live Photo's video that averages 28). SLOMO=0: none is skipped.
+  if [ "$SLOMO" = 1 ] && (( avg > 61 )); then
+    intent=$("$vidmeta" key "$f" com.apple.quicktime.full-frame-rate-playback-intent 2>/dev/null)
+    if [ "$intent" != 1 ]; then
+      slomo=$((slomo + 1))
+      if [ "$intent" = 0 ]; then
+        echo "Skipped $name: slo-mo ($(printf '%.0f' $avg) fps on average); a copy would play at normal speed" >> "$LOG"
+      else
+        echo "Skipped $name: perhaps slo-mo ($(printf '%.0f' $avg) fps on average, and the file doesn't say); SLOMO=0 converts such videos" >> "$LOG"
+      fi
+      continue
+    fi
   fi
   # Spatial video (MV-HEVC, two views): ffmpeg would keep one view.
   if [[ $p_sd == *(Stereo 3D|Stereoscopic)* || $p_profile == *Multiview* ]]; then
@@ -168,6 +189,7 @@ done
 skipped=()
 (( photos )) && skipped+=("$photos photo(s)")
 (( live )) && skipped+=("$live Live Photo(s)")
+(( novideo )) && skipped+=("$novideo video(s) this ffmpeg can't decode")
 (( slomo )) && skipped+=("$slomo slo-mo video(s)")
 (( spatial )) && skipped+=("$spatial spatial video(s)")
 (( noaudio )) && skipped+=("$noaudio video(s) whose sound can't be read")

@@ -41,7 +41,8 @@ DIST = TOOL / 'dist'
 VIDEOS = {
     'sdr': ['--rotate', '90'],  # 8-bit, a vertical video's rotation flag
     'hlg': ['--hlg'],  # 10-bit HLG (and Dolby Vision 8.4 on macOS 27)
-    'slomo': ['--fps', '120', '--seconds', '1'],
+    'slomo': ['--fps', '120', '--seconds', '1', '--slomo'],  # marked slo-mo
+    'fast': ['--fps', '120', '--seconds', '1'],  # 120 fps, played at that rate
     'two': ['--audio', 'surround,stereo', '--seconds', '1'],
     'silent': ['--audio', 'none', '--seconds', '1'],
     'big': ['--size', '1920x1080', '--seconds', '1', '--rotate', '90'],
@@ -173,6 +174,7 @@ class Mac:
             'Audio': '160',
             'Reuse': '',
             'AppleScript Result': ids,
+            'Matches': '1',  # the number of items selected in Photos
         }
         values.update(settings)
         return shell_scripts(self.actions, values)

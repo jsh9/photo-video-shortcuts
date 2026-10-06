@@ -6,9 +6,12 @@
 // make, model, software...), the video track's keys (lens model, focal length,
 // f-number, Apple's maker notes) and the creation and modification times.
 // ffmpeg can't do this itself: it writes the movie's keys back as unnamed text
-// entries, and drops the video track's.
+// entries, and drops the video track's. `vidmeta key` prints one of the
+// movie's keys, which ffprobe can misread (it reads an iPhone's 8-byte
+// integers as 0).
 //
 // Usage: vidmeta copy ORIGINAL CONVERTED   (CONVERTED must end with its moov)
+//        vidmeta key FILE KEY              (exit status 1: no such key)
 //        vidmeta --version
 //        vidmeta --selftest
 #include <stdint.h>
@@ -26,6 +29,7 @@
 static int usage(void) {
   fprintf(stderr,
           "usage: vidmeta copy ORIGINAL CONVERTED\n"
+          "       vidmeta key FILE KEY\n"
           "       vidmeta --version\n"
           "       vidmeta --selftest\n");
   return 2;
@@ -42,11 +46,23 @@ static int copy(const char *original, const char *converted) {
   return 0;
 }
 
+// Prints the value of one of the movie's keys; nothing, and exit status 1,
+// when the file doesn't have it.
+static int key(const char *path, const char *name) {
+  static char value[65536];
+  char err[512] = "";
+  const int found = mp4meta_key(path, name, value, sizeof value, err, sizeof err);
+  if (found < 0) fprintf(stderr, "vidmeta: %s\n", err);
+  if (found <= 0) return 1;
+  printf("%s\n", value);
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // The self-test: two minimal MP4 files written here, the "original" with
 // Apple keys on the movie and on its video track, and a "converted" one with
 // ffmpeg's own boxes and other times; vidmeta copies the first's metadata
-// onto the second, which is then read back.
+// onto the second, which is then read back, and its date key read by name.
 
 typedef struct {
   uint8_t *data;
@@ -245,7 +261,7 @@ static int selftest(void) {
     printf("Self-test FAILED: can't create a folder in %s\n", tmp && *tmp ? tmp : "/tmp");
     return 1;
   }
-  char original[1100], converted[1100], err[512] = "";
+  char original[1100], converted[1100], err[512] = "", value[64] = "";
   snprintf(original, sizeof original, "%s/original.mov", dir);
   snprintf(converted, sizeof converted, "%s/converted.mp4", dir);
   const char *failure = NULL;
@@ -307,6 +323,9 @@ static int selftest(void) {
     failure = "the times were not set";
   } else if (len < 24 + strlen(kFrames) || memcmp(result, c.data, 24 + strlen(kFrames)) != 0) {
     failure = "the frames were changed";
+  } else if (mp4meta_key(converted, kDateKey, value, sizeof value, err, sizeof err) != 1 ||
+             strcmp(value, kDate) != 0) {
+    failure = "the date key can't be read back";
   }
   free(a.data);
   free(c.data);
@@ -331,5 +350,6 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && strcmp(argv[1], "--selftest") == 0) return selftest();
   if (argc == 4 && strcmp(argv[1], "copy") == 0) return copy(argv[2], argv[3]);
+  if (argc == 4 && strcmp(argv[1], "key") == 0) return key(argv[2], argv[3]);
   return usage();
 }

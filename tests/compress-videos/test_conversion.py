@@ -27,6 +27,7 @@ NAMES = {
     'four_three': 'IMG_0007.MOV',
     'ntsc': 'IMG_0008.MOV',
     'bare': 'IMG_0009.MOV',
+    'fast': 'IMG_0010.MOV',
 }
 # Quick settings: the copies are checked, not the encoders' quality.
 SETTINGS = {
@@ -68,10 +69,12 @@ def probe(tools, path):
 
 
 def test_everything_but_the_slo_mo_converted(run):
+    # The slo-mo is skipped as its file marks it; the 120 fps video that is
+    # marked to play at its full rate is converted.
     assert sorted(run.copies) == sorted(k for k in NAMES if k != 'slomo')
     log = run.mac.log
     assert 'Skipped IMG_0005.MOV: slo-mo (120 fps on average)' in log
-    assert 'Done: 8 of 8 converted in' in log
+    assert 'Done: 9 of 9 converted in' in log
     assert '!' not in log
     assert run.mac.skipped == 'Skipped 1 slo-mo video(s).'
 
@@ -86,12 +89,14 @@ def test_codec_container_and_sound(run, tools):
                 'hvc1',
             )
             assert video['profile'] == 'Main 10'
-            assert video['pix_fmt'] == 'yuv420p10le'
         else:
             assert (video['codec_name'], video['codec_tag_string']) == (
                 'av1',
                 'av01',
             )
+
+        # 10 bits, as our ffprobe reads AV1 too (FFmpeg's AV1 decoder)
+        assert video['pix_fmt'] == 'yuv420p10le'
 
         if key == 'silent':
             assert audio == []
@@ -102,17 +107,6 @@ def test_codec_container_and_sound(run, tools):
                 audio[0]['sample_rate'],
                 audio[0]['channels'],
             ) == ('opus', '48000', 2)
-
-
-def test_av1_is_ten_bit(run):
-    if run.codec != 'av1':
-        pytest.skip('AV1 only')
-
-    ffprobe = vh.homebrew('ffprobe')
-    vh.need(ffprobe, "Homebrew's ffprobe (with an AV1 decoder) is needed")
-    for path in run.copies.values():
-        video, _ = probe({'ffprobe': ffprobe}, path)
-        assert video['pix_fmt'] == 'yuv420p10le'
 
 
 def rotation(stream):
@@ -134,7 +128,7 @@ def test_size_limit_and_rotation(run, tools):
     assert sizes['big'] == (1280, 720, -90)  # shown 720x1280
     assert sizes['four_three'] == (1280, 960, 0)
     assert sizes['sdr'] == (320, 180, -90)
-    for key in ('hlg', 'two', 'silent', 'ntsc', 'bare'):
+    for key in ('hlg', 'two', 'silent', 'ntsc', 'bare', 'fast'):
         assert sizes[key] == (320, 180, 0), key
 
 
@@ -166,9 +160,21 @@ def test_frame_rate_and_duration(run, tools):
         assert (
             abs(float(video['duration']) - float(original['duration'])) < 0.05
         ), key
+        num, den = map(int, video['avg_frame_rate'].split('/'))
         if key == 'ntsc':
-            num, den = map(int, video['avg_frame_rate'].split('/'))
             assert abs(num / den - 29.95) < 0.1
+        elif key == 'fast':
+            assert abs(num / den - 120) < 0.5
+
+
+def test_the_copys_size_in_the_log(run):
+    # ffprobe's size of the copy, not a prediction
+    line = next(
+        l
+        for l in run.mac.log.splitlines()
+        if l.startswith('  ') and ' → ' in l
+    )
+    assert ', 320×180, ' in line
 
 
 def test_the_stereo_track_is_chosen(run):
@@ -303,6 +309,48 @@ def test_the_picture(run, tools, key):
     mse = np.mean((a - b) ** 2)
     psnr = 99.0 if mse == 0 else 10 * np.log10(255.0**2 / mse)
     assert psnr >= MIN_PSNR, psnr
+
+
+@pytest.mark.parametrize('codec', ['h265', 'av1'])
+def test_an_av1_video_converts_again(tmp_path, actions, tools, videos, codec):
+    # An AV1 video (a copy this shortcut made, say) is decoded in software,
+    # with dav1d (FFmpeg's own AV1 decoder works only with a hardware
+    # accelerator), and converted again.
+    source = tmp_path / 'av1.mp4'
+    result = vh.run([
+        tools['ffmpeg'],
+        '-v',
+        'error',
+        '-i',
+        videos['sdr'],
+        '-map',
+        '0:v:0',
+        '-map',
+        '0:a:0',
+        '-c:v',
+        'libsvtav1',
+        '-preset',
+        '10',
+        '-crf',
+        '40',
+        '-pix_fmt',
+        'yuv420p10le',
+        '-c:a',
+        'libopus',
+        source,
+    ])
+    assert result.returncode == 0, result.stderr
+    mac = vh.Mac(tmp_path / 'mac', actions, tools)
+    mac.export(source, 'IMG_0011.mp4')
+    lines = mac.convert(
+        'ID|IMG_0011.mp4', Size='720p', Audio='96', **SETTINGS[codec]
+    )
+    assert len(lines) == 1, mac.log
+    assert '!' not in mac.log, mac.log
+    video, audio = probe(tools, Path(lines[0].split('|')[0]))
+    assert video['codec_name'] == ('hevc' if codec == 'h265' else 'av1')
+    assert video['pix_fmt'] == 'yuv420p10le'
+    assert [a['codec_name'] for a in audio] == ['opus']
 
 
 def test_fixtures_have_an_iphones_keys(videos, helpers):

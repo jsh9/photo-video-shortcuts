@@ -1,4 +1,5 @@
-// Copies a video's metadata from the original into a converted MP4/MOV.
+// Copies a video's metadata from the original into a converted MP4/MOV, and
+// reads one of its keys.
 #ifndef VIDBATCH_MP4META_H
 #define VIDBATCH_MP4META_H
 
@@ -13,6 +14,14 @@
 // original's `mvhd`. `converted` must end with its `moov` box.
 // Returns the number of boxes copied, or -1 with a message in err.
 int mp4meta_copy(const char *original, const char *converted, char *err, size_t err_len);
+
+// Reads one of the movie's QuickTime metadata keys (moov/meta, as iPhones
+// write them; `key` is its full name, such as
+// "com.apple.quicktime.creationdate") into `out` as text: UTF-8 as it is, an
+// integer in decimal. Returns 1 if found, 0 if the file has no such key, or -1
+// with a message in err (also for a value of another type).
+int mp4meta_key(const char *path, const char *key, char *out, size_t out_len, char *err,
+                size_t err_len);
 
 // Adds a box (for example a `meta` box) to the end of the file's `moov`, which
 // must be the last box in the file. Used by the self-test. Returns 0 or -1.

@@ -1,7 +1,8 @@
 """
 vidmeta, the metadata helper (src/vidmeta.c, src/mp4meta.c), on MP4 files
 written here box by box: what it copies from the original into the converted
-file, the times it sets, what it leaves alone, and the files it refuses.
+file, the times it sets, what it leaves alone, and the files it refuses; and
+the movie keys it reads (vidmeta key), with their types.
 
 The tests run the build with the sanitizers (build/vidmeta), so a memory error
 in the box parsing fails them; the released build is checked for its version
@@ -45,23 +46,33 @@ def hdlr(handler):
 
 def keys_meta(**keys):
     """A QuickTime metadata box (hdlr mdta, keys, ilst), UTF-8 values."""
-    names = [k.replace('_', '.') for k in keys]
+    return typed_meta({
+        k.replace('_', '.'): (1, v.encode()) for k, v in keys.items()
+    })
+
+
+def typed_meta(keys, full_box=False):
+    """
+    A QuickTime metadata box: {name: (well-known type, value bytes)}. With
+    ``full_box``, the meta box has a version and flags, as ISO's has.
+    """
     keys_box = box(
         b'keys',
-        struct.pack('>II', 0, len(names)),
-        *(box(b'mdta', n.encode()) for n in names),
+        struct.pack('>II', 0, len(keys)),
+        *(box(b'mdta', n.encode()) for n in keys),
     )
     items = box(
         b'ilst',
         *(
             box(
                 struct.pack('>I', i),
-                box(b'data', struct.pack('>II', 1, 0), v.encode()),
+                box(b'data', struct.pack('>II', kind, 0), value),
             )
-            for i, v in enumerate(keys.values(), 1)
+            for i, (kind, value) in enumerate(keys.values(), 1)
         ),
     )
-    return box(b'meta', hdlr(b'mdta'), keys_box, items)
+    version = bytes(4) if full_box else b''
+    return box(b'meta', version, hdlr(b'mdta'), keys_box, items)
 
 
 def udta(tag, text):
@@ -209,7 +220,9 @@ def test_selftest(vidmeta, vidmeta_release):
         assert result.stdout.endswith('Self-test passed.\n')
 
 
-@pytest.mark.parametrize('args', [[], ['copy'], ['copy', 'a'], ['--help']])
+@pytest.mark.parametrize(
+    'args', [[], ['copy'], ['copy', 'a'], ['key', 'a'], ['--help']]
+)
 def test_usage(vidmeta, args):
     result = run(vidmeta, *args)
     assert result.returncode == 2
@@ -371,3 +384,124 @@ def test_missing_original(vidmeta, tmp_path):
     assert result.returncode == 1
     assert "can't open" in result.stderr
     assert conv.read_bytes() == converted()
+
+
+# ---------------------------------------------------------------------------
+# vidmeta key
+
+INTENT = 'com.apple.quicktime.full-frame-rate-playback-intent'
+
+
+def with_movie_meta(meta):
+    """An original whose movie has this meta box (and a track's lens key)."""
+    return (
+        FTYP
+        + FRAMES
+        + box(
+            b'moov',
+            timed(b'mvhd', 0, ORIGINAL_TIMES),
+            trak(b'vide', 0, ORIGINAL_TIMES, LENS),
+            meta,
+        )
+    )
+
+
+def key(vidmeta, tmp_path, data, name):
+    path = tmp_path / 'IMG_0001.MOV'
+    path.write_bytes(data)
+    return run(vidmeta, 'key', path, name)
+
+
+@pytest.mark.parametrize(
+    ('kind', 'value', 'text'),
+    [
+        # as an iPhone writes them: int64 (type 21, 8 bytes), int8
+        (21, struct.pack('>q', 1), '1'),
+        (21, struct.pack('>q', 0), '0'),
+        (21, struct.pack('>b', 1), '1'),
+        (21, struct.pack('>h', -2), '-2'),
+        (21, b'\xff\xff\xfe', '-2'),  # 3 bytes
+        (21, struct.pack('>i', -100000), '-100000'),
+        (22, struct.pack('>H', 65535), '65535'),
+        (22, struct.pack('>Q', 2**64 - 1), str(2**64 - 1)),
+        (67, struct.pack('>i', 74), '74'),  # a fixed-size int32
+        (75, b'\xc8', '200'),  # a fixed-size uint8
+        (1, 'iPhone 17 Pro'.encode(), 'iPhone 17 Pro'),
+        (1, 'café'.encode(), 'café'),
+    ],
+)
+def test_key_values_and_types(vidmeta, tmp_path, kind, value, text):
+    meta = typed_meta({
+        'com.apple.quicktime.make': (1, b'Apple'),
+        INTENT: (kind, value),
+    })
+    result = key(vidmeta, tmp_path, with_movie_meta(meta), INTENT)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        f'{text}\n',
+        '',
+    )
+
+
+def test_key_of_an_iso_meta_box(vidmeta, tmp_path):
+    meta = typed_meta({INTENT: (21, struct.pack('>q', 1))}, full_box=True)
+    result = key(vidmeta, tmp_path, with_movie_meta(meta), INTENT)
+    assert result.stdout == '1\n'
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'com.apple.quicktime.nothing',
+        'com.apple.quicktime.creation',  # a prefix of a key
+        # the video track's key: not a movie key
+        'com.apple.quicktime.camera.lens_model',
+    ],
+)
+def test_missing_key(vidmeta, tmp_path, name):
+    result = key(vidmeta, tmp_path, original(), name)
+    assert (result.returncode, result.stdout, result.stderr) == (1, '', '')
+
+
+def test_key_without_metadata(vidmeta, tmp_path):
+    bare = FTYP + FRAMES + box(b'moov', timed(b'mvhd', 0, ORIGINAL_TIMES))
+    result = key(vidmeta, tmp_path, bare, INTENT)
+    assert (result.returncode, result.stdout, result.stderr) == (1, '', '')
+
+
+def test_key_of_the_original(vidmeta, tmp_path):
+    # keys_meta's UTF-8 values, as copied
+    result = key(
+        vidmeta, tmp_path, original(), 'com.apple.quicktime.location.ISO6709'
+    )
+    assert result.stdout == '+48.8584+002.2945+035.000/\n'
+
+
+@pytest.mark.parametrize(
+    ('meta', 'message'),
+    [
+        (typed_meta({INTENT: (23, struct.pack('>f', 1.5))}), 'data type 23'),
+        (typed_meta({INTENT: (21, bytes(9))}), 'data type 21'),
+        # the keys box says a key is longer than the box
+        (
+            box(
+                b'meta',
+                hdlr(b'mdta'),
+                box(b'keys', struct.pack('>III', 0, 1, 500), b'mdta'),
+                box(b'ilst'),
+            ),
+            'damaged meta box',
+        ),
+    ],
+)
+def test_key_refused(vidmeta, tmp_path, meta, message):
+    result = key(vidmeta, tmp_path, with_movie_meta(meta), INTENT)
+    assert result.returncode == 1
+    assert result.stdout == ''
+    assert message in result.stderr
+
+
+def test_key_of_a_missing_file(vidmeta, tmp_path):
+    result = run(vidmeta, 'key', tmp_path / 'nothing.MOV', INTENT)
+    assert result.returncode == 1
+    assert "can't open" in result.stderr

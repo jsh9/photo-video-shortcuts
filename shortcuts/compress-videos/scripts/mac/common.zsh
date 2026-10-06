@@ -15,6 +15,7 @@ VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
 NICE=${NICE:-10}  # ffmpeg's priority (nice): 10 keeps the Mac responsive
 DOLBY=${DOLBY:-1}  # 0: convert Dolby Vision videos as plain HDR
+SLOMO=${SLOMO:-1}  # 0: skip no video as slo-mo (a slo-mo's copy loses its slow motion)
 PROGRESS_EVERY=${PROGRESS_EVERY:-5}  # seconds between progress lines
 # The shortcut's choices, the first word of each list's title; with REUSE=1,
 # the last run's settings instead (SETTINGS, written after each batch).
@@ -140,11 +141,13 @@ dovi_ok=''
 if [ -z "$dovi_ok" ] && [ "$DOLBY" = 1 ]; then
   echo "! $ffmpeg can't carry Dolby Vision: videos with it are skipped. Install the ffmpeg made for this shortcut: see @HELP_URL@" >> "$LOG"
 fi
-# The decoders, to choose an audio track this ffmpeg can read.
+# The codecs this ffmpeg can decode (ffmpeg -codecs: "D" first, then the
+# codec's name, whatever its decoder is called: AV1's is libdav1d), to skip a
+# video it can't read and to choose an audio track it can.
 typeset -A decodable
-for line in "${(@f)$("$ffmpeg" -hide_banner -decoders 2>/dev/null)}"; do
+for line in "${(@f)$("$ffmpeg" -hide_banner -codecs 2>/dev/null)}"; do
   words=(${=line})
-  [[ ${words[1]} == [VAS]????? ]] && decodable[${words[2]}]=1
+  [[ ${words[1]} == D????? && ${words[2]} != '=' ]] && decodable[${words[2]}]=1
 done
 if [ "$("$vidmeta" --version 2>/dev/null)" != "vidmeta $VERSION" ]; then
   echo "! $vidmeta is not vidmeta $VERSION, the version this shortcut was made for; see Updating in @HELP_URL@" >> "$LOG"

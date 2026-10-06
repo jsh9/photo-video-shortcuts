@@ -60,6 +60,8 @@ def test_name_and_note(gen, actions, version):
         gen.ORIGINALS_ALBUM,
         gen.HELP_URL,
         'AV1 plays only',
+        'It works only on videos selected in Photos',
+        'it has no picker',
     ):
         assert text in note
 
@@ -142,6 +144,52 @@ def test_probe_first_and_a_note_without_a_selection(gen, actions):
     error_then, _ = branches(otherwise, vh.params(errors[0])['UUID'])
     assert [vh.ident(a) for a in error_then] == [NOTIFICATION]
     assert "'AppleScript Result'" in repr(vh.params(error_then[0]))
+
+
+def test_free_space_checked_before_the_questions(gen, actions):
+    # Right after the selection check: the work folder's script, with the
+    # number of selected items; its "ERROR: ..." is shown, and the shortcut
+    # stops before any question and before Photos exports anything.
+    selection = matches(actions, '^SELECTION')[0]
+    start = actions.index(selection)
+    group = next(
+        vh.params(a)['GroupingIdentifier']
+        for a in actions[start:]
+        if vh.ident(a) == 'is.workflow.actions.conditional'
+    )
+    end = max(
+        i
+        for i, a in enumerate(actions)
+        if vh.ident(a) == 'is.workflow.actions.conditional'
+        and vh.params(a)['GroupingIdentifier'] == group
+    )
+    count, prepare = actions[end + 1], actions[end + 2]
+    assert vh.ident(count) == MATCH
+    assert vh.params(count)['WFMatchTextPattern'] == r'\d+'
+    assert vh.ident(prepare) == RUN_SHELL
+    text = vh.render(vh.params(prepare)['Script'], VALUES)
+    assert text.startswith(
+        'W="$HOME/Pictures/.compress-videos-macos"; rm -rf "$W"; '
+        'mkdir -p "$W/in"\nn=3\n'
+    )
+    assert f'need=$(( n * {gen.ROOM_PER_ITEM} ))' in text
+    errors = [
+        a
+        for a in matches(actions, '^ERROR')
+        if vh.params(prepare)['UUID'] in repr(vh.params(a))
+    ]
+    assert len(errors) == 1
+    then, otherwise = branches(actions, vh.params(errors[0])['UUID'])
+    assert [vh.ident(a) for a in then] == [
+        NOTIFICATION,
+        'is.workflow.actions.exit',
+    ]
+    assert vh.params(prepare)['UUID'] in repr(vh.params(then[0]))
+    assert otherwise == []
+    first_question = next(
+        i for i, a in enumerate(actions) if vh.ident(a) in (MENU, LIST)
+    )
+    assert actions.index(prepare) < first_question
 
 
 def test_surfaces(gen, sample, actions):

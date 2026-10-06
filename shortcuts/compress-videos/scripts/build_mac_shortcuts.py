@@ -3,14 +3,16 @@
 Generates the Mac shortcut "Compress Videos (macOS)" as a signed .shortcut
 file.
 
-Started while Photos is in front with videos selected (Share menu, right-click
-> Share, the menu bar), it converts that selection: Photos exports the
-originals, ffmpeg converts each video to H.265 or AV1 with Opus sound
-(HandBrake's settings, asked as six questions), vidmeta copies the original's
-metadata, the copies are imported into the originals' albums, and the originals
-are collected in an album for the user to delete. Started any other way, it
-says to select the videos in Photos: Shortcuts can't hand a script the original
-videos (its picker re-renders them, and failed on some), so there is no picker.
+It works only on videos selected in Photos. Started while Photos is in front
+with videos selected (Share menu, right-click > Share, the menu bar), it
+converts that selection: Photos exports the originals, ffmpeg converts each
+video to H.265 or AV1 with Opus sound (HandBrake's settings, asked as six
+questions), vidmeta copies the original's metadata, the copies are imported
+into the originals' albums, and the originals are collected in an album for the
+user to delete. Started any other way (the Shortcuts app, Spotlight...), it
+only says to select the videos in Photos: Shortcuts can't hand a script the
+original videos (its picker re-renders them, and failed on some), so there is
+no picker.
 
 The conversion is one Run Shell Script (scripts/mac/*.zsh with lib/mac's
 progress window and finish step), which Shortcuts waits for however long it
@@ -65,6 +67,11 @@ VIDMETA_PATHS = [
 # The work folder: Photos exports the originals into it and imports the
 # copies from it (AppleScript), and its sandbox reaches ~/Pictures.
 WORK = '"$HOME/Pictures/.compress-videos-macos"'
+# Free space the work folder's disk must have before Photos exports anything,
+# per selected item, for its original and its copy: about three minutes of 4K
+# iPhone video. Generous for short clips and photos; once the files are
+# exported, the conversion script checks their real size.
+ROOM_PER_ITEM = 500_000_000  # bytes
 # The album that collects the originals of the converted videos (a script
 # can't delete them; the user deletes them from there).
 ORIGINALS_ALBUM = 'Videos already compressed'
@@ -160,6 +167,31 @@ def applescript_text(name):
     return text
 
 
+def prepare_script(count):
+    """
+    The first Run Shell Script's parts: an empty work folder, whose path it
+    prints (the export script's input), if its disk has ROOM_PER_ITEM for each
+    of the ``count`` items selected in Photos; else an "ERROR: ..." line, so
+    that Photos never fills the disk with the export.
+    """
+    return (
+        f'W={WORK}; rm -rf "$W"; mkdir -p "$W/in"\nn=',
+        count,
+        '\n'
+        '[[ $n == <-> ]] || n=0\n'
+        f'need=$(( n * {ROOM_PER_ITEM} ))\n'
+        'free=$(( $(df -k "$W" | awk \'NR == 2 { print $4 }\') * 1024 ))\n'
+        'if (( free < need )); then\n'
+        "  printf 'ERROR: not enough free space for the %d item(s) selected in "
+        'Photos: about %.1f GB is needed (the exported originals and their '
+        "copies), %.1f GB is free. Select fewer videos, or free some space.' "
+        '$n $(( need / 1e9 )) $(( free / 1e9 ))\n'
+        'else\n'
+        '  printf "%s" "$W"\n'
+        'fi',
+    )
+
+
 def finish_script():
     """
     The last Run Shell Script (input: the outcome, on stdin): appends it to the
@@ -187,13 +219,15 @@ def build(sample):
         f'{NAME} {VERSION}. '
         'Converts the videos selected in Photos to H.265 or AV1 with ffmpeg (Run '
         "Shell Script), with HandBrake's settings and Opus sound, keeping their "
-        'metadata (date, location, camera, lens), HDR and Dolby Vision. Select the '
-        'videos in Photos, then Share > Compress Videos (macOS): Photos exports the '
-        "originals, the copies are imported into the originals' albums, and the "
-        f'originals go into the album "{ORIGINALS_ALBUM}" for you to delete. Photos, '
-        'Live Photos and slo-mo videos are skipped. AV1 plays only on Macs with M3 '
-        'or later, iPhone 15 Pro or later. Needs ffmpeg, ffprobe and vidmeta in '
-        '~/.local/bin and Allow Running Scripts in Shortcuts > Settings > Advanced. '
+        'metadata (date, location, camera, lens), HDR and Dolby Vision. It works '
+        'only on videos selected in Photos: select them there, then Share > '
+        f'{NAME}. Run from the Shortcuts app or anywhere else, it only says so; it '
+        'has no picker. Photos exports the originals, the copies are imported into '
+        "the originals' albums, and the originals go into the album "
+        f'"{ORIGINALS_ALBUM}" for you to delete. Photos, Live Photos and slo-mo '
+        'videos are skipped. AV1 plays only on Macs with M3 or later, iPhone 15 Pro '
+        'or later. Needs ffmpeg, ffprobe and vidmeta in ~/.local/bin and Allow '
+        'Running Scripts in Shortcuts > Settings > Advanced. '
         f'Setup and help: {HELP_URL}'
     )
     # Only the videos selected in Photos, with Photos in front: Photos then
@@ -218,20 +252,24 @@ def build(sample):
     b.if_has_value(
         b.match_text(probe, '^SELECTION'), lambda: None, not_selected
     )
+    # The work folder, if there is room for the export, before any question.
+    count = b.match_text(probe, r'\d+')
+    work = b.run_shell_script(*prepare_script(count))
+
+    def no_room():
+        b.notification(NOTIFY, work)
+        b.stop()
+
+    b.if_has_value(b.match_text(work, '^ERROR'), no_room, lambda: None)
     last = b.run_shell_script(
         f'sed -n "s/^SUMMARY=//p" {LOG_DIR}/last-settings.txt 2>/dev/null || true'
     )
     vf.settings(b, last)
-    count = b.match_text(probe, r'\d+')
     b.notification(
         NOTIFY,
         'Converting the videos among the ',
         count,
         ' item(s) selected in Photos… A Terminal window follows the progress.',
-    )
-    # An empty work folder; its path is the export script's input.
-    work = b.run_shell_script(
-        f'W={WORK}; rm -rf "$W"; mkdir -p "$W/in"; printf "%s" "$W"'
     )
     ids = b.run_applescript(applescript_text('export'), input_ref=work)
     result = b.run_shell_script(*script(ids))

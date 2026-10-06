@@ -1,7 +1,22 @@
 # One video at a time, with the encoder on every core; ffmpeg runs niced so
-# the Mac stays responsive. Each video is checked (codec, pixel format,
-# duration) and gets the original's metadata (vidmeta) before it counts.
+# the Mac stays responsive. Decoding and encoding are done in software, on the
+# CPU (-hwaccel none, x265, SVT-AV1), never by the Mac's media engines. Each
+# video is checked (codec, pixel format, duration) and gets the original's
+# metadata (vidmeta) before it counts.
 export SVT_LOG=2  # SVT-AV1: warnings only (its own info lines are long)
+# scaled WIDTH HEIGHT: the copy's size as the scale filter makes it (the
+# frame fitted in a LIMIT x LIMIT box, so the long edge is at most LIMIT
+# whatever the orientation; never enlarged; even sizes), with libavfilter's
+# arithmetic (ff_scale_adjust_dimensions: the aspect ratio rounded to the
+# nearest even size, then rounded down to an even one)
+scaled() {
+  local w=$1 h=$2 sw sh tw th
+  sw=$(( w < LIMIT ? w : LIMIT )) sh=$(( h < LIMIT ? h : LIMIT ))
+  tw=$(( (sh * w + h) / (2 * h) * 2 )) th=$(( (sw * h + w) / (2 * w) * 2 ))
+  (( tw < sw )) && sw=$tw
+  (( th < sh )) && sh=$th
+  print $(( sw / 2 * 2 )) $(( sh / 2 * 2 ))
+}
 # dovi_rate WIDTH PIXELS-PER-SECOND: the VBV rate (kbit/s) HandBrake gives
 # x265 for Dolby Vision (libhb/dovi_common.c, hb_dovi_levels): the high-tier
 # rate of the first Dolby Vision level the size fits, since x265 allows the
@@ -76,15 +91,6 @@ if (( njobs )); then
   for n in {1..$njobs}; do
     in=${J[$n,file]} name=${J[$n,name]} out="$WORK/vid_out_$n.mp4"
     w=${J[$n,w]} h=${J[$n,h]} dur=${J[$n,duration]:-0} pix=${J[$n,pix]}
-    # The copy's size, as the scale filter makes it: the frame fitted in a
-    # LIMIT x LIMIT box (so the long edge is at most LIMIT, whatever the
-    # orientation), never enlarged, even sizes.
-    long=$(( w > h ? w : h ))
-    if (( long > LIMIT )); then
-      ow=$(( w * LIMIT / long / 2 * 2 )) oh=$(( h * LIMIT / long / 2 * 2 ))
-    else
-      ow=$(( w / 2 * 2 )) oh=$(( h / 2 * 2 ))
-    fi
     fps=$(printf '%.3f' ${J[$n,avg]})
     fps=${${fps%%0#}%.}
     kind="${w}×${h} $fps fps"
@@ -94,7 +100,7 @@ if (( njobs )); then
     esac
     [[ $pix =~ 'p(10|12)' ]] && kind+=" ${match[1]}-bit"
     [ -n "${J[$n,dv]}" ] && kind+=" Dolby Vision"
-    target="${ow}×${oh} $CODEC_TEXT $PRESET${TUNE:+ tune $TUNE} RF $RF"
+    target="$CODEC_TEXT $PRESET${TUNE:+ tune $TUNE} RF $RF"
     if [ -n "${J[$n,audio]}" ]; then
       target+=", Opus $AUDIO kbps"
       [ -n "${J[$n,ac2]}" ] && target+=" (stereo)"
@@ -106,7 +112,7 @@ if (( njobs )); then
     (( ${J[$n,videos]} > 1 )) && echo "  (it has ${J[$n,videos]} video tracks; the first is converted)" >> "$LOG"
     # The command: HandBrake's settings as ffmpeg options (see DEVELOPING.md).
     cmd=(nice -n "$NICE" "$ffmpeg" -hide_banner -nostdin -v warning -nostats -progress pipe:1 -y
-      -noautorotate -i "$in" -map 0:v:0)
+      -hwaccel none -noautorotate -i "$in" -map 0:v:0)
     [ -n "${J[$n,audio]}" ] && cmd+=(-map "0:${J[$n,audio]}")
     cmd+=(-map_metadata -1 -fps_mode passthrough
       -vf "scale=w='min(iw,$LIMIT)':h='min(ih,$LIMIT)':force_original_aspect_ratio=decrease:force_divisible_by=2")
@@ -118,8 +124,11 @@ if (( njobs )); then
       cmd+=(-profile:v main10 -pix_fmt yuv420p10le)
       params="keyint=$((10 * fr)):min-keyint=$fr"
       if [ -n "${J[$n,carry]}" ]; then
-        # Dolby Vision needs x265's VBV (its HRD); pixels per second with the
-        # whole frames per second, as HandBrake counts them
+        # Dolby Vision needs x265's VBV (its HRD), from the copy's size and
+        # its pixels per second with the whole frames per second, as
+        # HandBrake counts them
+        dims=($(scaled $w $h))
+        ow=${dims[1]} oh=${dims[2]}
         fpsi=${J[$n,rate]%/*}
         (( fpsi = ${J[$n,rate]#*/} > 0 ? fpsi / ${J[$n,rate]#*/} : fr ))
         vbv=$(dovi_rate $ow $(( ow * oh * fpsi )))
@@ -155,23 +164,25 @@ if (( njobs )); then
       fail "ffmpeg could not convert it (exit status $rc)"
       continue
     fi
-    # The check: the expected codec in 10 bits (ffprobe without an AV1
-    # decoder can't tell AV1's pixel format), and the whole duration.
-    oc='' op='' od=''
+    # The check: the expected codec in 10 bits, and the whole duration; and
+    # the copy's size, for the log.
+    oc='' op='' od='' ow='' oh=''
     while IFS='=' read -r key value; do
       case $key in
         codec_name) oc=$value;;
         pix_fmt) op=$value;;
         duration) od=$value;;
+        width) ow=$value;;
+        height) oh=$value;;
       esac
-    done < <("$ffprobe" -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,duration -of default=nw=1 "$out" 2>/dev/null)
+    done < <("$ffprobe" -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,duration,width,height -of default=nw=1 "$out" 2>/dev/null)
     want=hevc
     [ "$CODEC" = av1 ] && want=av1
     if [ "$oc" != "$want" ]; then
       fail "the copy has no $want video"
       continue
     fi
-    if [ "$op" != yuv420p10le ] && ! { [ "$CODEC" = av1 ] && [[ $op == (unknown|) ]]; }; then
+    if [ "$op" != yuv420p10le ]; then
       fail "the copy is not 10-bit ($op)"
       continue
     fi
@@ -190,7 +201,7 @@ if (( njobs )); then
     size_out=$(stat -f %z "$out")
     bytes_in=$(( bytes_in + ${J[$n,size]} ))
     bytes_out=$(( bytes_out + size_out ))
-    echo "  $(size_text ${J[$n,size]}) → $(size_text $size_out) ($(( 100 * size_out / (${J[$n,size]} > 0 ? ${J[$n,size]} : 1) ))%), $(duration_text $elapsed) at $(printf '%.1f' $(( dur / elapsed )))× real time" >> "$LOG"
+    echo "  $(size_text ${J[$n,size]}) → $(size_text $size_out) ($(( 100 * size_out / (${J[$n,size]} > 0 ? ${J[$n,size]} : 1) ))%)${ow:+, ${ow}×${oh}}, $(duration_text $elapsed) at $(printf '%.1f' $(( dur / elapsed )))× real time" >> "$LOG"
     printf 'vid_out_%d.mp4|%d|delete|%s\n' $n $n "${name:r}.mp4" >> "$WORK/vid_done.txt"
     converted=$((converted + 1))
   done

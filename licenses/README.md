@@ -44,3 +44,4 @@ contains no third-party code.
 | [x265](https://github.com/Multicorewareinc/x265)   | 4.3     | GPL-2.0-or-later                                                       |
 | [SVT-AV1](https://gitlab.com/AOMediaCodec/SVT-AV1) | 4.2.0   | BSD-3-Clause-Clear, and the Alliance for Open Media Patent License 1.0 |
 | [libopus](https://opus-codec.org)                  | 1.6.1   | BSD-3-Clause                                                           |
+| [dav1d](https://code.videolan.org/videolan/dav1d)  | 1.5.4   | BSD-2-Clause                                                           |

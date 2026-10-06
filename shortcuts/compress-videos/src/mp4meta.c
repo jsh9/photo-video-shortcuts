@@ -352,6 +352,124 @@ done:
   return ret;
 }
 
+// The text of a data box's value: UTF-8 as it is; a big-endian integer
+// (QuickTime's well-known types 21 and 65-67, 74: signed; 22 and 75-78:
+// unsigned) of 1 to 8 bytes in decimal. Returns 1, or -1 for another type.
+static int value_text(uint32_t type, const uint8_t *p, size_t len, char *out, size_t out_len,
+                      char *err, size_t err_len) {
+  const int is_signed = type == 21 || (type >= 65 && type <= 67) || type == 74;
+  const int is_unsigned = type == 22 || (type >= 75 && type <= 78);
+  if (type == 1) {
+    if (len >= out_len) {
+      set_err(err, err_len, "the value is too long");
+      return -1;
+    }
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 1;
+  }
+  if ((is_signed || is_unsigned) && len >= 1 && len <= 8) {
+    uint64_t v = 0;
+    for (size_t i = 0; i < len; i++) v = v << 8 | p[i];
+    if (is_signed) {
+      if (len < 8 && (p[0] & 0x80)) v |= ~(uint64_t)0 << (8 * len);  // sign extension
+      snprintf(out, out_len, "%lld", (long long)(int64_t)v);
+    } else {
+      snprintf(out, out_len, "%llu", (unsigned long long)v);
+    }
+    return 1;
+  }
+  set_err(err, err_len, "the value has data type %u, which isn't shown", (unsigned)type);
+  return -1;
+}
+
+// Looks for `key` in a QuickTime metadata box (hdlr mdta, keys, ilst): 1 and
+// its value in out, 0 if it isn't there, -1 if the box is damaged or the value
+// can't be shown.
+static int meta_key(const uint8_t *data, const box_t *meta, const char *key, char *out,
+                    size_t out_len, char *err, size_t err_len) {
+  const size_t end = meta->pos + meta->size;
+  size_t start = meta->pos + meta->header;
+  box_t hdlr, keys, ilst, item, value;
+  // QuickTime's meta box has no version and flags; ISO's has them.
+  if (find_child(data, start, end, FOURCC('h', 'd', 'l', 'r'), &hdlr) != 1) {
+    start += 4;
+    if (start > end || find_child(data, start, end, FOURCC('h', 'd', 'l', 'r'), &hdlr) != 1)
+      return 0;
+  }
+  if (hdlr.size < hdlr.header + 12 ||
+      rd32(data + hdlr.pos + hdlr.header + 8) != FOURCC('m', 'd', 't', 'a') ||
+      find_child(data, start, end, FOURCC('k', 'e', 'y', 's'), &keys) != 1 ||
+      find_child(data, start, end, FOURCC('i', 'l', 's', 't'), &ilst) != 1)
+    return 0;
+  // keys: version and flags, the count, then (size, namespace, name) per key;
+  // the first key is number 1.
+  const size_t key_len = strlen(key), keys_end = keys.pos + keys.size;
+  size_t p = keys.pos + keys.header + 8;
+  uint32_t index = 0;
+  for (uint32_t n = 1; p + 8 <= keys_end; n++) {
+    const uint32_t size = rd32(data + p);
+    if (size < 8 || size > keys_end - p) goto bad;
+    if (size - 8 == key_len && memcmp(data + p + 8, key, key_len) == 0) {
+      index = n;
+      break;
+    }
+    p += size;
+  }
+  if (!index) return 0;
+  // ilst: a box per value, its type the key's number, holding a data box:
+  // the value's type, its locale, then the value.
+  size_t pos = ilst.pos + ilst.header;
+  int r;
+  while ((r = next_box(data, &pos, ilst.pos + ilst.size, &item)) == 1) {
+    if (item.type != index) continue;
+    if (find_child(data, item.pos + item.header, item.pos + item.size, FOURCC('d', 'a', 't', 'a'),
+                   &value) != 1 ||
+        value.size < value.header + 8)
+      goto bad;
+    const uint8_t *v = data + value.pos + value.header;
+    return value_text(rd32(v) & 0xFFFFFF, v + 8, value.size - value.header - 8, out, out_len, err,
+                      err_len);
+  }
+  if (r == 0) return 0;
+bad:
+  set_err(err, err_len, "damaged meta box");
+  return -1;
+}
+
+int mp4meta_key(const char *path, const char *key, char *out, size_t out_len, char *err,
+                size_t err_len) {
+  FILE *f = fopen(path, "rb");
+  if (!f) {
+    set_err(err, err_len, "can't open %s", path);
+    return -1;
+  }
+  uint8_t *moov = NULL;
+  size_t moov_len = 0;
+  long long offset;
+  int at_end, found = 0;
+  int r = read_moov(f, &moov, &moov_len, &offset, &at_end, err, err_len);
+  fclose(f);
+  if (r != 0) return -1;
+  box_t top, b;
+  size_t pos = 0;
+  if (next_box(moov, &pos, moov_len, &top) != 1) {
+    r = -1;
+  } else {
+    pos = top.header;
+    while (!found && (r = next_box(moov, &pos, moov_len, &b)) == 1)
+      if (b.type == FOURCC('m', 'e', 't', 'a'))
+        found = meta_key(moov, &b, key, out, out_len, err, err_len);
+  }
+  free(moov);
+  if (found < 0) return -1;
+  if (found == 0 && r < 0) {
+    set_err(err, err_len, "damaged moov box in %s", path);
+    return -1;
+  }
+  return found;
+}
+
 int mp4meta_append(const char *path, const uint8_t *box, size_t len, char *err, size_t err_len) {
   // Keep the file's own meta/udta boxes: pass them along with the new box.
   FILE *f = fopen(path, "rb");

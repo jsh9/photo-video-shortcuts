@@ -1,10 +1,10 @@
 -- @NAME@: is Photos in front with items selected? (lib/mac, shared by the Mac
--- shortcuts.) Returns "SELECTION" and the count, "NONE" (the shortcut then
--- does without a selection), or "ERROR: ..." (for example, Shortcuts may not
--- control Photos; the shortcut shows it). Photos is only asked when it is
+-- shortcuts.) Returns "SELECTION" and the count, "NONE" (Photos isn't
+-- running or in front, or nothing is selected), or "ERROR: ..." (for example,
+-- Shortcuts may not control Photos). What a shortcut does with each answer is
+-- its own (see its build_mac_shortcuts.py). Photos is only asked when it is
 -- running: a tell block would launch it otherwise. No Shortcuts variable may
--- appear in this text: the script would not compile (see the shortcuts'
--- build_mac_shortcuts.py).
+-- appear in this text: the script would not compile.
 on run {input, parameters}
 	try
 		if application "Photos" is running then

@@ -6,8 +6,10 @@
 //
 // usage: make_video OUT.mov [--size WxH] [--seconds S] [--fps F] [--hlg]
 //                   [--rotate 0|90|180|270] [--audio stereo|none|surround,stereo]
-//                   [--no-keys]
+//                   [--slomo] [--no-keys]
 //
+// --slomo marks the video as an iPhone marks a slo-mo (its key
+// full-frame-rate-playback-intent is 0 instead of 1).
 // The picture is a gradient with a square moving across it, so that a copy
 // can be compared with the original (PSNR). --audio lists the sound tracks in
 // order: "surround" is 5.1, "stereo" two channels, each a sine wave.
@@ -33,6 +35,7 @@ var hlg = false
 var rotate = 0
 var audio = ["stereo"]
 var keys = true
+var slomo = false
 while !args.isEmpty {
   let a = args.removeFirst()
   switch a {
@@ -47,6 +50,7 @@ while !args.isEmpty {
   case "--audio":
     let list = args.removeFirst()
     audio = list == "none" ? [] : list.split(separator: ",").map(String.init)
+  case "--slomo": slomo = true
   case "--no-keys": keys = false
   default: fail("unknown option \(a)")
   }
@@ -70,8 +74,8 @@ let movieKeys = [
   item("com.apple.quicktime.make", "Apple", utf8),
   item("com.apple.quicktime.model", "iPhone 17 Pro", utf8),
   item("com.apple.quicktime.software", "26.0", utf8),
-  item("com.apple.quicktime.full-frame-rate-playback-intent", NSNumber(value: Int64(1)),
-       kCMMetadataBaseDataType_SInt64),
+  item("com.apple.quicktime.full-frame-rate-playback-intent",
+       NSNumber(value: Int64(slomo ? 0 : 1)), kCMMetadataBaseDataType_SInt64),
   item("com.apple.quicktime.metadata.1", NSNumber(value: Int8(1)), kCMMetadataBaseDataType_SInt8),
 ]
 let trackKeys = [

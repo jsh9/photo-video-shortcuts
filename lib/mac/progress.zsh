@@ -1,8 +1,8 @@
 # The progress window (lib/mac, shared by the Mac shortcuts' scripts). Needs
 # LOGDIR, a folder Terminal reads without asking for access (not Pictures or
 # iCloud Drive); LOG, the log, in it; and WATCH, 1 to open the window. Its
-# files are LOGDIR/@ROUTE@.command and LOGDIR/@ROUTE@.pid (@ROUTE@: the
-# route's name, filled in by the generator), which finish.zsh uses too.
+# files, which finish.zsh uses too, are in LOGDIR, named after the route
+# (the generator fills the name in): the window's script and its pid.
 if [ "$WATCH" = 1 ]; then
   # A Terminal window follows the log while the conversion runs; it records
   # its process id so that the finish step can end exactly this window.

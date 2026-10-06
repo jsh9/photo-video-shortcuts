@@ -8,8 +8,9 @@ The originals are collected in an album, *Videos already compressed*, for you
 to delete when you're happy with the copies. Nothing is deleted by the
 shortcut.
 
-It runs on a Mac with Apple silicon and macOS 14 or later. An iPhone version is
-planned.
+It runs on a Mac with Apple silicon and macOS 14 or later, and only on videos
+selected in Photos: run from the Shortcuts app or anywhere else, it just tells
+you to select them in Photos. An iPhone version is planned.
 
 <!--TOC-->
 
@@ -41,8 +42,8 @@ ______________________________________________________________________
 
    It should end with "Self-test passed". The three tools are about 33 MB:
    `compress-videos-ffmpeg` and `compress-videos-ffprobe` are FFmpeg 9 built
-   for this shortcut, with x265, SVT-AV1 and libopus in it and nothing else
-   (their own names, so that they never replace another ffmpeg in your
+   for this shortcut, with x265, SVT-AV1, libopus and dav1d in it and nothing
+   else (their own names, so that they never replace another ffmpeg in your
    Terminal); `vidmeta` copies the videos' metadata. Without them, the shortcut
    uses Homebrew's ffmpeg (7.1 or later) if you have it, but it still needs
    `vidmeta`.
@@ -62,9 +63,12 @@ ______________________________________________________________________
 ## 2. Use
 
 In Photos, select the videos, then **Share ▸ Compress Videos (macOS)** (in the
-toolbar, or right-click ▸ Share). Photos must be in front with the videos
-selected: started any other way, the shortcut only tells you to do this. You
-can select photos and Live Photos too; they are skipped.
+toolbar, or right-click ▸ Share). This is the only way to use it: Photos must
+be in front with the videos selected. Started from the Shortcuts app, Spotlight
+or the menu bar with nothing selected in Photos, it only tells you to do this;
+it has no file or photo picker, because Shortcuts can't give a script the
+original videos (it hands over re-rendered copies). You can select photos and
+Live Photos too; they are skipped.
 
 ### 2.1. The questions
 
@@ -104,8 +108,12 @@ select all, and delete them (they stay in Recently Deleted for 30 days). Photos
 may list a copy and its original under Duplicates.
 
 The originals are copied out of Photos first, so you need free space for them
-plus the copies; the shortcut checks and stops if there isn't enough. Convert a
-large selection in smaller batches.
+plus the copies. Before Photos copies anything, the shortcut asks for about 500
+MB free per selected item, and stops if there isn't that much (it can't know
+the videos' sizes yet); once they are copied, it checks their real size and
+stops if they and their copies won't fit. So convert a large selection in
+smaller batches, a month or a trip at a time, and select only the videos (in
+Photos' sidebar, Media Types ▸ Videos).
 
 ## 3. What is kept, and what isn't
 
@@ -122,8 +130,21 @@ Kept, as Photos shows them:
 
 Not converted at all (counted as skipped): slo-mo videos (the slow part is an
 edit that a copy would lose: it would play at normal speed), spatial videos
-(one view would be kept), videos whose sound ffmpeg can't read, and photos and
-Live Photos.
+(one view would be kept), videos whose picture or sound ffmpeg can't read (our
+ffmpeg reads H.265, H.264 and AV1 videos, not Apple ProRes), and photos and
+Live Photos. An AV1 or H.265 video, a copy this shortcut made for example, is
+converted again like any other.
+
+Which videos count as slo-mo: those recorded at more than 61 frames per second
+that the iPhone marked as slo-mo. Recent iPhones mark every video, so a video
+recorded at 120 fps in normal Video mode (4K at 120 fps on an iPhone 16 Pro and
+later) is converted, at 120 fps. A fast video without the mark, from an older
+iPhone or another camera (an action camera's 100 or 120 fps video, say), is
+skipped as *perhaps slo-mo*, as the log says. To convert those too: open the
+shortcut in Shortcuts, find the Run Shell Script action whose script starts
+with `# Compress Videos (macOS)`, and change its line `SLOMO=${SLOMO:-1}` to
+`SLOMO=0`. Then no video is skipped as slo-mo, real ones included (their copies
+play at normal speed); change it back afterwards.
 
 Not kept in the copies:
 
@@ -149,6 +170,9 @@ Measured on a 14-core M4 Pro, a 4K 30 fps iPhone video limited to 2K: H.265
 *medium* converts about as fast as the video plays (1.1× real time), *fast*
 about 1.5×; AV1 preset 5 about 0.6×. *slow* and the lower AV1 presets take
 several times longer. The Mac stays usable: ffmpeg runs at a lower priority.
+Everything is done in software, on the CPU, as with HandBrake's x265 and
+SVT-AV1 encoders: the Mac's hardware video encoders and decoders are never
+used.
 
 ## 6. Troubleshooting
 
@@ -160,6 +184,9 @@ several times longer. The Mac stays usable: ffmpeg runs at a lower priority.
   in System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.
 - **"Select the videos in Photos…"**: Photos wasn't in front with a selection
   when it started. Start it from Photos' Share menu.
+- **"Not enough free space for the N item(s)…"**: the shortcut wants about 500
+  MB free per selected item before Photos copies them out. Select fewer videos,
+  or free some space.
 - **The log says `ERROR: ffmpeg is not installed` or
   `vidmeta is not installed`**: install the tools
   ([section 1](#1-install-once)).

@@ -70,14 +70,35 @@ written before the work; what the implementation and the spikes of 5.2 changed
   doesn't change it): 70 Mbit/s up to 1080p60, 130 for 4K up to 60 fps, not the
   20/25/40 of 4.2. ffmpeg sets the Dolby Vision level from the size only, so
   the record is the same either way.
-- **Slo-mo**: an average frame rate above 61 fps, not "above 100 fps" by
-  `r_frame_rate`, which a variable-rate video can put far above its real rate
-  (150 for a Live Photo's video averaging 28); a 240 fps slo-mo averages 177.
+- **Slo-mo**: by the iPhone's own mark, the movie key
+  `com.apple.quicktime.full-frame-rate-playback-intent` (0 on a slo-mo, 1 on
+  the iPhone 17 Pro's other videos), so that a video recorded at 120 fps in
+  normal Video mode is converted. Without the key, a video averaging above 61
+  fps is taken for slo-mo; `SLOMO=0` turns the rule off. The average, not
+  `r_frame_rate` above 100 fps: a variable-rate video can put `r_frame_rate`
+  far above its real rate (150 for a Live Photo's video averaging 28), and a
+  240 fps slo-mo averages 177. 100 fps wouldn't tell a 120 fps slo-mo from a
+  120 fps video either; the key does. ffprobe reads the key's 8-byte integer as
+  0, so `vidmeta key` reads it (`mp4meta_key`, added to the draft's
+  `mp4meta.c`).
 - **V7 failed**: `ffmpeg --version` prints the version line on stderr and exits
   with an error; `release.py` uses `-version` for `ffmpeg-macos` and
   `ffprobe-macos` (the fallback of 5.2).
-- Our ffprobe has no AV1 decoder and reports an AV1 copy's pixel format as
-  `unknown`; the check accepts that for AV1.
+- Our build decodes AV1 with **dav1d** 1.5.4 (static, software): AV1 videos can
+  be converted again, and our ffprobe reports an AV1 copy's pixel format
+  (without a decoder, `unknown`), so the 10-bit check applies to AV1 as to
+  H.265. FFmpeg's own AV1 decoder was tried first and dropped: it decodes only
+  through a hardware accelerator, so an AV1 video in failed. Nothing uses the
+  Mac's media engines (the user's requirement): no VideoToolbox in the build,
+  and `-hwaccel none` in the command for Homebrew's ffmpeg too. A video whose
+  picture ffmpeg can't decode (`ffmpeg -codecs`; ProRes with our build) is
+  skipped and counted.
+- **Free space** is checked twice: before Photos exports anything, at 500 MB
+  per selected item (the count is all the shortcut knows then), and after the
+  export, against the exported files' size, as 3.4 planned.
+- The log shows the copy's size as ffprobe reads it; Dolby Vision's VBV, which
+  must be known before encoding, uses the size computed with libavfilter's
+  rounding (`ff_scale_adjust_dimensions`).
 - The test videos come from AVFoundation (`make_video.swift`), which on macOS
   27 writes HLG HEVC with Dolby Vision 8.4 (an RPU in every frame), so the
   Dolby Vision path is tested without personal videos.

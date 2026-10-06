@@ -28,17 +28,22 @@ ______________________________________________________________________
 Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
    Run AppleScript (lib/mac/probe.applescript): is Photos in front with a
    selection? If not: a notification ("Select the videos in Photos...") and
-   stop. There is no picker: Shortcuts hands a script re-rendered copies of
-   picked videos, through AVFoundation, and failed on some.
+   stop. The selection is the only route; there is no picker: Shortcuts hands
+   a script re-rendered copies of picked videos, through AVFoundation, and
+   failed on some.
+
+   Run Shell Script empties ~/Pictures/.compress-videos-macos (Photos'
+   sandbox reaches ~/Pictures) and checks that its disk has 500 MB free per
+   selected item (ROOM_PER_ITEM, for the export and the copies); if not, a
+   notification and stop, before any question and before Photos exports
+   anything
 
    "Same as last time" (when ~/Library/Caches/compress-videos-macos/
    last-settings.txt exists) or the six questions (vf.py): codec, preset,
    tune (H.265), RF, largest size, audio; each sets a variable
 
-   Run Shell Script empties ~/Pictures/.compress-videos-macos (Photos'
-   sandbox reaches ~/Pictures); Run AppleScript (lib/mac/export.applescript)
-   has Photos export the originals into its in/ and returns "id|filename"
-   lines
+   Run AppleScript (lib/mac/export.applescript) has Photos export the
+   originals into the work folder's in/ and returns "id|filename" lines
 
    Run Shell Script (/bin/zsh; scripts/mac/common.zsh + selection.zsh, with
    encode.zsh at its @RUN@; the settings and the lines as variables):
@@ -46,9 +51,11 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
      in ~/.local/bin, else Homebrew's ffmpeg 7.1+; vidmeta), sorts in/: photos
      and Live Photos (a photo whose .mov isn't an item of its own) skipped;
      each video probed with ffprobe and skipped if a copy would lose
-     something (1.3); checks the free space; then for each video, niced:
+     something (1.3); checks the free space against the exported files' size;
+     then for each video, niced:
        ffmpeg ... in/IMG_1234.MOV vid_out_N.mp4   (1.1; progress lines)
-       ffprobe vid_out_N.mp4   (codec, 10 bits, the whole duration)
+       ffprobe vid_out_N.mp4   (codec, 10 bits, the whole duration; its size
+                                for the log)
        vidmeta copy in/IMG_1234.MOV vid_out_N.mp4   (1.2)
      moves each copy to out/IMG_1234.mp4 and prints
        path|original id|delete|IMG_1234.mp4
@@ -71,9 +78,10 @@ Terminal window (`lib/mac/progress.zsh`; `WATCH=0` turns it off) follows the
 log, which has the command line of each video, a progress line every 5 s
 (`PROGRESS_EVERY`), and the size and speed of each copy. Switches at the top of
 the script: `NICE=10` (ffmpeg's priority), `DOLBY=1` (0: Dolby Vision videos
-become plain HDR), and `FFMPEG`, `FFPROBE`, `VIDMETA` (other tools, used by the
-tests). The script never exits nonzero for a conversion problem: it writes
-`ERROR:` and `!` lines to the log, which the shortcut shows.
+become plain HDR), `SLOMO=1` (0: no video is skipped as slo-mo, 1.3), and
+`FFMPEG`, `FFPROBE`, `VIDMETA` (other tools, used by the tests). The script
+never exits nonzero for a conversion problem: it writes `ERROR:` and `!` lines
+to the log, which the shortcut shows.
 
 ### 1.1. The ffmpeg command
 
@@ -82,7 +90,7 @@ HandBrake's settings (from its `libhb/encx265.c`, `encsvtav1.c` and
 
 ```
 nice -n 10 ffmpeg -hide_banner -nostdin -v warning -nostats -progress pipe:1 -y \
-  -noautorotate -i in/IMG_1234.MOV -map 0:v:0 -map 0:1 -map_metadata -1 \
+  -hwaccel none -noautorotate -i in/IMG_1234.MOV -map 0:v:0 -map 0:1 -map_metadata -1 \
   -fps_mode passthrough \
   -vf "scale=w='min(iw,2560)':h='min(ih,2560)':force_original_aspect_ratio=decrease:force_divisible_by=2" \
   -c:v libx265 -preset medium -crf 24 -profile:v main10 -pix_fmt yuv420p10le \
@@ -103,16 +111,22 @@ nice -n 10 ffmpeg -hide_banner -nostdin -v warning -nostats -progress pipe:1 -y 
 - Dolby Vision (a source with a DOVI configuration record, `DOLBY=1`):
   `-dolbyvision 1 -strict unofficial` (else the MP4 muxer drops the `dvvC`
   box). x265 needs VBV for the RPU's HRD: HandBrake's rate is the first Dolby
-  Vision level the copy's width and pixels per second fit, at the high tier,
-  since x265 allows the high tier by default (70 Mbit/s up to 1080p60 and
-  1440p30, 130 for 4K up to 60 fps, 240 for 4K120). ffmpeg sets the Dolby
-  Vision level from the size alone.
+  Vision level the copy's width and pixels per second fit (the copy's size
+  computed as libavfilter rounds it), at the high tier, since x265 allows the
+  high tier by default (70 Mbit/s up to 1080p60 and 1440p30, 130 for 4K up to
+  60 fps, 240 for 4K120). ffmpeg sets the Dolby Vision level from the size
+  alone.
 - Sound: the first track with at most 2 channels ffmpeg can read (iPhones: the
   stereo AAC; their spatial audio is Apple's APAC, which ffmpeg can't read),
   else the first readable one with `-ac 2`, else none (`-an`). Opus at 48 kHz.
 - `-map_metadata -1`: ffmpeg's own copy of the keys is wrong for Photos (1.2).
 
 The script sets `SVT_LOG=2`, so SVT-AV1 prints only its warnings.
+
+Everything runs in software, on the CPU, as HandBrake's x265 and SVT-AV1
+encoders do: our build has no VideoToolbox (`--disable-autodetect`), decodes
+AV1 with dav1d, and the command says `-hwaccel none`, which also keeps
+Homebrew's ffmpeg from decoding with the Mac's media engines.
 
 ### 1.2. Metadata: vidmeta
 
@@ -127,6 +141,10 @@ Byte for byte, so every value keeps its type (int64, int8, int32, `en-US`
 strings). It refuses a copy whose `moov` isn't last, a damaged file, or a file
 without `moov`; the script then fails that video. `vidmeta --selftest` writes
 two small MP4 files, copies one's metadata onto the other and reads it back.
+`vidmeta key FILE KEY` prints one of the movie's keys (UTF-8 text, or an
+integer in decimal; exit status 1 when the file doesn't have it): the script
+reads the slo-mo mark with it (1.3), since ffprobe reads an iPhone's 8-byte
+integers as 0.
 
 ### 1.3. What is skipped
 
@@ -134,9 +152,18 @@ Before any video is converted, from the exported files and ffprobe:
 
 - photos, and Live Photos (a photo plus a `.mov` that isn't an item of its own;
   when Photos' export lists no items, any photo with a `.mov` of its name);
-- slo-mo: an average frame rate above 61 fps. Photos exports the recording at
-  its capture rate (a 240 fps slo-mo averages 177) and the slow part is an
-  edit, so a copy would play at normal speed. Not ffprobe's `r_frame_rate`: a
+- a video whose picture this ffmpeg can't decode: its codec isn't among those
+  `ffmpeg -codecs` marks `D` (our build decodes HEVC, H.264 and AV1, not Apple
+  ProRes);
+- slo-mo (with `SLOMO=1`, the default): Photos exports the recording at its
+  capture rate (a 240 fps slo-mo averages 177) and the slow part is an edit, so
+  a copy would play at normal speed. A video averaging above 61 fps is skipped
+  unless its movie key `com.apple.quicktime.full-frame-rate-playback- intent`
+  is 1. Recent iPhones write it on every video (seen on an iPhone 17 Pro): 0
+  for a slo-mo, 1 for the others, which play at their full rate, so a 4K video
+  recorded at 120 fps (not slo-mo) is converted. Without the key (older
+  iPhones, other cameras), a fast video is skipped as "perhaps slo-mo";
+  `SLOMO=0` converts it. The average, not ffprobe's `r_frame_rate`: a
   variable-rate video can put it far above its real rate (150 for a Live
   Photo's video that averages 28);
 - spatial video: "Stereo 3D" side data or a Multiview profile (not yet seen on
@@ -150,7 +177,7 @@ Before any video is converted, from the exported files and ffprobe:
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `release.json`                   | the release files: `ffmpeg-macos`, `ffprobe-macos`, `vidmeta-macos` and the Mac shortcut                                                                  |
 | `VERSION`                        | the version, shared by the shortcut, `vidmeta` and our ffmpeg's version line                                                                              |
-| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy)                                                                                       |
+| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy, and reading a key)                                                                    |
 | `scripts/build-macos.sh`         | builds `dist/ffmpeg-macos`, `dist/ffprobe-macos`, `dist/vidmeta-macos` and `build/vidmeta` (with the sanitizers, for the tests)                           |
 | `scripts/vf.py`                  | the questions (titles, descriptions, defaults) and their builders; re-exports `lib/wfkit.py`                                                              |
 | `scripts/build_mac_shortcuts.py` | generates and signs `dist/Compress Videos (macOS).shortcut`                                                                                               |
@@ -161,8 +188,8 @@ Before any video is converted, from the exported files and ffprobe:
 
 ## 3. Building (Mac)
 
-On Apple silicon, with Homebrew `cmake`, `ninja` and `pkg-config`, from this
-folder (`shortcuts/compress-videos`):
+On Apple silicon, with Homebrew `cmake`, `ninja`, `meson` and `pkgconf`, from
+this folder (`shortcuts/compress-videos`):
 
 ```bash
 ./scripts/build-macos.sh
@@ -170,15 +197,18 @@ python3 scripts/build_mac_shortcuts.py --guess
 ```
 
 `build-macos.sh` downloads the sources of FFmpeg 9.0.2, x265 4.3, SVT-AV1 4.2.0
-and libopus 1.6.1 into the repository's `.deps/` (checked against the SHA-256
-of Homebrew's formulae), builds x265 twice (10-bit linked into 8-bit), SVT-AV1
-and libopus as static libraries, and FFmpeg with `--disable-everything` plus
-what the shortcut uses, linked statically (only `libSystem` and `libc++`
-remain; `-dead_strip_dylibs` drops the frameworks FFmpeg's configure adds
-anyway). About a minute and a half on an M4 Pro; a second run rebuilds only
-what changed. `--extra-version=compress-videos-<VERSION>` puts the version in
-ffmpeg's and ffprobe's version line. `ONLY=vidmeta ./scripts/build-macos.sh`
-builds the helper alone. The build is GPL (x265); see
+libopus 1.6.1 and dav1d 1.5.4 into the repository's `.deps/` (checked against
+the SHA-256 of Homebrew's formulae), builds x265 twice (10-bit linked into
+8-bit), SVT-AV1, libopus and dav1d (AV1 decoding: AV1 videos in, and AV1
+copies' pixel format for ffprobe; FFmpeg's own AV1 decoder works only with a
+hardware accelerator) as static libraries, and FFmpeg with
+`--disable-everything` plus what the shortcut uses, linked statically (only
+`libSystem` and `libc++` remain; `-dead_strip_dylibs` drops the frameworks
+FFmpeg's configure adds anyway). About a minute and a half on an M4 Pro; a
+second run rebuilds only what changed.
+`--extra-version=compress-videos-<VERSION>` puts the version in ffmpeg's and
+ffprobe's version line. `ONLY=vidmeta ./scripts/build-macos.sh` builds the
+helper alone. The build is GPL (x265); see
 [licenses](../../licenses/README.md).
 
 `build_mac_shortcuts.py --guess --no-sign` writes the unsigned plist the tests
@@ -207,8 +237,8 @@ Compress Photos' files (marked *unchanged* in the notes), and the README's
 2. **Set up the Mac** (once):
 
    - signed in to an Apple ID, for `shortcuts sign`;
-   - Homebrew's `cmake`, `ninja` and `pkg-config` for this tool's build, and
-     the packages Compress Photos' build needs (see its
+   - Homebrew's `cmake`, `ninja`, `meson` and `pkgconf` for this tool's build,
+     and the packages Compress Photos' build needs (see its
      [Building](../compress-photos/DEVELOPING.md#3-building-mac)), since every
      release builds every shortcut: `binaryen`, and `wasmtime`, which runs its
      WebAssembly encoders' `--version`;
@@ -219,8 +249,8 @@ Compress Photos' files (marked *unchanged* in the notes), and the README's
    script, not Shortcuts itself. From the repository root,
    `python3 scripts/release.py compress-videos --dry-run` builds and signs
    everything without creating a tag or release (the first run downloads
-   FFmpeg, x265, SVT-AV1 and libopus into `.deps/`). Then install what it
-   built, from the repository root:
+   FFmpeg, x265, SVT-AV1, libopus and dav1d into `.deps/`). Then install what
+   it built, from the repository root:
 
    ```bash
    cp shortcuts/compress-videos/dist/ffmpeg-macos ~/.local/bin/compress-videos-ffmpeg && cp shortcuts/compress-videos/dist/ffprobe-macos ~/.local/bin/compress-videos-ffprobe && cp shortcuts/compress-videos/dist/vidmeta-macos ~/.local/bin/vidmeta && ~/.local/bin/vidmeta --selftest

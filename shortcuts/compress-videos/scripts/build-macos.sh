@@ -14,16 +14,19 @@
 #
 # FFmpeg is configured with --disable-everything plus what the shortcut's
 # commands use: MOV/MP4 in, MP4 out, HEVC, H.264, AAC, ALAC, PCM and Opus
-# decoding, scaling and resampling, and three encoders linked in statically:
+# decoding, scaling and resampling, and four libraries linked in statically:
 # x265 (H.265: the 8-bit library with the 10-bit one linked in, so it encodes
-# Main and Main 10), SVT-AV1 (AV1) and libopus (Opus). x265 makes the build GPL,
-# as this repository is. --extra-version puts "compress-videos-<VERSION>" in
-# ffmpeg's and ffprobe's version line, which scripts/release.py checks.
+# Main and Main 10), SVT-AV1 (AV1) and libopus (Opus), and dav1d, which decodes
+# AV1. All of it runs on the CPU: no hardware encoder or decoder is built in.
+# x265 makes the build GPL, as this repository is. --extra-version puts
+# "compress-videos-<VERSION>" in ffmpeg's and ffprobe's version line, which
+# scripts/release.py checks.
 #
-# Needs: Homebrew cmake, ninja and pkg-config. Downloads the sources into the
-# repository's .deps/ on first run and checks their SHA-256. The libraries and
-# FFmpeg are built in build/macos, where a second run only rebuilds what
-# changed (CI caches that folder). ONLY=vidmeta builds the helper alone.
+# Needs: Homebrew cmake, ninja, meson and pkgconf (pkg-config). Downloads the
+# sources into the repository's .deps/ on first run and checks their SHA-256.
+# The libraries and FFmpeg are built in build/macos, where a second run only
+# rebuilds what changed (CI caches that folder). ONLY=vidmeta builds the
+# helper alone.
 set -eu
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
@@ -34,16 +37,19 @@ FFMPEG_VERSION=9.0.2
 X265_VERSION=4.3
 SVTAV1_VERSION=4.2.0
 OPUS_VERSION=1.6.1
+DAV1D_VERSION=1.5.4
 # The release archives' SHA-256 (the same as Homebrew's formulae).
 FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 X265_SHA256=83c53e4c8bbb8f1e33ed59e10a7d621d1d7801ca853910c3eb41f038b8ffb121
 SVTAV1_SHA256=512f2ea5649e3e76c2dddcc25c2556fb67a9582baaab207c9c96161c94659dad
 OPUS_SHA256=6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1
+DAV1D_SHA256=2abfb0c89212e6e4733a54e0ae509ec00a5b845a6360946f918806e14aedb011
 DEPS="$REPO/.deps"
 FFMPEG="$DEPS/ffmpeg-$FFMPEG_VERSION"
 X265="$DEPS/x265-$X265_VERSION"
 SVTAV1="$DEPS/svt-av1-$SVTAV1_VERSION"
 OPUS="$DEPS/opus-$OPUS_VERSION"
+DAV1D="$DEPS/dav1d-$DAV1D_VERSION"
 MIN_MACOS=14.0  # Opus in MP4 plays in Photos from macOS 14 on
 ARCH=arm64
 ONLY=${ONLY:-all}
@@ -101,6 +107,7 @@ fetch "$FFMPEG" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" "$FF
 fetch "$X265" "https://github.com/Multicorewareinc/x265/releases/download/$X265_VERSION/x265_$X265_VERSION.tar.gz" "$X265_SHA256"
 fetch "$SVTAV1" "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v$SVTAV1_VERSION/SVT-AV1-v$SVTAV1_VERSION.tar.bz2" "$SVTAV1_SHA256"
 fetch "$OPUS" "https://downloads.xiph.org/releases/opus/opus-$OPUS_VERSION.tar.gz" "$OPUS_SHA256"
+fetch "$DAV1D" "https://code.videolan.org/videolan/dav1d/-/archive/$DAV1D_VERSION/dav1d-$DAV1D_VERSION.tar.bz2" "$DAV1D_SHA256"
 
 # Each library in its own folder, named after its version, all installed into
 # one prefix that FFmpeg's configure reads (pkg-config).
@@ -147,15 +154,30 @@ cmake -S "$SVTAV1" -B "$bdir/svt-av1-$SVTAV1_VERSION" -G Ninja -Wno-dev $common 
   >"$(log svt-av1)" 2>&1 || fail svt-av1
 ninja -C "$bdir/svt-av1-$SVTAV1_VERSION" install >>"$(log svt-av1)" 2>&1 || fail svt-av1
 
+echo "== dav1d $DAV1D_VERSION"
+# The AV1 decoder, the library only: for AV1 videos in (a copy this shortcut
+# made, say), and for ffprobe to read an AV1 copy's pixel format. FFmpeg's own
+# AV1 decoder can't: it decodes only through a hardware accelerator.
+dav1d_dir="$bdir/dav1d-$DAV1D_VERSION"
+reconfigure=''
+[ -f "$dav1d_dir/build.ninja" ] && reconfigure=--reconfigure
+CC="$CC" CFLAGS="$flags" LDFLAGS="$flags" meson setup $reconfigure "$dav1d_dir" "$DAV1D" \
+  --buildtype=release --default-library=static --prefix="$prefix" --libdir=lib \
+  -Denable_tools=false -Denable_tests=false -Denable_examples=false \
+  >"$(log dav1d)" 2>&1 || fail dav1d
+ninja -C "$dav1d_dir" install >>"$(log dav1d)" 2>&1 || fail dav1d
+
 echo "== FFmpeg $FFMPEG_VERSION"
 # Only what the shortcut's ffmpeg and ffprobe commands use:
 # - in: the file protocol and the MOV/MP4 demuxer; the video and audio codecs
-#   of iPhone and camera videos (HEVC, H.264, AAC, ALAC, PCM, Opus);
+#   of iPhone and camera videos (HEVC, H.264, AAC, ALAC, PCM, Opus), and AV1
+#   with dav1d (also for ffprobe: the script checks an AV1 copy is 10-bit);
 # - out: the MP4 muxer, x265, SVT-AV1 and libopus; pipe: for -progress pipe:1;
 # - between: scale (the size limit, and 10-bit conversion) and aresample
 #   (48 kHz for Opus, -ac 2), and the filters ffmpeg itself needs.
 # --disable-autodetect keeps out everything else this Mac has (VideoToolbox,
-# zlib, iconv, Homebrew's libraries...); PKG_CONFIG_LIBDIR finds only the
+# Apple's hardware encoders and decoders; zlib, iconv, Homebrew's
+# libraries...); PKG_CONFIG_LIBDIR finds only the
 # libraries built above. configure still adds CoreFoundation, CoreMedia and
 # CoreVideo to the link, which nothing here uses: -dead_strip_dylibs drops them.
 ffdir="$bdir/ffmpeg-$FFMPEG_VERSION"
@@ -175,10 +197,10 @@ if [ "$(cat "$ffdir/configured" 2>/dev/null || true)" != "$stamp" ]; then
       --pkg-config=pkg-config --pkg-config-flags=--static \
       --enable-static --disable-shared --disable-autodetect --disable-everything \
       --disable-doc --disable-debug --disable-network --disable-avdevice --disable-ffplay \
-      --enable-gpl --enable-libx265 --enable-libsvtav1 --enable-libopus \
+      --enable-gpl --enable-libx265 --enable-libsvtav1 --enable-libopus --enable-libdav1d \
       --enable-protocol=file,pipe \
       --enable-demuxer=mov --enable-muxer=mp4 \
-      --enable-decoder='hevc,h264,aac,alac,opus,pcm_*' \
+      --enable-decoder='hevc,h264,libdav1d,aac,alac,opus,pcm_*' \
       --enable-parser=hevc,h264,aac,opus,av1 \
       --enable-encoder=libx265,libsvtav1,libopus \
       --enable-filter=scale,aresample,format,aformat,null,anull
