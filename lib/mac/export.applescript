@@ -1,14 +1,15 @@
--- Compress Photos (macOS): exports the original files of the photos selected
--- in Photos into <work>/in (input: the work folder's path), and returns one
--- line per selected photo, "id|filename", for the shell to match the exported
--- files to the photos. "using originals": the original file as it was
--- imported (an edited photo's edits are not applied); without it, Photos
--- renders JPEGs. On an error, returns "ERROR: ...".
+-- @NAME@: exports the original files of the items selected in Photos into
+-- <work>/in (input: the work folder's path), and returns one line per
+-- selected item, "id|filename", for the shell to match the exported files to
+-- the items (a Live Photo is one item, exported as a photo and a .mov).
+-- "using originals": the file as it was recorded or imported (an edited
+-- item's edits are not applied); without it, Photos renders a copy. On an
+-- error, returns "ERROR: ...".
 on run {input, parameters}
 	try
 		set work to item 1 of input as text
 		set dest to POSIX file (work & "/in/")
-		-- Exporting many photos, or ones iCloud must first download, takes
+		-- Exporting many items, or ones iCloud must first download, takes
 		-- longer than AppleScript's default 2-minute limit on one command.
 		with timeout of 3600 seconds
 			tell application "Photos"
@@ -24,6 +25,6 @@ on run {input, parameters}
 		end timeout
 		return idText
 	on error e number errNum
-		return "ERROR: Photos could not export the selected photos (" & errNum & ": " & e & ")"
+		return "ERROR: Photos could not export the selected items (" & errNum & ": " & e & ")"
 	end try
 end run

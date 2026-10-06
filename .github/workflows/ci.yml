@@ -29,8 +29,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      # meson builds dav1d; pkgconf: Compress Videos' build-macos.sh runs
+      # FFmpeg's configure with pkg-config. The runner image has pkg-config
+      # already; listed so the build doesn't depend on that.
       - name: Install build and test tools
-        run: brew install --quiet cmake ninja binaryen wasmtime exiftool jpeg-xl libheif
+        run: brew install --quiet cmake ninja meson pkgconf binaryen wasmtime exiftool
+          jpeg-xl libheif ffmpeg
       # wasi-sdk and the library sources (about 800 MB), downloaded by the
       # build scripts; refreshed when a build script changes.
       - name: Cache downloaded toolchains and sources
@@ -59,3 +63,8 @@ jobs:
       # In CI, a missing build or tool fails the tests instead of skipping them.
       - name: Run tests
         run: python -m tox -e tests
+      # Compress Videos accepts Homebrew's ffmpeg when ours isn't installed.
+      - name: Run the Compress Videos conversion tests with Homebrew's ffmpeg
+        env:
+          FFMPEG: /opt/homebrew/bin/ffmpeg
+        run: python -m tox -e tests -- tests/compress-videos/test_conversion.py

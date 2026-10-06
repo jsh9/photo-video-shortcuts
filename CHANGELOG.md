@@ -3,6 +3,35 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Videos 0.1.0] - 2026-10-05
+
+- Added
+  - *Compress Videos (macOS)*: select videos in Photos, then Share ▸ Compress
+    Videos (macOS). Each video is converted to H.265 or AV1 with Opus sound,
+    with HandBrake's settings (codec, preset, tune, quality RF, largest size,
+    audio bitrate, asked as six questions, or "Same as last time"), and
+    imported into Photos into its original's albums; the originals are
+    collected in the album *Videos already compressed* for you to delete. The
+    copies keep the capture date and time zone, location, camera, lens and
+    Apple's other keys with their types, the rotation, HDR and Dolby Vision.
+    Photos, Live Photos and slo-mo, spatial, Apple Log and unreadable videos
+    are skipped and counted; a slo-mo is told from a 120 fps video by the
+    iPhone's own mark. iPhone ProRes recordings are converted too. It works
+    only on videos selected in Photos, and checks for free space before Photos
+    exports them. A Terminal window follows the conversion with its progress
+    and time left.
+  - `ffmpeg-macos` and `ffprobe-macos`: FFmpeg 9.0.2 built for the shortcut,
+    with only what it uses and three encoders built in, x265 4.3 (H.265, 8- and
+    10-bit), SVT-AV1 4.2.0 (AV1) and libopus 1.6.1 (Opus), FFmpeg's ProRes
+    decoder, and dav1d 1.5.4 to read AV1 videos; all in software, never the
+    Mac's media engines. Static arm64 executables for macOS 14 or later,
+    installed as `~/.local/bin/compress-videos-ffmpeg` and
+    `compress-videos-ffprobe` so that they never replace another ffmpeg.
+    Homebrew's ffmpeg 7.1 or later works too.
+  - `vidmeta-macos`: copies a video's Apple metadata onto its converted copy
+    byte for byte, which ffmpeg can't do, and reads the slo-mo and Apple Log
+    marks. `vidmeta --selftest` checks an installation.
+
 ## [Compress Photos 0.5.0] - 2026-10-05
 
 - Added

@@ -7,10 +7,10 @@ free terminal app, because iOS has no JPEG XL encoder or quality-controlled
 video encoder of its own. On the Mac, Shortcuts runs the same encoder itself
 (Run Shell Script).
 
-| Shortcut                                               | What it does                                                                                          | iPhone             | Mac                                                                       |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → JPEG XL, saved back to Photos; Live Photos and videos are skipped | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
-| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies                                                                  | Coming soon        | Planned                                                                   |
+| Shortcut                                               | What it does                                                                                                           | iPhone             | Mac                                                                       |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → JPEG XL, saved back to Photos; Live Photos and videos are skipped                  | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
 
 <!--TOC-->
 
@@ -24,6 +24,8 @@ ______________________________________________________________________
     - [1.1.2. Compress Photos](#112-compress-photos)
     - [1.1.3. Compress Videos](#113-compress-videos)
   - [1.2. On Mac](#12-on-mac)
+    - [1.2.1. Compress Photos](#121-compress-photos)
+    - [1.2.2. Compress Videos](#122-compress-videos)
 - [2. Updating](#2-updating)
 - [3. Repository layout](#3-repository-layout)
 - [4. Developing](#4-developing)
@@ -95,6 +97,8 @@ Coming soon.
 Apple silicon, macOS 14 or later. No a-Shell: Shortcuts runs the encoder
 itself.
 
+#### 1.2.1. Compress Photos
+
 1. **Install the encoder.** In Terminal, paste this line and press Return:
 
    ```
@@ -121,10 +125,36 @@ How to use them, and what to do if they don't show up in Photos' Share menu or
 Finder's Quick Actions:
 [Compress Photos (macOS)](shortcuts/compress-photos/README-mac.md).
 
+#### 1.2.2. Compress Videos
+
+1. **Install the tools** (our ffmpeg and ffprobe, under their own names, and
+   `vidmeta`, which copies the videos' metadata). In Terminal, paste this line
+   and press Return:
+
+   ```
+   mkdir -p ~/.local/bin && cd ~/.local/bin && curl -L -o compress-videos-ffmpeg https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/ffmpeg-macos && curl -L -o compress-videos-ffprobe https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/ffprobe-macos && curl -L -o vidmeta https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/vidmeta-macos && chmod +x compress-videos-ffmpeg compress-videos-ffprobe vidmeta && ./vidmeta --selftest
+   ```
+
+   It should end with "Self-test passed".
+
+2. **Allow scripts**, as for Compress Photos: Shortcuts ▸ Settings ▸ Advanced ▸
+   **Allow Running Scripts**.
+
+3. **Add the shortcut.** From the latest
+   [release](https://github.com/jsh9/photo-video-shortcuts/releases) download
+   `compress-videos-mac-shortcuts-v<version>.zip`, unzip it, and double-click
+   *Compress Videos (macOS)* → Add Shortcut.
+
+4. **Grant permissions** the first time you run it from Photos (select some
+   videos, then Share ▸ Compress Videos (macOS)): choose Always Allow when
+   macOS asks whether Shortcuts may control Photos.
+
+How to use it: [Compress Videos](shortcuts/compress-videos/README.md).
+
 ## 2. Updating
 
 Each shortcut has its own version, shown in the note at the top of the shortcut
-and by its encoder (for example `jxlbatch --version`). The
+and by its encoder (for example `jxlbatch --version`, `vidmeta --version`). The
 [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases) says
 which files each release changed; download only those, the same way as above.
 The iPhone and Mac files of a shortcut share its version, so a release may
@@ -147,6 +177,8 @@ its developer notes:
 
 - [Compress Photos](shortcuts/compress-photos/DEVELOPING.md), including
   [releasing a new version](shortcuts/compress-photos/DEVELOPING.md#6-releasing-a-new-version).
+- [Compress Videos](shortcuts/compress-videos/DEVELOPING.md), including
+  [releasing a new version](shortcuts/compress-videos/DEVELOPING.md#4-releasing-a-new-version).
 
 ## 5. License
 
