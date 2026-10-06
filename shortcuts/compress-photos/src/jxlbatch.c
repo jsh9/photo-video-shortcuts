@@ -1228,6 +1228,16 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   say_wrap("", "Done: %zu of %zu converted in %.0f s", batch.done, count, now_seconds() - t0);
   if (batch.done) {
     say_wrap("", "%s -> %s (%.0f%%)", in_s, out_s, batch.bytes_in > 0 ? 100.0 * batch.bytes_out / batch.bytes_in : 0.0);
+    // the space saved (or taken: a lossless JPEG XL of a small JPEG can be larger)
+    const double saved = batch.bytes_in - batch.bytes_out;
+    const double saved_pct = batch.bytes_in > 0 ? 100.0 * saved / batch.bytes_in : 0.0;
+    char saved_s[32];
+    fmt_bytes(saved_s, sizeof saved_s, saved < 0 ? -saved : saved);
+    if (saved >= 0) {
+      say_wrap("", "Saved %s (%.0f%%)", saved_s, saved_pct);
+    } else {
+      say_wrap("", "%s larger (%.0f%%)", saved_s, -saved_pct);
+    }
   }
   if (batch.done < count) {
     say_wrap("", "%zu failed; see the messages above.", count - batch.done);

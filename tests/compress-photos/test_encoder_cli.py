@@ -97,6 +97,26 @@ def test_batch_continues_after_failed_photos(encoder, tmp_path):
     )
 
 
+def test_summary_says_how_much_space_was_saved(encoder, tmp_path):
+    # After "in -> out (share)", the space saved and its share of the input,
+    # consistent with the sizes on disk.
+    ph.stage(tmp_path, [ph.HERE / 'fixtures' / 'hdr' / 'o1.heic'])
+    result = encoder.run(['-q', '83', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    size_in = (tmp_path / 'jxl_in_1.orig').stat().st_size
+    size_out = (tmp_path / 'jxl_out_1.jxl').stat().st_size
+    lines = result.stdout.splitlines()
+    sizes = (
+        next(i for i, line in enumerate(lines) if line.startswith('Done:')) + 1
+    )
+    assert re.fullmatch(r'\S+ \S+ -> \S+ \S+ \(\d+%\)', lines[sizes]), lines[
+        sizes
+    ]
+    m = re.fullmatch(r'Saved (\S+ \S+) \((\d+)%\)', lines[sizes + 1])
+    assert m, lines[sizes + 1]
+    assert int(m.group(2)) == round(100 * (size_in - size_out) / size_in)
+
+
 def test_nothing_converted(encoder, tmp_path):
     gif = tmp_path / 'b.gif'
     Image.new('RGB', (8, 8)).save(gif)

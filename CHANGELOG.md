@@ -19,6 +19,8 @@ encoder. Every release includes the current files of all shortcuts.
     set the amounts (0: none). HDR files grow by about 10-15%; SDR files are
     unchanged. Photos converted earlier keep their banding until converted
     again from their originals.
+  - The batch summary also says how much space was saved and its share of the
+    originals' size (`Saved 1.1 MB (34%)`), below the sizes line.
 - Changed
   - *Compress Photos* (iPhone) no longer offers to delete the originals.
     Instead, each converted still photo's original is added to the album
