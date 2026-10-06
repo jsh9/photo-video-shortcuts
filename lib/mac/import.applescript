@@ -1,10 +1,10 @@
--- @NAME@: imports the @KIND@ files the shell made, each into
--- the albums its original is in, and collects the originals whose @KIND@ has
--- everything they have in the album "@ORIGINALS_ALBUM@", for the user to
--- delete (a script cannot delete photos).
+-- @NAME@: imports the files the shell made, each into the albums its
+-- original is in, and collects the originals marked "delete" (their copy has
+-- everything they have) in the album "@ORIGINALS_ALBUM@", for the user to
+-- delete (a script cannot delete them).
 --
 -- Input: one line per result, "path|original id|delete or keep|name" (the id
--- may be empty when the exported file could not be matched to a photo).
+-- may be empty when the exported file could not be matched to an item).
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -128,7 +128,7 @@ on run {input, parameters}
 					set target to make new album named "@ORIGINALS_ALBUM@"
 				end if
 				-- By reference (media item id X), not a "whose id is" filter: the
-				-- filter scans the whole library, about 1.6 s per photo in a
+				-- filter scans the whole library, about 1.6 s per item in a
 				-- library of 58,000 items; the reference is immediate.
 				set originals to {}
 				repeat with oid in toCollect

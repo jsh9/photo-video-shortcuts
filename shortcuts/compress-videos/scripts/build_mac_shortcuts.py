@@ -115,7 +115,6 @@ def script_text():
         '@WORK@': WORK,
         '@LOG_DIR@': LOG_DIR,
         '@ROUTE@': ROUTE,
-        '@ENCODER@': 'ffmpeg',
         '@FFMPEG_CANDIDATES@': ' '.join(f'"{p}"' for p in FFMPEG_PATHS),
         '@FFMPEG_LOOKED@': ', '.join(
             p.replace('$HOME', '~') for p in FFMPEG_PATHS
@@ -149,13 +148,13 @@ def script(lines):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@, @KIND@ and @ORIGINALS_ALBUM@
-    filled in. Plain text: a Shortcuts variable inside a Run AppleScript's text
-    keeps it from compiling (it then produces no output and no error; seen on
-    macOS 26), so values go in through the action's input.
+    lib/mac/<name>.applescript, with @NAME@ and @ORIGINALS_ALBUM@ filled in.
+    Plain text: a Shortcuts variable inside a Run AppleScript's text keeps it
+    from compiling (it then produces no output and no error; seen on macOS 26),
+    so values go in through the action's input.
     """
     text = (LIB_MAC / f'{name}.applescript').read_text()
-    text = text.replace('@NAME@', NAME).replace('@KIND@', 'converted video')
+    text = text.replace('@NAME@', NAME)
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text

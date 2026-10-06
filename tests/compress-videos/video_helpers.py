@@ -5,7 +5,6 @@ does (in a pretend home folder, with the real tools or stand-ins), and what
 ffprobe and AVFoundation (avmeta.swift) read in the results.
 """
 
-import importlib.util
 import json
 import os
 import shutil
@@ -13,8 +12,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_TESTS = str(Path(__file__).resolve().parents[1])
+if _TESTS not in sys.path:
+    sys.path.insert(0, _TESTS)
 
+import shortcut_helpers  # noqa: E402
 from shortcut_helpers import (  # noqa: E402, F401
     compile_swift,
     ident,
@@ -71,11 +73,7 @@ TRACK_KEYS = {
 
 def load_generator(name='build_mac_shortcuts'):
     """scripts/<name>.py (build_mac_shortcuts or vf) as a module."""
-    path = TOOL / 'scripts' / f'{name}.py'
-    spec = importlib.util.spec_from_file_location(f'videos_{name}', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return shortcut_helpers.load_generator(TOOL / 'scripts', name)
 
 
 def make_videos(folder, make_video, names=None):

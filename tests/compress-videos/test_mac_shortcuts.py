@@ -392,7 +392,7 @@ def test_shell_scripts_use_zsh(gen, actions):
     )
     assert '"$HOME/Pictures/.compress-videos-macos"' in text
     assert 'open -a Terminal "$cmd"' in text
-    assert 'while ffmpeg runs' in text
+    assert 'while the conversion runs' in text
     assert "VERSION='" + gen.VERSION + "'" in text
     assert not re.findall('@[A-Z_]+@', text)
 
@@ -428,7 +428,7 @@ def test_applescripts_in_order_with_their_inputs(gen, actions):
     text = gen.applescript_text('import')
     assert gen.ORIGINALS_ALBUM == 'Videos already compressed'
     assert f'"{gen.ORIGINALS_ALBUM}"' in text
-    assert text.startswith(f'-- {NAME}: imports the converted video files')
+    assert text.startswith(f'-- {NAME}: imports the files the shell made')
     assert 'with timeout of 3600 seconds' in gen.applescript_text('export')
 
 
