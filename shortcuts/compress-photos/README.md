@@ -66,13 +66,15 @@ See [Installation](../../README.md#1-installation) in the main README.
   - **From Photos:** select photos ▸ Share ▸ **Compress Photos**. The selected
     still photos are added to the album **Compressed to JXL** before the
     conversion (the shortcut is over once a-Shell is in front), so a photo
-    whose conversion fails is in the album too: a-Shell's output names it. The
-    share sheet's **Send As** option decides the format. Its default,
-    Automatic, converts HEIF to JPEG, so the shortcut gets a JPEG copy, and the
-    sizes shown compare against it. To send originals, tap **Options** at the
-    top of the share sheet and set Send As to **Current**. iOS offers no way to
-    make that the default, and a shortcut can't set it. `jxlbatch` prints a
-    reminder when it receives iPhone photos as JPEG.
+    whose conversion fails is in the album too: a-Shell's output names it. An
+    image shared from another app (Files, for example) isn't in the library, so
+    it isn't collected; only its JXL is saved, as before. The share sheet's
+    **Send As** option decides the format. Its default, Automatic, converts
+    HEIF to JPEG, so the shortcut gets a JPEG copy, and the sizes shown compare
+    against it. To send originals, tap **Options** at the top of the share
+    sheet and set Send As to **Current**. iOS offers no way to make that the
+    default, and a shortcut can't set it. `jxlbatch` prints a reminder when it
+    receives iPhone photos as JPEG.
 - **Only still photos are converted**, screenshots included. The shortcut skips
   the rest of the selection, then a notification counts what it skipped, for
   example "Skipped 2 Live Photo(s), 1 video(s)":

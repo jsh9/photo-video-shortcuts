@@ -223,20 +223,33 @@ def collect_in_album(b, photo, album, albums=None):
     Collected. ``albums``: the photo's album names if already read (Get Details
     of Images ▸ Album), else they are read here.
 
+    Only a photo from the library is collected: an image shared from another
+    app (Files) isn't in the library, and Save to Photo Album would import it
+    as a new photo. Get Details of Images ▸ Is Favorite tells them apart: a
+    library photo answers Yes or No, a file answers nothing (checked on iOS 26,
+    2026-10-06, with a diagnostic shortcut).
+
     Save to Photo Album adds a photo that is already in the library to the
     album as it is (no copy) when it isn't in that album yet; one that is would
-    be saved again as a copy, hence the check (Get Details of Images ▸ Album,
-    one album name per line). Checked from Photos' share sheet on iOS 26 with a
-    diagnostic shortcut (2026-10-06): no copies, and the one-time permission
-    prompt works there too.
+    be saved again as a copy, hence the album check (one album name per line).
+    Checked from Photos' share sheet on iOS 26 with a diagnostic shortcut
+    (2026-10-06): no copies, and the one-time permission prompt works there
+    too.
     """
-    if albums is None:
-        albums = b.photo_albums(photo)
 
-    already = b.match_text(albums, f'(^|\\n){ORIGINALS_ALBUM}($|\\n)')
+    def collect():
+        nonlocal albums
+        if albums is None:
+            albums = b.photo_albums(photo)
 
-    def add():
-        b.save_to_album(photo, album)
-        b.append_variable('Collected', photo)
+        already = b.match_text(albums, f'(^|\\n){ORIGINALS_ALBUM}($|\\n)')
 
-    b.if_has_value(already, lambda: None, add)
+        def add():
+            b.save_to_album(photo, album)
+            b.append_variable('Collected', photo)
+
+        b.if_has_value(already, lambda: None, add)
+
+    b.if_has_value(
+        b.photo_details(photo, 'Is Favorite'), collect, lambda: None
+    )

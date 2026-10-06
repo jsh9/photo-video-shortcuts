@@ -180,6 +180,16 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     ]
     assert len(saves) == len(checks) == 2
     assert checks[0] < saves[0] < checks[1] < saves[1]
+    # only library photos: an image from another app answers nothing to
+    # Is Favorite, and Save to Photo Album would import it as a new photo
+    favorites = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.properties.images'
+        and ph.params(a)['WFContentItemPropertyName'] == 'Is Favorite'
+    ]
+    assert len(favorites) == 2
+    assert favorites[0] < checks[0] and favorites[1] < checks[1]
     runs = [
         i
         for i, a in enumerate(actions)

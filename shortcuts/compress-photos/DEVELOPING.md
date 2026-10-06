@@ -46,8 +46,11 @@ or, from the picker:
    a-Shell switches back to Compress Photos, which saves the JXLs,
    adds each to its original's albums, and adds each saved copy's
    original to the album "Compressed to JXL"
-Nothing is deleted on either path; the user reviews the album. A photo
-already in the album isn't added again (its albums are checked first):
+Nothing is deleted on either path; the user reviews the album. Only a
+library photo is collected (Get Details ▸ Is Favorite answers Yes or No
+for one, nothing for an image from another app, which Save to Photo Album
+would import), and a photo already in the album isn't added again (its
+albums are checked first):
 Save to Photo Album adds a library photo to an album as it is, but one
 already there would be saved again as a copy.
 ```
