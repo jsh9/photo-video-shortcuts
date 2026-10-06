@@ -106,7 +106,13 @@ class Mac:
     }
 
     def scripts(
-            self, shortcut, quality='83', lines='', skipped='', cores='all'
+            self,
+            shortcut,
+            quality='83',
+            lines='',
+            skipped='',
+            cores='all',
+            hdr='keep',
     ):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
@@ -114,6 +120,7 @@ class Mac:
             {
                 'Matches': quality,
                 'Cores': cores,  # the cores menu's value
+                'HDR': hdr,  # the HDR menu's value
                 'Combined Text': lines,
                 'Skipped Echo': skipped,
                 'AppleScript Result': lines,  # the selection route's IDS
@@ -332,6 +339,38 @@ def test_cores_choice_becomes_jxlbatch_options(mac, cores, options):
         '83',
         '-e',
         '7',
+        *options,
+        '-C',
+        str(mac.work),
+        'jxl_job.txt',
+    ]
+
+
+@pytest.mark.parametrize(
+    ('hdr', 'options'),
+    [
+        ('keep', []),  # HDR photos become HDR (PQ) JPEG XL
+        ('drop', ['--sdr']),  # every photo becomes SDR
+        ('', []),  # anything else: keep
+    ],
+)
+def test_hdr_choice_becomes_jxlbatch_option(mac, hdr, options):
+    # The shortcut's third question (Keep HDR / Drop HDR) reaches the script
+    # as HDR; run.zsh turns "drop" into jxlbatch --sdr.
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script('photos', hdr=hdr), a, jxlbatch=fake_jxlbatch(mac)
+    )
+    assert result.returncode == 0, result.stderr
+    args = (mac.root / 'args.txt').read_text().splitlines()
+    assert args == [
+        '--mac',
+        '-q',
+        '83',
+        '-e',
+        '7',
+        '-j',
+        '0',
         *options,
         '-C',
         str(mac.work),

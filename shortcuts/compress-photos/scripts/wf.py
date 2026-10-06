@@ -8,6 +8,7 @@ builder (text and variable encoding, built-in actions, writing and signing the
 file) is lib/wfkit.py, shared with the other shortcuts and re-exported here.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -189,3 +190,66 @@ def choose_quality(b):
     )
     # The title's number: "83 (default)" -> "83".
     return b.match_text(b.get_name(chosen), r'\d+')
+
+
+# The album the converted originals are collected in, on both platforms. The
+# shortcuts never delete photos: the user reviews the album and deletes.
+ORIGINALS_ALBUM = 'Compressed to JXL'
+assert re.fullmatch(r'[\w ]+', ORIGINALS_ALBUM)  # used in a regex as is
+
+
+def copy_to_albums(b, copy, albums):
+    """
+    Adds the saved ``copy`` to each album name in ``albums`` (the original's,
+    from Get Details of Images ▸ Album) except ORIGINALS_ALBUM: an original
+    converted once before is in that album, and a copy there could be deleted
+    with the originals.
+    """
+
+    def per_album():
+        b.if_has_value(
+            b.match_text(REPEAT_ITEM_2, f'^{ORIGINALS_ALBUM}$'),
+            lambda: None,
+            lambda: b.save_to_album(copy, REPEAT_ITEM_2),
+        )
+
+    b.repeat_each(albums, per_album)
+
+
+def collect_in_album(b, photo, album, albums=None):
+    """
+    Adds the library photo ``photo`` to ``album`` (a text ref holding
+    ORIGINALS_ALBUM) unless it is already in it, and appends it to the variable
+    Collected. ``albums``: the photo's album names if already read (Get Details
+    of Images ▸ Album), else they are read here.
+
+    Only a photo from the library is collected: an image shared from another
+    app (Files) isn't in the library, and Save to Photo Album would import it
+    as a new photo. Get Details of Images ▸ Is Favorite tells them apart: a
+    library photo answers Yes or No, a file answers nothing (checked on iOS 26,
+    2026-10-06, with a diagnostic shortcut).
+
+    Save to Photo Album adds a photo that is already in the library to the
+    album as it is (no copy) when it isn't in that album yet; one that is would
+    be saved again as a copy, hence the album check (one album name per line).
+    Checked from Photos' share sheet on iOS 26 with a diagnostic shortcut
+    (2026-10-06): no copies, and the one-time permission prompt works there
+    too.
+    """
+
+    def collect():
+        nonlocal albums
+        if albums is None:
+            albums = b.photo_albums(photo)
+
+        already = b.match_text(albums, f'(^|\\n){ORIGINALS_ALBUM}($|\\n)')
+
+        def add():
+            b.save_to_album(photo, album)
+            b.append_variable('Collected', photo)
+
+        b.if_has_value(already, lambda: None, add)
+
+    b.if_has_value(
+        b.photo_details(photo, 'Is Favorite'), collect, lambda: None
+    )

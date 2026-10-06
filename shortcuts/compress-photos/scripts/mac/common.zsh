@@ -20,6 +20,7 @@ VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
 QUALITY='@QUALITY@'
 CORES='@CORES@'  # all: several photos at a time, every core; one: one photo, one thread
+HDR='@HDR@'  # keep: HDR photos become HDR (PQ) JPEG XL; drop: every photo becomes SDR
 # @LABEL@: one per input file, in the same order (see the shortcut)
 @LABEL@=$(cat <<'JXL_LINES'
 @LINES@

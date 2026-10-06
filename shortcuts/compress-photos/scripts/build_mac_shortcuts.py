@@ -37,12 +37,14 @@ sys.path.insert(0, str(HERE))
 import wf  # noqa: E402
 from wf import (  # noqa: E402
     EFFORT,
+    ORIGINALS_ALBUM,
     REPEAT_ITEM,
-    REPEAT_ITEM_2,
     SHORTCUT_INPUT,
     VERSION,
     Sample,
     choose_quality,
+    collect_in_album,
+    copy_to_albums,
     keep_still_photos,
     variable,
     workflow,
@@ -85,12 +87,10 @@ WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
 # exports the originals into this folder and imports the results from it
 # (AppleScript), and its sandbox reaches ~/Pictures but not the folders above.
 WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
-# The album that collects the originals whose JPEG XL has everything they have
-# (a script can't delete photos; the user deletes them from there). Only the
-# selection route collects, by photo id; the picker route has no ids and
-# leaves the originals alone (a lookup by file name could pick the wrong
-# photo).
-ORIGINALS_ALBUM = 'Compressed to JXL'
+# The converted originals are collected in the album wf.ORIGINALS_ALBUM (a
+# script can't delete photos; the user deletes them from there): the
+# selection route by photo id (import.applescript), the picker route by the
+# photos themselves (wf.collect_in_album).
 # Where every route keeps its log and the progress window's script: a plain
 # folder, so that Terminal (the progress window) never needs access to
 # iCloud Drive or Pictures (common.zsh sets the same path). Each route has its
@@ -116,6 +116,16 @@ CORES_CHOICES = [
     ('All cores (fast)', 'all'),
     ('One core (keeps the Mac responsive)', 'one'),
 ]
+# The third question: whether an HDR photo's HDR goes into the JPEG XL. The
+# script reads HDR (run.zsh): "drop" adds jxlbatch --sdr, so every photo is
+# saved as an ordinary 8-bit SDR JPEG XL (smaller, no banding in smooth skies,
+# and shown correctly by viewers that can't tone-map HDR); anything else keeps
+# the HDR (PQ).
+HDR_PROMPT = 'HDR'
+HDR_CHOICES = [
+    ('Keep HDR', 'keep'),
+    ('Drop HDR (smaller; shows right in any viewer)', 'drop'),
+]
 
 # ---------------------------------------------------------------------------
 # The shell script (zsh): scripts/mac/*.zsh, with @PLACEHOLDERS@
@@ -133,6 +143,7 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 SLOTS = {
     '@QUALITY@': 'Matches',
     '@CORES@': 'Cores',
+    '@HDR@': 'HDR',
     '@LINES@': 'Combined Text',
     '@SKIPPED@': 'Skipped Echo',
 }
@@ -175,7 +186,7 @@ def work_check(work):
 
 def script_text(name, body, label, work):
     """
-    The script as one text with the four @SLOTS@ still in it: common.zsh, then
+    The script as one text with the five @SLOTS@ still in it: common.zsh, then
     ``body`` (photos.zsh or files.zsh) with run.zsh at its @RUN@.
     """
     text = (MAC / 'common.zsh').read_text() + (MAC / body).read_text()
@@ -242,17 +253,18 @@ def finish_script(work):
     )
 
 
-def script(name, body, label, work, quality, cores, lines):
-    """The Run Shell Script text parts: strings and the four variables."""
+def script(name, body, label, work, quality, cores, hdr, lines):
+    """The Run Shell Script text parts: strings and the five variables."""
     refs = {
         '@QUALITY@': quality,
         '@CORES@': cores,
+        '@HDR@': hdr,
         '@LINES@': lines,
         '@SKIPPED@': variable('Skipped Echo'),
     }
     parts = []
     for piece in re.split(
-        '(@QUALITY@|@CORES@|@LINES@|@SKIPPED@)',
+        '(@QUALITY@|@CORES@|@HDR@|@LINES@|@SKIPPED@)',
         script_text(name, body, label, work),
     ):
         if piece in refs:
@@ -263,19 +275,30 @@ def script(name, body, label, work, quality, cores, lines):
     return parts
 
 
-def choose_cores(b):
+def choose_value(b, prompt, choices, name):
     """
-    Asks how to use the Mac's cores (CORES_CHOICES, a Choose from Menu) and
-    returns the variable Cores, set to the chosen value for the script.
+    A Choose from Menu with ``prompt`` and ``choices`` ((title, value) pairs)
+    whose cases set the variable ``name`` to the chosen value, for the script;
+    returns the variable.
     """
 
     def choose(value):
-        return lambda: b.set_variable('Cores', b.text(value))
+        return lambda: b.set_variable(name, b.text(value))
 
     b.choose_from_menu(
-        CORES_PROMPT, {title: choose(value) for title, value in CORES_CHOICES}
+        prompt, {title: choose(value) for title, value in choices}
     )
-    return variable('Cores')
+    return variable(name)
+
+
+def choose_cores(b):
+    """Asks how to use the Mac's cores (CORES_CHOICES); the variable Cores."""
+    return choose_value(b, CORES_PROMPT, CORES_CHOICES, 'Cores')
+
+
+def choose_hdr(b):
+    """Asks whether to keep HDR (HDR_CHOICES); the variable HDR."""
+    return choose_value(b, HDR_PROMPT, HDR_CHOICES, 'HDR')
 
 
 # ---------------------------------------------------------------------------
@@ -291,9 +314,9 @@ def build_photos(sample):
         'skipped. Started while Photos is in front with photos selected (Share menu, '
         'right-click > Shortcuts, menu bar), it converts that selection: Photos '
         "exports the originals, the JPEG XL copies are imported into the originals' "
-        f'albums, and the originals whose copy has everything they have go into the album "{ORIGINALS_ALBUM}" '
-        'for you to delete. Started any other way, it shows a photo picker, saves the '
-        "copies to Photos in the originals' albums, and leaves the originals alone. "
+        f'albums, and the converted originals go into the album "{ORIGINALS_ALBUM}" '
+        'for you to review and delete. Started any other way, it shows a photo picker, saves the '
+        "copies to Photos in the originals' albums, and collects the originals in that album too. "
         'Needs jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
         f'Advanced. Setup and help: {HELP_URL}'
     )
@@ -338,10 +361,11 @@ def selection_route(b):
     The photos selected in Photos, through AppleScript (see mac/*.applescript):
     Photos exports their originals into WORK_SELECTION/in, the script converts
     them, and Photos imports the results into the originals' albums and
-    collects the originals to delete in ORIGINALS_ALBUM.
+    collects the converted originals in ORIGINALS_ALBUM.
     """
     quality = choose_quality(b)
     cores = choose_cores(b)
+    hdr = choose_hdr(b)
     count = b.match_text(variable('Selection'), r'\d+')
     b.notification(
         'JPEG XL',
@@ -362,6 +386,7 @@ def selection_route(b):
             WORK_SELECTION,
             quality,
             cores,
+            hdr,
             ids,
         )
     )
@@ -391,7 +416,7 @@ def selection_route(b):
             imported,
             ' photo(s) to Photos. ',
             collected,
-            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to delete.',
+            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
         ),
         lambda: b.notification(
             'JPEG XL', 'Saved ', imported, ' photo(s) to Photos.'
@@ -403,16 +428,17 @@ def picker_route(b):
     """
     The photos in the variable Photos (the picker's, or the shortcut's input):
     Shortcuts passes them to the script as files, reads the results back with
-    Get File from WORK_PHOTOS and saves them to Photos. The originals are left
-    alone: Shortcuts' Delete Photos needs a prompt the Shortcuts app often
-    can't show on macOS 26, and without photo ids they can't be collected in
-    ORIGINALS_ALBUM safely.
+    Get File from WORK_PHOTOS and saves them to Photos. Each saved copy's
+    original is collected in ORIGINALS_ALBUM (collect_in_album, by the item
+    itself; no lookup by name). Nothing is deleted: Shortcuts' Delete Photos
+    needs a prompt the Shortcuts app often can't show on macOS 26.
     """
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
     quality = choose_quality(b)
     cores = choose_cores(b)
+    hdr = choose_hdr(b)
     b.notification(
         'JPEG XL',
         'Converting ',
@@ -433,10 +459,13 @@ def picker_route(b):
             WORK_PHOTOS,
             quality,
             cores,
+            hdr,
             b.combine(variable('Names'), '\n'),
         ),
         input_ref=photos,
     )
+
+    album = b.text(ORIGINALS_ALBUM)
 
     # Each output line is "file|index|delete or keep|Name.jxl"; no line when
     # nothing was converted (then Match Text finds no "|").
@@ -459,10 +488,9 @@ def picker_route(b):
                 b.append_variable('Saved Photos', saved)
                 index = b.item_at_index(parts, 2)
                 original = b.item_at_index(photos, index)
-                b.repeat_each(
-                    b.photo_albums(original),
-                    lambda: b.save_to_album(saved, REPEAT_ITEM_2),
-                )
+                albums = b.photo_albums(original)
+                copy_to_albums(b, saved, albums)
+                collect_in_album(b, original, album, albums)
 
             def not_saved():
                 b.append_variable(
@@ -501,8 +529,19 @@ def picker_route(b):
     b.run_shell_script(
         finish_script(WORK_PHOTOS), input_ref=outcome, as_arguments=False
     )
-    b.notification(
-        'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
+    b.if_has_value(
+        variable('Collected'),
+        lambda: b.notification(
+            'JPEG XL',
+            'Saved ',
+            variable('Saved'),
+            ' photo(s) to Photos. ',
+            b.count(variable('Collected')),
+            f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
+        ),
+        lambda: b.notification(
+            'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
+        ),
     )
 
 
@@ -528,6 +567,7 @@ def build_files(sample):
     b.if_has_value(SHORTCUT_INPUT, lambda: None, no_input)
     quality = choose_quality(b)
     cores = choose_cores(b)
+    hdr = choose_hdr(b)
     b.notification(
         'JPEG XL',
         'Converting ',
@@ -551,6 +591,7 @@ def build_files(sample):
             WORK_FILES,
             quality,
             cores,
+            hdr,
             b.combine(variable('Paths'), '\n'),
         ),
         input_ref=SHORTCUT_INPUT,

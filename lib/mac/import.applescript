@@ -1,10 +1,11 @@
 -- @NAME@: imports the files the shell made, each into the albums its
--- original is in, and collects the originals marked "delete" (their copy has
--- everything they have) in the album "@ORIGINALS_ALBUM@", for the user to
--- delete (a script cannot delete them).
+-- original is in, and collects every imported file's original in the album
+-- "@ORIGINALS_ALBUM@", for the user to review and delete (a script cannot
+-- delete them). The log says which copies lack their original's HDR.
 --
 -- Input: one line per result, "path|original id|delete or keep|name" (the id
--- may be empty when the exported file could not be matched to an item).
+-- may be empty when the exported file could not be matched to an item; the
+-- flag is jxlbatch's and is not acted on here).
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -94,7 +95,7 @@ on run {input, parameters}
 				set origId to item i of origIds
 				if origId is not "" then
 					set end of pairs to {origId, found}
-					if (item i of flags) is "delete" then set end of toCollect to origId
+					set end of toCollect to origId
 				else
 					set problems to problems & "! " & jxlName & ": saved, but its original is unknown, so it was not added to albums" & linefeed
 				end if
@@ -116,7 +117,7 @@ on run {input, parameters}
 		end timeout
 		set tAlbums to (current date) - t0
 	end if
-	-- The originals to delete, in one album.
+	-- The converted originals, in one album.
 	if (count of toCollect) > 0 then
 		set t0 to current date
 		try
@@ -160,7 +161,10 @@ on addToAlbums(albumList, albumIds, folderList, pairs)
 		repeat with pair in pairs
 			if (item i of albumIds) contains (item 1 of pair) then set end of members to item 2 of pair
 		end repeat
-		if (count of members) > 0 then
+		-- The review album "@ORIGINALS_ALBUM@" holds originals already
+		-- converted once; a copy must not join it, or it could be deleted
+		-- with them.
+		if (count of members) > 0 and (name of (item i of albumList)) is not "@ORIGINALS_ALBUM@" then
 			tell application "Photos"
 				try
 					add members to (item i of albumList)
