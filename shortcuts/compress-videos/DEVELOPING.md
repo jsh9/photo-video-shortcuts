@@ -188,21 +188,83 @@ needs an Apple ID). The tests are described in
 
 ## 4. Releasing a new version
 
-As for Compress Photos (see its
-[DEVELOPING.md](../compress-photos/DEVELOPING.md#6-releasing-a-new-version) and
-[docs/releasing.md](../../docs/releasing.md)), with this tool's files:
+A release is built, signed and published from a Mac by `scripts/release.py` (at
+the repository root), not by CI: signing the shortcut needs macOS and an Apple
+ID. What the script checks and the notes it writes are in
+[docs/releasing.md](../../docs/releasing.md). Every release carries the current
+files of all the shortcuts, so a Compress Videos release also re-publishes
+Compress Photos' files (marked *unchanged* in the notes), and the README's
+"latest" download links keep working for both.
 
-1. Set `VERSION` and add `## [Compress Videos <version>] - <date>` at the top
-   of [CHANGELOG.md](../../CHANGELOG.md), in the PR, saying which files to
-   update.
-2. Try the build on the Mac:
-   `python3 scripts/release.py compress-videos --dry-run` (from the repository
-   root), then copy `dist/ffmpeg-macos` and `dist/ffprobe-macos` to
-   `~/.local/bin/compress-videos-ffmpeg` and `compress-videos-ffprobe`, and
-   `dist/vidmeta-macos` to `~/.local/bin/vidmeta`; add the shortcut and convert
-   a few videos from Photos (an HDR video, a Live Photo, a slo-mo and a photo
-   among them), with each codec.
-3. On an up-to-date `main`: `python3 scripts/release.py compress-videos`. The
-   list should have `ffmpeg-macos`, `ffprobe-macos`, `vidmeta-macos` and
-   `compress-videos-mac-shortcuts-v<version>.zip`. `release.py` checks each
-   tool's version (`-version` for ffmpeg and ffprobe, which reject two dashes).
+1. **Bump the version, in a PR.** Set `VERSION` (shared by the shortcut,
+   `vidmeta` and our ffmpeg's version line) and add the entry at the top of
+   [CHANGELOG.md](../../CHANGELOG.md) with the release date:
+   `## [Compress Videos 0.2.0] - 2026-11-01`. Say which files to update (for
+   example "Update the shortcut; the tools are unchanged"), because the README
+   tells users to download only those. Merge it to `main`. (0.1.0, the first
+   version, came with the PR that added the shortcut.)
+
+2. **Set up the Mac** (once):
+
+   - signed in to an Apple ID, for `shortcuts sign`;
+   - Homebrew's `cmake`, `ninja` and `pkg-config` for this tool's build, and
+     the packages Compress Photos' build needs (see its
+     [Building](../compress-photos/DEVELOPING.md#3-building-mac)), since every
+     release builds every shortcut: `binaryen`, and `wasmtime`, which runs its
+     WebAssembly encoders' `--version`;
+   - `gh` logged in with access to the repository (`gh auth status`), since
+     `gh release create` publishes.
+
+3. **Try the build on the Mac (recommended).** The tests run the shortcut's
+   script, not Shortcuts itself. From the repository root,
+   `python3 scripts/release.py compress-videos --dry-run` builds and signs
+   everything without creating a tag or release (the first run downloads
+   FFmpeg, x265, SVT-AV1 and libopus into `.deps/`). Then install what it
+   built, from the repository root:
+
+   ```bash
+   cp shortcuts/compress-videos/dist/ffmpeg-macos ~/.local/bin/compress-videos-ffmpeg && cp shortcuts/compress-videos/dist/ffprobe-macos ~/.local/bin/compress-videos-ffprobe && cp shortcuts/compress-videos/dist/vidmeta-macos ~/.local/bin/vidmeta && ~/.local/bin/vidmeta --selftest
+   ```
+
+   double-click
+   `shortcuts/compress-videos/dist/Compress Videos (macOS).shortcut` (Add
+   Shortcut, or Replace), and convert a few videos from Photos' Share menu with
+   each codec: an HDR video, a Live Photo, a slo-mo and a photo among them. The
+   PR that changed the shortcut may list what to look at.
+
+4. **Update `main`.** A real run refuses to publish unless the checkout is on
+   `main`, clean (no untracked files either), and the same as `origin/main`:
+
+   ```bash
+   git checkout main
+   git pull
+   git status
+   ```
+
+5. **Publish.** From the repository root:
+
+   ```bash
+   python3 scripts/release.py compress-videos
+   ```
+
+   It rebuilds every shortcut, checks the files, each tool's version
+   (`-version` for ffmpeg and ffprobe, `--version` for the others) and the
+   ZIPs, then prints the files and the release notes and asks you to confirm
+   (`[y/N]`). Check that the list has `ffmpeg-macos`, `ffprobe-macos`,
+   `vidmeta-macos` and `compress-videos-mac-shortcuts-v<version>.zip` (next to
+   Compress Photos' files), and that the notes have the Compress Videos
+   changelog entry, marked **new** (the first release) or **updated**; answer
+   `y` to create the tag `compress-videos-v<version>` and the release. Any
+   other answer publishes nothing.
+
+6. **Check the result.** The
+   [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases)
+   should show `Compress Videos <version>` as Latest, with those files. Run the
+   README's install line on the Mac (it downloads from that release and
+   replaces your copies in `~/.local/bin`) and check that it ends with
+   "Self-test passed" and that `~/.local/bin/compress-videos-ffmpeg -version`
+   ends its first line with `compress-videos-<version>`.
+
+A real run (not `--dry-run`) also stops when the tag already exists, the
+changelog has no dated entry for the version, or the version is the same as in
+the latest published release.

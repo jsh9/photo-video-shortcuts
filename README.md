@@ -177,7 +177,8 @@ its developer notes:
 
 - [Compress Photos](shortcuts/compress-photos/DEVELOPING.md), including
   [releasing a new version](shortcuts/compress-photos/DEVELOPING.md#6-releasing-a-new-version).
-- [Compress Videos](shortcuts/compress-videos/DEVELOPING.md).
+- [Compress Videos](shortcuts/compress-videos/DEVELOPING.md), including
+  [releasing a new version](shortcuts/compress-videos/DEVELOPING.md#4-releasing-a-new-version).
 
 ## 5. License
 
