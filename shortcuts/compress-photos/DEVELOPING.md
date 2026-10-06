@@ -449,6 +449,36 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   photos are far below it (iPhones reach about 3 stops). Other images leave it
   to libjxl, which picks it by the color stored: 10,000 nits for PQ (e.g. a PNG
   with a PQ `cICP` chunk), 255 for SDR.
+- **Grain.** Apple renders a PQ JPEG XL for an SDR screen (a stored preview, a
+  non-HDR display, a dimmed one) through an 8-bit PQ step: measured on macOS 26
+  (`tests/compress-photos/banding.py` has the simulation), the SDR output is a
+  function of the 8-bit PQ value, about 2 SDR steps per PQ step in a sky, so a
+  sky gets half the levels an SDR photo has, with steps twice as tall, and a
+  lossless PQ file bands the same way. Lossy encoding then removes most of the
+  fine grain that would dither those steps (about 30% at q88, more at lower
+  qualities). So `src/grain.c` puts grain back into the pixels of a lossy PQ
+  output, as each region is rendered: two layers of luma noise (the same value
+  on R, G and B) from a fixed-seed integer PRNG, a *fine* one per pixel, which
+  hides the steps when the photo is viewed near its full size, and a *coarse*
+  one drawn 4 pixels apart and interpolated, which survives the encode and a
+  viewer's downscaling (a phone shows a 24 MP photo at a fifth of its size,
+  where per-pixel noise averages away; libjxl's own decoder-side noise is
+  useless there for the same reason). Each 16 × 16 cell of the SDR picture
+  weights the grain by its texture: full where neighbouring pixels differ by
+  less than a level of 255, none above 2.5 levels (texture hides the steps
+  anyway, and grain there would only cost bytes; a night photo's own grain
+  counts too), feathered between cells. The amounts are the standard deviation
+  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 50+33 at q88,
+  60+40 at q83, 82+54 at q72, tuned on a sunset skyline in
+  `docs/compress-photos-banding-plan.md`), or `--grain FINE` and
+  `--grain-coarse COARSE` (0 for none). The log says `grain 60+40` after the
+  headroom. An HDR file grows by about 10-15%; the encode takes about 4%
+  longer. Not grained: SDR outputs, lossless output, `--sdr`, an HDR photo with
+  alpha (computed at once, not region by region), and PQ pixels that don't come
+  from a gain map (a PNG with a PQ `cICP` chunk): the grain wraps the gain
+  map's renderer only. Integer math only, so the native and WebAssembly builds
+  still agree byte for byte. Photos converted before 0.6.0 keep their banding;
+  only a new conversion from the original gets grain.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an

@@ -90,6 +90,27 @@ def scene(width, height):
     return np.asarray(img)
 
 
+def sky_scene(width, height):
+    """
+    A clear sky: a smooth gradient with the faint grain of a bright, low-ISO
+    photo (about 0.6 of a level), the kind of picture whose HDR JPEG XL bands
+    in Apple's SDR rendering (test_banding.py).
+    """
+    y = np.linspace(0, 1, height)[:, None]
+    x = np.linspace(0, 1, width)[None, :]
+    rgb = np.stack(
+        [
+            95 + 70 * y + 8 * x,
+            130 + 55 * y + 4 * x,
+            190 + 30 * y - 6 * x,
+        ],
+        axis=2,
+    )
+    rng = np.random.default_rng(7)
+    rgb += rng.normal(0, 0.6, rgb.shape)
+    return np.clip(np.round(rgb), 0, 255).astype(np.uint8)
+
+
 def gain_pattern(width, height):
     """A smooth, asymmetric gain map (0..255): a bright blob, a ramp."""
     x = np.linspace(0, 1, width)[None, :]
@@ -647,13 +668,15 @@ class Case:
                  maker=None, xmp=False, note=None, tmap_kw=None,
                  tmap_data=None, gain_map_cropped=False, iden_source_turns=0,
                  gain_crop=None, tmap_color=None, irot0=False,
-                 delete=False):  # fmt: skip
+                 delete=False, scene=None, banding=False):  # fmt: skip
         self.__dict__.update(locals())
         del self.__dict__['self']
 
 
 CASES = [Case(f'o{o}', o=o) for o in range(1, 9)]
 CASES += [Case(f'o{o}_turned', o=o, gain_map_turned=True) for o in (2, 5, 6)]
+# a large smooth sky, for the banding test only (no expected pixels: too big)
+CASES += [Case('sky', size=(1024, 768), scene=sky_scene, banding=True)]
 CASES += [
     Case('grid_o6', o=6, tile=(32, 32)),
     Case('odd_size_o6', o=6, size=(66, 50), crop=(0, 0, 49, 65), tile=(32, 32)),
@@ -777,7 +800,7 @@ def write_photo(case, path, profiles, transforms=True):
     """Writes the HEIC; returns (stored gain map, stored-to-upright fn)."""
     sw, sh = case.size if case.o in (1, 2, 3, 4) else case.size[::-1]
     # the upright photo, uncropped, then stored
-    upright = scene(*case.size)
+    upright = (case.scene or scene)(*case.size)
     base = stored(upright, case.o)
     gw, gh = case.gain_size or (case.size[0] // 2, case.size[1] // 2)
     gain_upright = gain_pattern(gw, gh)
@@ -1036,6 +1059,8 @@ def main():
             info['note'] = case.note
             if case.delete:
                 info['delete'] = True
+        elif case.banding:
+            info['banding'] = True
         else:
             pixels, headroom, peak = expected(
                 case, heic, gain, gplanes, profiles

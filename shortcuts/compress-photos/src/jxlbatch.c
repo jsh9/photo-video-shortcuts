@@ -31,6 +31,7 @@
 #endif
 
 #include "gainmap.h"
+#include "grain.h"
 #include "meta.h"
 #include "pixels.h"
 #include "selftest_hdr_heic.h"
@@ -64,6 +65,8 @@ typedef struct {
   int mac;    // --mac: for the Mac shortcuts; no hints about the iPhone's share sheet
   int jobs;   // -j: photos converted at a time (0: from the number of cores); threads builds
   int threads;  // -t: threads per photo (0: the cores, shared by the photos); threads builds
+  int grain;         // --grain: fine grain added to HDR outputs, in percent of an 8-bit PQ step (-1: from the quality)
+  int grain_coarse;  // --grain-coarse: the coarse layer (-1: from the quality)
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -759,11 +762,25 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   // PNG pixels are as stored, with their orientation in EXIF (or XMP).
   int orient = 1;
   int transposed = 0;  // the stored pixels are turned by a quarter turn
+  grain_opts_t grain = {0, 0};  // the grain added to an HDR output, for the log
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
     if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, &transposed, err, sizeof err) != 0) goto done;
     if (hdr.note[0]) say_wrap("  ", "! HDR gain map not used (%s); saved as SDR", hdr.note);
     if (hdr.warning[0]) say_wrap("  ", "! %s", hdr.warning);
+    // Grain against banding in an HDR (PQ) output's smooth areas (grain.h);
+    // not for lossless output, which keeps every bit of the original's.
+    if (hdr.headroom > 0 && opt->quality < 100.0f) {
+      grain_opts_t gopts = grain_auto(opt->quality);
+      if (opt->grain >= 0) gopts.fine = opt->grain;
+      if (opt->grain_coarse >= 0) gopts.coarse = opt->grain_coarse;
+      const int rc = grain_attach(&img, &gopts);
+      if (rc < 0) {
+        snprintf(err, sizeof err, "out of memory");
+        goto done;
+      }
+      if (rc == 0) grain = gopts;
+    }
   } else {
     // HDR JPEGs (as Photos sends HDR photos with "Send As: Automatic"): the
     // gain map isn't converted.
@@ -864,7 +881,9 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     char in_s[32], out_s[32], depth[32] = "";
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
-    if (hdr.headroom > 0) {
+    if (hdr.headroom > 0 && (grain.fine > 0 || grain.coarse > 0)) {
+      snprintf(depth, sizeof depth, ", HDR %.1f\u00d7, grain %d+%d", hdr.headroom, grain.fine, grain.coarse);
+    } else if (hdr.headroom > 0) {
       snprintf(depth, sizeof depth, ", HDR %.1f\u00d7", hdr.headroom);
     } else if (img.bits > 8) {
       snprintf(depth, sizeof depth, ", 10-bit");
@@ -1209,6 +1228,16 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   say_wrap("", "Done: %zu of %zu converted in %.0f s", batch.done, count, now_seconds() - t0);
   if (batch.done) {
     say_wrap("", "%s -> %s (%.0f%%)", in_s, out_s, batch.bytes_in > 0 ? 100.0 * batch.bytes_out / batch.bytes_in : 0.0);
+    // the space saved (or taken: a lossless JPEG XL of a small JPEG can be larger)
+    const double saved = batch.bytes_in - batch.bytes_out;
+    const double saved_pct = batch.bytes_in > 0 ? 100.0 * saved / batch.bytes_in : 0.0;
+    char saved_s[32];
+    fmt_bytes(saved_s, sizeof saved_s, saved < 0 ? -saved : saved);
+    if (saved >= 0) {
+      say_wrap("", "Saved %s (%.0f%%)", saved_s, saved_pct);
+    } else {
+      say_wrap("", "%s larger (%.0f%%)", saved_s, -saved_pct);
+    }
   }
   if (batch.done < count) {
     say_wrap("", "%zu failed; see the messages above.", count - batch.done);
@@ -1477,7 +1506,8 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [-C DIR] JOBFILE\n"
+  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [--grain FINE]\n"
+      "                [--grain-coarse COARSE] [-C DIR] JOBFILE\n"
       "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-t THREADS] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
@@ -1490,11 +1520,15 @@ static void usage(void) {
       "  -C  folder holding JOBFILE and the jxl_in_* files\n"
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
+      "  --grain  fine grain added to HDR outputs against banding, in percent of an 8-bit PQ step\n"
+      "           (default: from the quality; 0: no fine layer)\n"
+      "  --grain-coarse  the coarse layer, drawn 4 pixels apart (default: from the quality;\n"
+      "           0: no coarse layer; with --grain 0, no grain at all)\n"
       "  --mac    for the Mac shortcuts: no hints about the iPhone's share sheet\n");
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0};
+  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0, -1, -1};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
@@ -1539,6 +1573,18 @@ int main(int argc, char **argv) {
       opt.retry = 1;
     } else if (!strcmp(a, "--sdr")) {
       opt.sdr = 1;
+    } else if (!strcmp(a, "--grain") && i + 1 < argc) {
+      opt.grain = atoi(argv[++i]);
+      if (opt.grain < 0 || opt.grain > 400) {
+        usage();
+        return 2;
+      }
+    } else if (!strcmp(a, "--grain-coarse") && i + 1 < argc) {
+      opt.grain_coarse = atoi(argv[++i]);
+      if (opt.grain_coarse < 0 || opt.grain_coarse > 400) {
+        usage();
+        return 2;
+      }
     } else if (!strcmp(a, "--mac")) {
       opt.mac = 1;
     } else if (!strcmp(a, "--selftest")) {

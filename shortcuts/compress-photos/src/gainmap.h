@@ -69,6 +69,10 @@ void gainmap_color_name(const color_t *color, char *buf, size_t len);
 int gainmap_prepare(image_t *base, image_t *gain_map, const double window[4], int gain_map_full_range,
                     const gainmap_meta_t *meta, image_t *out);
 
+// The SDR picture an image from gainmap_prepare is computed from (NULL for
+// any other image): for grain_attach, which needs its texture.
+const image_t *gainmap_base(const image_t *hdr);
+
 // 1 if an ICC profile has the tag `sig`.
 int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]);
 // The CICP color primaries in an ICC profile's 'cicp' tag; 0 if it has none.

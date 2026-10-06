@@ -11,6 +11,16 @@ encoder. Every release includes the current files of all shortcuts.
     (`jxlbatch --sdr`): smaller, without the color banding an HDR JPEG XL can
     show in smooth skies, and shown correctly by viewers that can't tone-map
     HDR.
+  - HDR JPEG XL files get a little grain in their smooth areas, against the
+    color banding Apple's SDR rendering of them showed in skies (it draws a PQ
+    file through an 8-bit step with half the levels, and a lossy encode had
+    removed the grain that would hide the steps). Two layers, fine and coarse,
+    weighted by the picture's texture; `jxlbatch --grain` and `--grain-coarse`
+    set the amounts (0: none). HDR files grow by about 10-15%; SDR files are
+    unchanged. Photos converted earlier keep their banding until converted
+    again from their originals.
+  - The batch summary also says how much space was saved and its share of the
+    originals' size (`Saved 1.1 MB (34%)`), below the sizes line.
 - Changed
   - *Compress Photos* (iPhone) no longer offers to delete the originals.
     Instead, each converted still photo's original is added to the album

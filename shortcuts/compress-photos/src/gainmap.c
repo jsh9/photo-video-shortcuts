@@ -406,6 +406,11 @@ static int render(void *owner, uint32_t x, uint32_t y, uint32_t w, uint32_t h, u
   return 0;
 }
 
+const image_t *gainmap_base(const image_t *hdr) {
+  if (!hdr || hdr->render != render || !hdr->owner) return NULL;
+  return &((const renderer_t *)hdr->owner)->base;
+}
+
 int gainmap_prepare(image_t *base, image_t *gm, const double window[4], int gm_full_range, const gainmap_meta_t *m,
                     image_t *out) {
   memset(out, 0, sizeof *out);

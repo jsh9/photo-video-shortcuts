@@ -16,7 +16,8 @@ ______________________________________________________________________
   - [3.4. D. Mac shortcuts: HDR on/off (PR 1)](#34-d-mac-shortcuts-hdr-onoff-pr-1)
   - [3.5. E. iPhone shortcut: album instead of deletion (PR 1)](#35-e-iphone-shortcut-album-instead-of-deletion-pr-1)
   - [3.6. F. Docs, release, verification](#36-f-docs-release-verification)
-- [4. Out of scope](#4-out-of-scope)
+- [4. Tuning results (2026-10-06, PR 2)](#4-tuning-results-2026-10-06-pr-2)
+- [5. Out of scope](#5-out-of-scope)
 
 ______________________________________________________________________
 
@@ -147,7 +148,36 @@ READMEs, DEVELOPING.md 1.3, CHANGELOG, VERSION 0.6.0, `releasing.md`; on both
 devices: convert `IMG_1976` on each, view on both (fit, ⌘R, zoom), HDR on and
 off. Already-converted photos keep their banding.
 
-## 4. Out of scope
+## 4. Tuning results (2026-10-06, PR 2)
+
+`IMG_1976` at q83 (no grain: 1.93 MB, Mac-fit plateau 0.81, phone-fit 0.83;
+reference 0.30 / 0.48). `fine` is per-pixel noise, `coarse` is drawn 4 px
+apart; amounts in percent of an 8-bit PQ step.
+
+| fine + coarse | size | Mac fit | phone fit |
+| ------------- | ---- | ------- | --------- |
+| 60 + 40       | +12% | 0.55    | 0.61      |
+| 70 + 40       | +13% | 0.50    | 0.59      |
+| 80 + 50       | +17% | 0.43    | 0.52      |
+| 80 + 70       | +19% | 0.39    | 0.42      |
+| 100 + 50      | +20% | 0.33    | 0.48      |
+| 100 + 60      | +21% | 0.31    | 0.44      |
+
+Single-layer grain can't do both scales cheaply: fine grain alone (size 1)
+fixes the Mac scale, coarse alone (size 4) the phone scale, and size 2 passes
+both only at +32%. The auto curve, `fine = 80 + (83 - q) × 2.7`,
+`coarse = fine × 5/8` (q88: 67+41, q83: 80+50, q72: 110+68), costs about
++15-20% at each quality; the encode takes 4% longer. **Verdict (2026-10-06):**
+on a 16" MacBook Pro at fit-to-screen, the candidates A (80+50), B (60+40) and
+C (100+60) all showed the same slight banding near the horizon, far less than
+no grain, so the user chose the least grainy: B. Default curve:
+`fine = 60 + (83 - q) × 2`, `coarse = fine × 2/3` (q88: 50+33, q83: 60+40, q72:
+82+54), about +10-15%. The test's rule is the share of the gap between the
+no-grain output and the reference that the grained output closes: 40% at the
+Mac scale, 80% at the phone scale, which is what this default does on the sky
+fixture (0.63 of 0.92 → 0.32; 0.59 of 0.81 → 0.58).
+
+## 5. Out of scope
 
 - Mac and WebAssembly encoders differ by a few bytes on `IMG_1976` although
   DEVELOPING.md claims byte-for-byte equality (likely SIMD rounding; the small
