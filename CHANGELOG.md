@@ -3,6 +3,27 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.6.0] - 2026-10-06
+
+- Added
+  - The Mac shortcuts ask a third question, *HDR*: *Keep HDR* (as before), or
+    *Drop HDR*, which saves every photo as an ordinary SDR JPEG XL
+    (`jxlbatch --sdr`): smaller, without the color banding an HDR JPEG XL can
+    show in smooth skies, and shown correctly by viewers that can't tone-map
+    HDR.
+- Changed
+  - *Compress Photos* (iPhone) no longer offers to delete the originals.
+    Instead, each converted still photo's original is added to the album
+    *Compressed to JXL*, as on the Mac: from the picker, as each copy is saved;
+    from the share sheet, before the conversion (the shortcut is over once
+    a-Shell is in front), so a photo whose conversion fails is in the album
+    too, and a-Shell's output names it. A photo already in the album isn't
+    added again, and nothing is deleted.
+  - Every converted original is collected, on both platforms, whether or not
+    its JPEG XL has its HDR; the log's `!` notes say which lack it. Up to 0.5.0
+    those were kept out of the album and of the delete prompt. The Mac picker
+    route, which left the originals alone, collects them too.
+
 ## [Compress Videos 0.1.0] - 2026-10-05
 
 - Added

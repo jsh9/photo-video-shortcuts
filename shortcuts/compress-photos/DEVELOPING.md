@@ -40,10 +40,16 @@ then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
    under its original name, adds it to the albums listed in
    jxl_albums_N.txt (written by Compress Photos), and cleans up
+   (the originals were added to the album "Compressed to JXL" before
+   the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
    a-Shell switches back to Compress Photos, which saves the JXLs,
-   adds each to its original's albums, then asks to delete the
-   originals whose JXL was saved (and has their HDR)
+   adds each to its original's albums, and adds each saved copy's
+   original to the album "Compressed to JXL"
+Nothing is deleted on either path; the user reviews the album. A photo
+already in the album isn't added again (its albums are checked first):
+Save to Photo Album adds a library photo to an album as it is, but one
+already there would be saved again as a copy.
 ```
 
 Only still photos are staged. Each item is sorted by its own details, which Get
@@ -65,8 +71,8 @@ list. What this relies on (ContentKit's `WFImageContentItem` and
 - A photo from the library answers with its asset's media type and subtypes. An
   image that isn't in the library, such as one shared from Files, answers
   `Image` with no Photo Type, so it is converted like a photo, as before 0.3.0
-  (JXL-Import saves the result to Photos; nothing is deleted from the share
-  sheet). An item with no Media Type at all is converted too.
+  (JXL-Import saves the result to Photos). An item with no Media Type at all is
+  converted too.
 - A list put into a text field is one entry per line, so Match Text
   `Live Photo` finds it in an HDR Live Photo's `HDR`, `Live Photo`. Match Text
   is only run on a value that exists (an If "has any value" first).
@@ -121,8 +127,9 @@ Compress Photos (macOS)                      (shortcut)
    Shortcuts, menu bar), that selection, through AppleScript (the "selection
    route"); else its own photo picker (the "picker route")
 
-   selection route: asks for a quality preset and how to use the cores (All
-   cores / One core); Run Shell Script empties
+   selection route: asks for a quality preset, how to use the cores (All
+   cores / One core) and whether to keep HDR (Keep HDR / Drop HDR, which is
+   jxlbatch --sdr); Run Shell Script empties
    ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
    Run AppleScript (lib/mac/export.applescript, input: that folder) has Photos
    export the originals into its in/ and returns "id|filename" lines; Run
@@ -132,13 +139,13 @@ Compress Photos (macOS)                      (shortcut)
    prints "path|id|delete or keep|Name.jxl"; Run AppleScript
    (lib/mac/import.applescript, input: those lines) has Photos import each file,
    add it to every album its original is in (the albums' contents read one
-   folder at a time, nested ones too), and add the "delete" originals (by
-   id reference) to the album
+   folder at a time, nested ones too), and add every imported file's
+   original (by id reference) to the album
    "Compressed to JXL" (a script can't delete photos); returns
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
-   picker route: keeps the still photos (same as the iPhone), asks for a
-   quality preset and how to use the cores, collects the photos' names, then
+   picker route: keeps the still photos (same as the iPhone), asks the same
+   three questions, collects the photos' names, then
    Run Shell Script
    (/bin/zsh, the photos passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
@@ -147,20 +154,21 @@ Compress Photos (macOS)                      (shortcut)
      Drive folder (~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/
      Documents), runs
        jxlbatch --mac -q 83 -e 7 -j 0 -C "$WORK" jxl_job.txt
-     (-j 1 -t 1 for One core; the log in ~/Library/Caches, below) and prints
+     (-j 1 -t 1 for One core; --sdr for Drop HDR; the log in
+     ~/Library/Caches, below) and prints
      jxl_done.txt's lines:
        jxl_out_N.jxl|N|delete or keep|Name.jxl
          then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
    to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
-   and saved to Photos and added to the original's albums; the originals are
-   left alone (no ids to collect them by; a lookup by file name could pick
-   the wrong photo)
+   and saved to Photos and added to the original's albums, and the original
+   (the item itself, no lookup by name) is added to the album "Compressed to
+   JXL" unless its albums already list it
          the log is shown in Quick Look if it has a "!" note, an error or a failed
    photo; the finish script appends the outcome and "Done" to the log (for
    the progress window) and removes the work folder; a notification counts
-   the saved photos (Delete Photos isn't used: its prompt is one the
-   Shortcuts app often can't show on macOS 26, "Presenter connection
-   failed", and it isn't available from the Share menu at all)
+   the saved and the collected photos (Delete Photos isn't used: its prompt
+   is one the Shortcuts app often can't show on macOS 26, "Presenter
+   connection failed", and it isn't available from the Share menu at all)
 
          both routes, and the Finder shortcut: the log, the progress window's
    script and its pid file live in ~/Library/Caches/compress-photos-macos as
@@ -322,8 +330,8 @@ or invalid fragments, or conflicting values), that photo fails with a message
 rather than losing metadata; other photos continue. This includes a
 `HasExtendedXMP` reference with no fragments in the file, and a JPEG metadata
 segment that is cut short, since either could mean metadata is lost. Failed
-photos are absent from `jxl_done.txt`, so the shortcut cannot offer to delete
-their originals. The CLI and job/result formats stay the same.
+photos are absent from `jxl_done.txt`. The CLI and job/result formats stay the
+same.
 
 ### 1.3. HDR
 
@@ -366,9 +374,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   turn, a mirror or a square photo's rotation applies to it. So such a photo,
   if turned or cropped, is converted as SDR with
   `! HDR gain map not used (not an iPhone camera photo)`, and, by the owner's
-  choice, its original may still be deleted (`delete` in `jxl_done.txt`), on
-  every path (also with `--sdr` or malformed metadata). The batch ends with how
-  many there were. Not checked: whether other iPhone apps write the label.
+  choice, marked `delete` in `jxl_done.txt`, on every path (also with `--sdr`
+  or malformed metadata). The batch ends with how many there were. Not checked:
+  whether other iPhone apps write the label.
   `exiftool -a -AuxiliaryImageType photo.heic` lists
   `urn:com:apple:photo:2020:aux:hdrgainmap` when a file has it. The `-a`
   matters: an iPhone 17 Pro photo, for example, has four auxiliary images (also
@@ -482,14 +490,15 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   metadata (including more than 16 stops), other metadata versions, an older
   gain map without its maker notes, a gain map not labeled as Apple's on a
   turned or cropped photo (see above).
-- **Kept originals.** Each `jxl_done.txt` line is
+- **The `keep` flag.** Each `jxl_done.txt` line is
   `file|index|delete or keep|name`. `keep` means the original had HDR that the
   JXL lacks (a gain map that wasn't used, except an unlabeled one on a turned
-  or cropped photo; an HDR JPEG, which `jxlbatch` only detects; or `--sdr`),
-  and the shortcut doesn't offer it for deletion. When every original is
-  `keep`, the shortcut skips Delete Photos. Older shortcuts read only the first
-  and last fields; a new shortcut with an older `jxlbatch` sees the name as the
-  third field and keeps every original.
+  or cropped photo; an HDR JPEG, which `jxlbatch` only detects; or `--sdr`).
+  Since 0.6.0 the shortcuts don't act on it: every converted original is
+  collected in the album "Compressed to JXL" and the log's `!` notes say which
+  JXLs lack HDR (shortcuts up to 0.5.0 offered only `delete` originals for
+  deletion, or collected only those). The field stays in the format for them
+  and for the log.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet (linked to the gain map by `cdsc`),
   not the photo's, so they aren't copied: an EXIF or XMP item linked only to
@@ -743,16 +752,16 @@ no input: Continue):
      3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.9
         with:
         1. **Get Item from List**: that item of `Stills` (the original).
-        2. **Get Item from List**: Item At Index 3 of the `|` split, then
-           **Match Text** `^delete$` in it (Case Sensitive). **If** Matches has
-           any value: **Add to Variable** `Converted` (the original). **End
-           If**. (`keep` means the JXL lacks the original's HDR.)
-        3. **Get Details of Images**: Album of that original.
-        4. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
+        2. **Get Details of Images**: Album of that original.
+        3. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
            Photo Media, to Repeat Item 2.
-     4. Steps 6–7 of JXL-Import.
-     5. **Delete Photos**: `Converted`.
-   - **End If**.
+        4. **Match Text** `(^|\n)Compressed to JXL($|\n)` in that Album list.
+           **If** Matches has any value: nothing. **Otherwise**: **Save to
+           Photo Album**: the original, to a **Text** `Compressed to JXL`;
+           **Add to Variable** `Collected` (the original). **End If**.
+     4. Steps 6–7 of JXL-Import, the notification also counting `Collected`.
+   - **End If**. (In the share-sheet branch, step 4 above runs for each item of
+     `Stills` before the Execute Command.)
 
 The wait, the `cd` and the retry cover a-Shell being launched by the shortcut.
 a-Shell then restores its last session, including its folder, while it starts

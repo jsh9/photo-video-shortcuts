@@ -38,16 +38,18 @@ from wf import (  # noqa: E402
     EFFORT,
     HELP_URL,
     OBJ,
+    ORIGINALS_ALBUM,
     QUALITY_PRESETS,
     REPEAT_INDEX,
     REPEAT_ITEM,
-    REPEAT_ITEM_2,
     SHORTCUT_INPUT,
     VERSION,
     Ref,
     Sample,
     attachment,
     choose_quality,
+    collect_in_album,
+    copy_to_albums,
     keep_still_photos,
     output_of,
     plain_or_text,
@@ -197,18 +199,19 @@ def run_jxlbatch(b, quality, then):
     )
 
 
-def save_results(b, originals=None):
+def save_results(b, originals=None, album=None):
     """
     Saves the JPEG XL files listed in jxl_done.txt to Photos, each also to the
     albums its original is in.
 
     Each line is "file|index|delete or keep|name". With ``originals`` (the
-    staged photos), the albums are read from the original at the line's index,
-    and that original is added to the variable Converted (offered for deletion)
-    if the line says "delete"; "keep" means the JPEG XL lacks the original's
-    HDR. (A line from an older jxlbatch, "file|index|name", keeps it.) Without
-    ``originals``, the albums are read from jxl_albums_<index>.txt, one album
-    name per line, if that file exists. Returns the number of photos saved.
+    staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the
+    albums are read from the original at the line's index, and that original is
+    collected in the album (collect_in_album). The flag is jxlbatch's: "keep"
+    means the JPEG XL lacks the original's HDR, which a-Shell's output says
+    too; it doesn't change what happens here. Without ``originals``, the albums
+    are read from jxl_albums_<index>.txt, one album name per line, if that file
+    exists. Returns the number of photos saved.
     """
     lines = b.split(b.text_from_input(b.ashell_get_file('jxl_done.txt')), '\n')
 
@@ -222,19 +225,12 @@ def save_results(b, originals=None):
         index = b.item_at_index(parts, 2)
 
         def add_to_albums(albums):
-            b.repeat_each(
-                albums, lambda: b.save_to_album(saved, REPEAT_ITEM_2)
-            )
+            copy_to_albums(b, saved, albums)
 
         if originals:
             original = b.item_at_index(originals, index)
-            delete = b.match_text(b.item_at_index(parts, 3), '^delete$')
-            b.if_has_value(
-                delete,
-                lambda: b.append_variable('Converted', original),
-                lambda: None,
-            )
             add_to_albums(b.photo_albums(original))
+            collect_in_album(b, original, album)
         else:
             albums_file = b.ashell_get_file(
                 'jxl_albums_', index, '.txt', error_if_missing=False
@@ -264,7 +260,8 @@ def build_compress(sample):
         'Only still photos are converted: Live Photos and videos are skipped. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
-        'saves the results itself, and offers to delete the originals. Either way, '
+        'saves the results itself. Either way, the converted originals go into the '
+        f'album "{ORIGINALS_ALBUM}" for you to review; nothing is deleted. '
         "each JPEG XL copy is also added to its original's albums. "
         'Setup and help: '
         f'{HELP_URL}'
@@ -320,6 +317,11 @@ def build_compress(sample):
             )
 
         b.repeat_each(photos, write_albums)
+        # The originals are collected now: once a-Shell is in front this
+        # shortcut is over, and JXL-Import has no originals. So a photo whose
+        # conversion fails is in the album too; a-Shell's output names it.
+        album = b.text(ORIGINALS_ALBUM)
+        b.repeat_each(photos, lambda: collect_in_album(b, REPEAT_ITEM, album))
         run_jxlbatch(
             b, quality, f'open shortcuts://run-shortcut?name={NAME_B}'
         )
@@ -327,14 +329,23 @@ def build_compress(sample):
     def from_picker():
         run_jxlbatch(b, quality, 'open shortcuts://')
         b.wait_to_return()
-        count = save_results(b, photos)
+        album = b.text(ORIGINALS_ALBUM)
+        count = save_results(b, photos, album)
         b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
-        b.notification('JPEG XL', 'Saved ', count, ' photo(s) to Photos.')
-        # Empty when every original is kept (or with an older jxlbatch).
+        # Empty when nothing was saved, or every original was in the album.
         b.if_has_value(
-            variable('Converted'),
-            lambda: b.delete_photos(variable('Converted')),
-            lambda: None,
+            variable('Collected'),
+            lambda: b.notification(
+                'JPEG XL',
+                'Saved ',
+                count,
+                ' photo(s) to Photos. ',
+                b.count(variable('Collected')),
+                f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
+            ),
+            lambda: b.notification(
+                'JPEG XL', 'Saved ', count, ' photo(s) to Photos.'
+            ),
         )
 
     b.if_has_value(SHORTCUT_INPUT, from_share_sheet, from_picker)

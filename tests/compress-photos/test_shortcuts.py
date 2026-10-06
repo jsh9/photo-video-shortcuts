@@ -137,61 +137,59 @@ def test_written_file_is_valid(gen, shortcuts, tmp_path, monkeypatch):
         assert (tmp_path / f'{name}.unsigned.wflow').exists()
 
 
-def test_kept_originals_not_offered_for_deletion(shortcuts):
-    # Each jxl_done.txt line is "file|index|delete or keep|name". An original
-    # joins Converted (offered for deletion at the end) only inside "If
-    # (item 3 matches ^delete$) has any value": "keep" (the JXL lacks its
-    # HDR) and older jxlbatch lines (item 3 is then the name) keep it.
+def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
+    # The converted originals go into the album ORIGINALS_ALBUM (Save to
+    # Photo Album adds a library photo there without a copy) unless the
+    # photo's albums already list it; nothing is deleted. From the share
+    # sheet, before a-Shell takes over (the shortcut is then over); from the
+    # picker, after each copy is saved. jxlbatch's "delete"/"keep" flag in
+    # jxl_done.txt is not acted on.
     actions = shortcuts['Compress Photos']
-    matches = [
-        ph.params(a)['UUID']
+    idents = [ph.ident(a) for a in actions]
+    assert 'is.workflow.actions.deletephotos' not in idents
+    assert not [
+        a
         for a in actions
         if ph.ident(a) == 'is.workflow.actions.text.match'
         and ph.params(a).get('WFMatchTextPattern') == '^delete$'
     ]
-    assert len(matches) == 1
-    groups, inside = set(), []
-    appended = 0
-    for action in actions:
-        p = ph.params(action)
-        if ph.ident(action) == 'is.workflow.actions.conditional':
-            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
-            if mode == 0 and matches[0] in repr(p.get('WFInput')):
-                groups.add(group)
-                inside.append(group)
-            elif group in groups and mode in (1, 2) and group in inside:
-                inside.remove(group)
-
-        if ph.ident(action) == 'is.workflow.actions.appendvariable' and (
-            p['WFVariableName'] == 'Converted'
-        ):
-            assert inside, 'an original joins Converted unconditionally'
-            appended += 1
-
-    assert appended == 1
-
-
-def test_delete_prompt_only_with_originals_to_delete(shortcuts):
-    # When every original is "keep", Converted is empty: Delete Photos runs
-    # only inside "If Converted has any value".
-    actions = shortcuts['Compress Photos']
-    deletes, open_groups = 0, []
-    for action in actions:
-        p = ph.params(action)
-        if ph.ident(action) == 'is.workflow.actions.conditional':
-            group, mode = p['GroupingIdentifier'], p['WFControlFlowMode']
-            if mode == 0:
-                open_groups.append((
-                    group,
-                    "'Converted'" in repr(p['WFInput']),
-                ))
-            elif mode == 1:
-                open_groups[-1] = (group, False)  # the Otherwise branch
-            else:
-                open_groups.pop()
-
-        if ph.ident(action) == 'is.workflow.actions.deletephotos':
-            assert any(converted for _, converted in open_groups)
-            deletes += 1
-
-    assert deletes == 1
+    texts = {
+        ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.gettext'
+        and ph.params(a)['WFTextActionText']['Value']
+        == {'string': gen.ORIGINALS_ALBUM}
+    }
+    saves = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.savetocameraroll'
+        and ph
+        .params(a)
+        .get('WFCameraRollSelectedGroup', {})
+        .get('Value', {})
+        .get('OutputUUID')
+        in texts
+    ]
+    pattern = f'(^|\\n){gen.ORIGINALS_ALBUM}($|\\n)'
+    checks = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == pattern
+    ]
+    assert len(saves) == len(checks) == 2
+    assert checks[0] < saves[0] < checks[1] < saves[1]
+    runs = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a).startswith(gen.ASHELL_BUNDLE_ID)
+        and 'jxlbatch' in repr(ph.params(a))
+    ]
+    assert saves[0] < runs[0], 'the share-sheet route collects before a-Shell'
+    assert saves[1] > runs[-1], 'the picker route collects after the save'
+    # JXL-Import saves copies into their originals' albums only
+    importer = shortcuts['JXL-Import']
+    assert 'is.workflow.actions.deletephotos' not in [
+        ph.ident(a) for a in importer
+    ]

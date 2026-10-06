@@ -4,9 +4,10 @@ Select photos in Photos → Share → **Compress Photos** → pick a quality pre
 (83 is the everyday choice). JPEG XL copies are saved back to Photos, into the
 same albums as the originals, keeping the original's metadata: capture date,
 time and time zone, GPS location, camera, lens, exposure, maker notes, and XMP.
-Started from the Shortcuts app instead, it lets you pick the photos and then
-offers to delete the originals. Only still photos are converted, screenshots
-included: Live Photos and videos are skipped.
+Started from the Shortcuts app instead, it lets you pick the photos. Either
+way, the converted originals are collected in the album *Compressed to JXL* for
+you to review and delete; the shortcut deletes nothing. Only still photos are
+converted, screenshots included: Live Photos and videos are skipped.
 
 iOS can display JPEG XL but has no encoder, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
@@ -41,31 +42,35 @@ See [Installation](../../README.md#1-installation) in the main README.
 - **Two ways to start it:**
   - **From the Shortcuts app** (tap it, or ▶ in the editor): it shows a photo
     picker, without videos. Photos picked there come straight from the library,
-    so the original HEIF is used. When the JXL copies are saved, it **offers to
-    delete the originals**, only those whose JXL was saved and has everything
-    the JXL can keep. An HDR photo whose JXL lacks its HDR (see
-    [HDR photos](#31-hdr-photos)) is not offered for deletion, except an HDR
-    photo from another app, stored turned or cropped, whose HDR isn't
-    converted.
-    - iOS asks you to confirm ("Delete N photos?"). Tap Don't Allow to keep
-      them.
-    - Deleted photos go to Recently Deleted for 30 days.
-    - Deleting also removes what the JXL doesn't have: depth/Portrait data, the
-      SDR version of an HDR photo (see [HDR photos](#31-hdr-photos)), edit
-      history, and Photos-only information (favorites, captions, people).
-      Albums are kept, because the JXL is added to them. Live Photos are never
-      converted, so they are never offered for deletion.
+    so the original HEIF is used. As each JXL copy is saved, its original is
+    added to the album **Compressed to JXL** (created if needed; a photo
+    already in it isn't added twice). Review that album and delete its photos
+    when you are done; the shortcut deletes nothing.
+    - The first time, iOS asks whether the shortcut may save to a photo album:
+      allow it.
+    - a-Shell's output says which copies lack their original's HDR
+      (`! HDR gain map not used`, see [HDR photos](#31-hdr-photos)): those
+      originals are in the album too, so look at the output before deleting.
+    - Deleted photos go to Recently Deleted for 30 days. Deleting also removes
+      what the JXL doesn't have: depth/Portrait data, the SDR version of an HDR
+      photo (see [HDR photos](#31-hdr-photos)), edit history, and Photos-only
+      information (favorites, captions, people). Albums are kept, because the
+      JXL is added to them. Live Photos are never converted, so they are never
+      collected.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then stops at
       once with "File jxl_done.txt not found".
-  - **From Photos:** select photos ▸ Share ▸ **Compress Photos**. Originals are
-    never deleted this way. The share sheet's **Send As** option decides the
-    format. Its default, Automatic, converts HEIF to JPEG, so the shortcut gets
-    a JPEG copy, and the sizes shown compare against it. To send originals, tap
-    **Options** at the top of the share sheet and set Send As to **Current**.
-    iOS offers no way to make that the default, and a shortcut can't set it.
-    `jxlbatch` prints a reminder when it receives iPhone photos as JPEG.
+  - **From Photos:** select photos ▸ Share ▸ **Compress Photos**. The selected
+    still photos are added to the album **Compressed to JXL** before the
+    conversion (the shortcut is over once a-Shell is in front), so a photo
+    whose conversion fails is in the album too: a-Shell's output names it. The
+    share sheet's **Send As** option decides the format. Its default,
+    Automatic, converts HEIF to JPEG, so the shortcut gets a JPEG copy, and the
+    sizes shown compare against it. To send originals, tap **Options** at the
+    top of the share sheet and set Send As to **Current**. iOS offers no way to
+    make that the default, and a shortcut can't set it. `jxlbatch` prints a
+    reminder when it receives iPhone photos as JPEG.
 - **Only still photos are converted**, screenshots included. The shortcut skips
   the rest of the selection, then a notification counts what it skipped, for
   example "Skipped 2 Live Photo(s), 1 video(s)":
@@ -84,8 +89,7 @@ See [Installation](../../README.md#1-installation) in the main README.
   switches back to Shortcuts by itself.**
   - iOS pauses a-Shell in the background.
   - When started from the Shortcuts app, switching back early makes the
-    shortcut continue before the conversion is done. It then saves nothing and
-    deletes nothing.
+    shortcut continue before the conversion is done. It then saves nothing.
 - The JXL copies sort next to the originals because they share the capture
   date. A notification shows how many were saved.
 - **Albums:** each JXL is also added to every album its original is in. It's
@@ -143,12 +147,11 @@ Not kept:
 - **Depth/Portrait data**. The result is the still.
 - **Live Photos** aren't converted at all (see [Use](#2-use)).
 - **HDR of photos sent as JPEG** (Send As: Automatic): the JPEG's gain map
-  isn't converted, so the result is the standard-dynamic-range (SDR) photo, and
-  its original is kept. Send them as Current instead.
+  isn't converted, so the result is the standard-dynamic-range (SDR) photo.
+  Send them as Current instead.
 - **HDR of photos from other apps, stored turned or cropped**, whose gain map
   isn't labeled as Apple's (see [HDR photos](#31-hdr-photos)): the result is
-  SDR, and, unlike the other cases here, **its original is still offered for
-  deletion**.
+  SDR.
 - **Edits**: an edited photo is converted as it looks now; the edit can't be
   reverted. Photos keeps the unedited original and the edit separately, but
   hands the shortcut only the edited rendering, from the share sheet and from
@@ -188,8 +191,8 @@ An HDR HEIC from elsewhere (for example saved by another app, or on a Mac)
 whose gain map isn't labeled, stored turned or cropped, is converted as SDR,
 and a-Shell says
 `! HDR gain map not used (not an iPhone camera photo); saved as SDR`, and at
-the end of the batch how many such photos there were. **Its original is still
-offered for deletion**, and deleting it loses its HDR.
+the end of the batch how many such photos there were. Its original is in the
+album *Compressed to JXL* like the others; deleting it loses its HDR.
 
 **Edited photos:** checked with HDR photos edited in Photos, from an iPhone 17
 Pro (iOS 26) and an iPhone 13 mini (iOS 16, Apple's older gain map): they
@@ -200,9 +203,8 @@ and later (see below): on screens that can't show all of the HDR, the JXL looks
 a little darker or brighter than the edited HEIC (at full brightness they
 match), while a JXL converted from the unedited photo keeps the profile.
 Checked with crops, rotations and adjustments (exposure, shadows, highlights, a
-style). If one gives `not an iPhone camera photo`, tap Don't Allow at the
-delete prompt (this keeps the whole batch's originals) and delete the others by
-hand.
+style). If one gives `not an iPhone camera photo`, keep its original when you
+go through the album *Compressed to JXL*.
 
 **Implausible brightness:** a gain map claiming to brighten the photo by more
 than 16 stops (65,536×), in either format (for Apple's older one, the headroom

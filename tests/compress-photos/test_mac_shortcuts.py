@@ -20,6 +20,7 @@ MENU = 'is.workflow.actions.choosefrommenu'
 VALUES = {
     'Matches': '83',
     'Cores': 'all',
+    'HDR': 'keep',
     'Combined Text': 'IMG_0001.HEIC',
     'Skipped Echo': '',
     'AppleScript Result': 'ID|IMG_0001.HEIC',
@@ -122,7 +123,7 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert "CORES='all'" in text
     assert 'for f in "$@"; do' in text
     assert (
-        '"$jxlbatch" --mac -q "$QUALITY" -e 7 "${cores[@]}" -C "$WORK" jxl_job.txt'
+        '"$jxlbatch" --mac -q "$QUALITY" -e 7 "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
         in text
     )
     assert 'open -a Terminal "$cmd"' in text
@@ -137,17 +138,26 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
             assert 'pkill' not in script  # ends its own window, by pid
 
 
-def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
-    # After the quality list, a Choose from Menu asks how to use the cores:
-    # "All cores (fast)" first (the usual choice), then "One core". Each case
-    # sets the variable Cores to the value the script reads, and the batch
-    # script turns "one" into one photo at a time on one thread (jxlbatch
-    # -j 1 -t 1) and anything else into several photos at a time with all the
-    # cores (-j 0).
-    assert gen.CORES_CHOICES == [
-        ('All cores (fast)', 'all'),
-        ('One core (keeps the Mac responsive)', 'one'),
+def menu_cases(actions, start):
+    """
+    The case and end markers of the Choose from Menu starting at ``start``.
+    """
+    group = ph.params(actions[start])['GroupingIdentifier']
+    return [
+        i
+        for i in range(start + 1, len(actions))
+        if ph.ident(actions[i]) == MENU
+        and ph.params(actions[i])['GroupingIdentifier'] == group
     ]
+
+
+def check_menu_in_each_route(shortcuts, prompt, choices, var, position):
+    """
+    In each route of each shortcut, a Choose from Menu with ``prompt`` and
+    ``choices`` (titles) sets the variable ``var`` to each choice's value, and
+    sits at ``position`` (0: first after the quality list, 1: next) among the
+    menus between the quality list and the batch script.
+    """
     for name, routes in ((PHOTOS, 2), (FILES, 1)):
         actions = shortcuts[name]
         idents = [ph.ident(a) for a in actions]
@@ -156,38 +166,29 @@ def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
             for i, x in enumerate(idents)
             if x == 'is.workflow.actions.choosefromlist'
         ]
-        starts = [
-            i
-            for i, a in enumerate(actions)
-            if ph.ident(a) == MENU and ph.params(a)['WFControlFlowMode'] == 0
-        ]
         batches = [
             i
             for i, a in enumerate(actions)
             if ph.ident(a) == RUN_SHELL
             and 'jxl_job.txt' in str(ph.params(a)['Script'])
         ]
-        assert len(qualities) == len(starts) == len(batches) == routes
-        for quality, start, batch in zip(
-            qualities, starts, batches, strict=True
-        ):
-            assert quality < start < batch
-            p = ph.params(actions[start])
-            assert p['WFMenuPrompt'] == gen.CORES_PROMPT
-            assert p['WFMenuItems'] == [t for t, _ in gen.CORES_CHOICES]
-            cases = [
+        assert len(qualities) == len(batches) == routes
+        for quality, batch in zip(qualities, batches, strict=True):
+            starts = [
                 i
-                for i in range(start + 1, len(actions))
+                for i in range(quality, batch)
                 if ph.ident(actions[i]) == MENU
-                and ph.params(actions[i])['GroupingIdentifier']
-                == p['GroupingIdentifier']
+                and ph.params(actions[i])['WFControlFlowMode'] == 0
             ]
+            start = starts[position]
+            p = ph.params(actions[start])
+            assert p['WFMenuPrompt'] == prompt
+            assert p['WFMenuItems'] == [t for t, _ in choices]
+            cases = menu_cases(actions, start)
             assert [
                 ph.params(actions[i])['WFControlFlowMode'] for i in cases
-            ] == [1, 1, 2]
-            for i, (title, value) in zip(
-                cases[:-1], gen.CORES_CHOICES, strict=True
-            ):
+            ] == [1] * len(choices) + [2]
+            for i, (title, value) in zip(cases[:-1], choices, strict=True):
                 assert ph.params(actions[i])['WFMenuItemTitle'] == title
                 assert idents[i + 1 : i + 3] == [
                     'is.workflow.actions.gettext',
@@ -199,14 +200,55 @@ def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
                     )
                     == value
                 )
-                assert ph.params(actions[i + 2])['WFVariableName'] == 'Cores'
+                assert ph.params(actions[i + 2])['WFVariableName'] == var
 
-        for text in ph.shell_scripts(actions, {**VALUES, 'Cores': 'one'}):
+
+def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
+    # After the quality list, a Choose from Menu asks how to use the cores:
+    # "All cores (fast)" first (the usual choice), then "One core". Each case
+    # sets the variable Cores to the value the script reads, and the batch
+    # script turns "one" into one photo at a time on one thread (jxlbatch
+    # -j 1 -t 1) and anything else into several photos at a time with all the
+    # cores (-j 0).
+    assert gen.CORES_CHOICES == [
+        ('All cores (fast)', 'all'),
+        ('One core (keeps the Mac responsive)', 'one'),
+    ]
+    check_menu_in_each_route(
+        shortcuts, gen.CORES_PROMPT, gen.CORES_CHOICES, 'Cores', 0
+    )
+    for name in (PHOTOS, FILES):
+        for text in ph.shell_scripts(
+            shortcuts[name], {**VALUES, 'Cores': 'one'}
+        ):
             if '"$jxlbatch"' in text:
                 assert "CORES='one'" in text
                 assert 'one) cores=(-j 1 -t 1);;' in text
                 assert '*) cores=(-j 0);;' in text
-                assert '"${cores[@]}" -C "$WORK" jxl_job.txt' in text
+                assert (
+                    '"${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt' in text
+                )
+
+
+def test_hdr_menu_after_the_cores_in_each_route(gen, shortcuts):
+    # The third question: keep an HDR photo's HDR (the usual choice, first),
+    # or drop it, which the script turns into jxlbatch --sdr: every photo is
+    # then an ordinary SDR JPEG XL.
+    assert gen.HDR_CHOICES == [
+        ('Keep HDR', 'keep'),
+        ('Drop HDR (smaller; shows right in any viewer)', 'drop'),
+    ]
+    check_menu_in_each_route(
+        shortcuts, gen.HDR_PROMPT, gen.HDR_CHOICES, 'HDR', 1
+    )
+    for name in (PHOTOS, FILES):
+        for text in ph.shell_scripts(
+            shortcuts[name], {**VALUES, 'HDR': 'drop'}
+        ):
+            if '"$jxlbatch"' in text:
+                assert "HDR='drop'" in text
+                assert 'drop) hdr=(--sdr);;' in text
+                assert '*) hdr=();;' in text
 
 
 def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
@@ -252,10 +294,12 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
         assert gen.WORK_NAME in text
 
 
-def test_delete_flag_only_read_by_the_import_script(gen, shortcuts):
-    # Each result line carries "delete" or "keep" ("keep": the JPEG XL lacks
-    # the original's HDR). Only import.applescript acts on it, collecting
-    # "delete" originals; the shortcut's own actions never match it.
+def test_every_imported_original_is_collected(gen, shortcuts):
+    # Each result line carries jxlbatch's "delete" or "keep" ("keep": the
+    # JPEG XL lacks the original's HDR, which the log says too). Nothing acts
+    # on it any more: the selection route's import.applescript collects every
+    # imported file's original in ORIGINALS_ALBUM, and the shortcut's own
+    # actions never match the flag.
     actions = shortcuts[PHOTOS]
     assert not [
         a
@@ -264,27 +308,71 @@ def test_delete_flag_only_read_by_the_import_script(gen, shortcuts):
         and ph.params(a).get('WFMatchTextPattern') == '^delete$'
     ]
     script = gen.applescript_text('import')
-    assert (
-        'if (item i of flags) is "delete" then set end of toCollect to origId'
-        in script
-    )
+    assert 'set end of toCollect to origId' in script
+    assert 'is "delete"' not in script
+    assert gen.ORIGINALS_ALBUM == 'Compressed to JXL'
+    assert gen.ORIGINALS_ALBUM in script
 
 
-def test_picker_route_leaves_the_originals_alone(gen, shortcuts):
+def album_saves(actions, album):
+    """
+    The Save to Photo Album actions whose album is a text holding ``album``.
+    """
+    texts = {
+        ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.gettext'
+        and ph.params(a)['WFTextActionText']['Value'] == {'string': album}
+    }
+    return [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.savetocameraroll'
+        and ph
+        .params(a)
+        .get('WFCameraRollSelectedGroup', {})
+        .get('Value', {})
+        .get('OutputUUID')
+        in texts
+    ]
+
+
+def test_picker_route_collects_the_originals_without_deleting(gen, shortcuts):
     # Delete Photos needs a prompt the Shortcuts app often can't show on
-    # macOS 26, and without photo ids a lookup by file name could pick the
-    # wrong photo: the picker route neither deletes nor collects. Only the
-    # selection route collects, by id (import.applescript).
+    # macOS 26, so nothing is deleted. The picker route collects each saved
+    # copy's original in ORIGINALS_ALBUM by the item itself (Save to Photo
+    # Album adds a library photo to an album without a copy), unless the
+    # photo's albums already list it; the selection route collects by id
+    # (import.applescript).
     actions = shortcuts[PHOTOS]
     assert not [
         a for a in actions if ph.ident(a) == 'is.workflow.actions.deletephotos'
     ]
-    for action, inside in ph.inside_if_on(actions, "'Selection'"):
-        if ph.ident(action) == RUN_APPLESCRIPT and not inside:
-            assert 'is Photos in front' in ph.params(action)['Script']
-
-    assert gen.ORIGINALS_ALBUM == 'Compressed to JXL'
-    assert gen.ORIGINALS_ALBUM in gen.applescript_text('import')
+    saves = album_saves(actions, gen.ORIGINALS_ALBUM)
+    assert len(saves) == 1
+    pattern = f'(^|\\n){gen.ORIGINALS_ALBUM}($|\\n)'
+    checks = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == pattern
+    ]
+    assert len(checks) == 1
+    assert checks[0] < saves[0]
+    # in the picker route (the Otherwise branch of "If Selection"), after the
+    # copy was saved
+    inside = dict(
+        (id(action), inside)
+        for action, inside in ph.inside_if_on(actions, "'Selection'")
+    )
+    assert not inside[id(actions[saves[0]])]
+    copies = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.savetocameraroll'
+        and i not in saves
+    ]
+    assert copies and copies[0] < saves[0]
 
 
 def test_probe_error_is_shown_before_the_picker(gen, shortcuts):
@@ -364,6 +452,7 @@ def test_files_passes_real_paths(shortcuts):
         {
             'Matches': '72',
             'Cores': 'all',
+            'HDR': 'keep',
             'Combined Text': '/a/b.heic\n\n/c',
             'Skipped Echo': '',
         },
@@ -446,8 +535,9 @@ def test_iphone_shortcuts_unchanged_by_refactor():
 def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
     # Set Name and Save to Photo Album output nothing when Run AppleScript
     # gave no file (seen on a Mac: the original was then deleted with no
-    # copy saved). So the album additions, the Converted entry and the saved
-    # count all sit inside "If (Saved Photo Media) has any value".
+    # copy saved). So the album additions (the copy's, and the original's
+    # collection in ORIGINALS_ALBUM) and the saved count all sit inside "If
+    # (Saved Photo Media) has any value".
     actions = shortcuts[PHOTOS]
     saves = [
         ph.params(a)['UUID']
@@ -470,7 +560,7 @@ def test_photos_nothing_follows_a_save_that_produced_nothing(shortcuts):
             assert inside, 'album addition outside the saved check'
             guarded['albums'] += 1
 
-    assert guarded == {'Saved Photos': 1, 'albums': 1}
+    assert guarded == {'Saved Photos': 1, 'albums': 2}
     # The count in the notification is of the photos actually saved.
     counts = [
         a
