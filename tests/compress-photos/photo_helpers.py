@@ -368,6 +368,60 @@ def load_generator(name='build_shortcuts'):
     return shortcut_helpers.load_generator(TOOL / 'scripts', name)
 
 
+def check_photo_dates(actions):
+    """
+    Checks wf.photo_date's steps in a shortcut and returns where each Format
+    Date is: inside a repeat, the Repeat Item's Date Taken (Get Details of
+    Images); only if Match Text finds text in it, Format Date of it as ISO 8601
+    with the time, then "Repeat Index|date" appended to Dates.
+    """
+    by_uuid = {params(a).get('UUID'): a for a in actions}
+    walked = list(walk(actions))
+    match_of = {}  # Match Text UUID -> the output it reads
+    for a in actions:
+        if ident(a) == 'is.workflow.actions.text.match':
+            (read,) = references(params(a)['text'])
+            match_of[params(a)['UUID']] = read.get('OutputUUID')
+
+    found = []
+    for i, (a, depth) in enumerate(walked):
+        if ident(a) != 'is.workflow.actions.format.date':
+            continue
+
+        p = params(a)
+        assert p['WFDateFormatStyle'] == 'ISO 8601'
+        assert p['WFISO8601IncludeTime'] is True
+        assert depth == 1
+        (taken,) = references(p['WFDate'])
+        details = by_uuid[taken['OutputUUID']]
+        assert ident(details) == 'is.workflow.actions.properties.images'
+        assert params(details)['WFContentItemPropertyName'] == 'Date Taken'
+        assert list(references(params(details)['WFInput'])) == [
+            {'Type': 'Variable', 'VariableName': 'Repeat Item'}
+        ]
+        guards = [
+            m for m, read in match_of.items() if read == taken['OutputUUID']
+        ]
+        assert len(guards) == 1
+        inside = dict(
+            (id(x), yes) for x, yes in inside_if_on(actions, guards[0])
+        )
+        assert inside[id(a)], 'formatted only when there is a date'
+        line, append = actions[i + 1], actions[i + 2]
+        assert (
+            render(
+                params(line)['WFTextActionText'],
+                {'Repeat Index': '3', 'Formatted Date': 'D'},
+            )
+            == '3|D'
+        )
+        assert ident(append) == 'is.workflow.actions.appendvariable'
+        assert params(append)['WFVariableName'] == 'Dates'
+        found.append(i)
+
+    return found
+
+
 def ashell_commands(actions, values):
     """The command text of each a-Shell Execute Command action."""
     return [

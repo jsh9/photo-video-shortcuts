@@ -3,6 +3,24 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.7.0] - 2026-10-09
+
+- Added
+  - Each JPEG XL copy gets the date Photos shows for its original, in Photos
+    and in its EXIF capture date (`DateTimeOriginal`, `CreateDate` and their
+    time zone), on both platforms. A date changed in Photos (Adjust Date and
+    Time), which Photos keeps in its library and not in the original file, is
+    no longer lost with the original; a photo without a capture date of its own
+    (an image saved from an app that removed it, a screenshot) is no longer
+    dated at the time of the conversion. A photo whose capture date already is
+    that moment keeps its EXIF byte for byte. The shortcuts pass the dates to
+    `jxlbatch` in `jxl_dates.txt` (`i|2024-01-01T17:00:00-05:00`); the log says
+    when a date was written. The Mac's selection route also checks each
+    imported copy's date in Photos.
+  - Update both the shortcuts and the encoders (`jxlbatch.wasm`,
+    `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
+    shortcut gives none.
+
 ## [Compress Photos 0.6.0] - 2026-10-06
 
 - Added

@@ -208,10 +208,15 @@ iPhone's need a-Shell, these need Run Shell Script.
 ## 4. What is and isn't kept
 
 The same as on the iPhone: see
-[What is and isn't kept](README.md#3-what-is-and-isnt-kept) and
-[HDR photos](README.md#31-hdr-photos). The Mac shortcuts get the photos from
-Shortcuts as files, as the iPhone shortcut does from the share sheet, and the
-encoder is the same; an edited photo is converted as it looks now.
+[What is and isn't kept](README.md#3-what-is-and-isnt-kept),
+[HDR photos](README.md#31-hdr-photos) and [Dates](README.md#32-dates). The Mac
+shortcuts get the photos from Shortcuts as files, as the iPhone shortcut does
+from the share sheet, and the encoder is the same; an edited photo is converted
+as it looks now. Each copy gets the date Photos shows for its original, in
+Photos and in its EXIF, also a date you changed in Photos (Image ▸ Adjust Date
+and Time) and for a photo without a capture date of its own; from Photos (the
+selection), a copy that Photos dated differently on import is given its
+original's date. The Finder shortcut's files keep their own dates.
 
 ## 5. Updating
 

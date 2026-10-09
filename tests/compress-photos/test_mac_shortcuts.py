@@ -23,7 +23,8 @@ VALUES = {
     'HDR': 'keep',
     'Combined Text': 'IMG_0001.HEIC',
     'Skipped Echo': '',
-    'AppleScript Result': 'ID|IMG_0001.HEIC',
+    'AppleScript Result': 'ID|2024-01-01 17:00:00|IMG_0001.HEIC',
+    'Dates': '1|2024-01-01T17:00:00-05:00',
 }
 
 
@@ -660,3 +661,26 @@ def test_applescripts_compile(gen):
                 timeout=120,
             )
             assert result.returncode == 0, (name, result.stderr)
+
+
+def test_photos_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
+    # The picker route reads each photo's date in Photos (Date Taken) in the
+    # repeat that collects the names (ph.check_photo_dates), and its batch
+    # script gets Dates; the selection route has them from Photos' AppleScript
+    # (export.applescript: "id|date|filename"), and the Finder shortcut, whose
+    # files aren't in Photos, none.
+    actions = shortcuts[PHOTOS]
+    (format_at,) = ph.check_photo_dates(actions)
+    batches = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL and 'Dates' in repr(ph.params(a)['Script'])
+    ]
+    assert len(batches) == 1 and format_at < batches[0]
+    script = ph.render(ph.params(actions[batches[0]])['Script'], VALUES)
+    assert 'for f in "$@"; do' in script  # the picker route's
+    assert '1|2024-01-01T17:00:00-05:00\nJXL_DATES' in script
+    assert 'set dateText to my wallTime(date of m)' in gen.applescript_text(
+        'export'
+    )
+    assert not ph.check_photo_dates(shortcuts[FILES])

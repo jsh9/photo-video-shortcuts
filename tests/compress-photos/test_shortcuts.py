@@ -109,10 +109,49 @@ def test_cleanup_removes_every_file(gen):
         'jxl_out_*',
         'jxl_albums_*',
         'jxl_job.txt',
+        'jxl_dates.txt',
         'jxl_done.txt',
         'jxl_started',
     ):
         assert pattern in gen.CLEANUP.split()
+
+
+def test_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
+    # Each staged photo's date in Photos (Date Taken) becomes a line
+    # "index|date" (ph.check_photo_dates), in the repeat that stages the
+    # photos, and the lines go to a-Shell as jxl_dates.txt when there are
+    # any, before jxlbatch runs. A stale file from an unfinished run is
+    # removed first: it would give photos wrong dates.
+    actions = shortcuts[gen.NAME_A]
+    formats = ph.check_photo_dates(actions)
+    assert len(formats) == 1
+    renames = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and ph.params(a)['WFName']['Value']['string'] == 'jxl_dates.txt'
+    ]
+    assert len(renames) == 1
+    rename = renames[0]
+    put = actions[rename + 1]
+    assert ph.ident(put).endswith('PutFileIntent')
+    inside = [yes for _, yes in ph.inside_if_on(actions, "'Dates'")]
+    assert inside[rename] and inside[rename + 1]
+    commands = [
+        (i, ph.params(a)['command'])
+        for i, a in enumerate(actions)
+        if ph.ident(a).endswith('ExecuteCommandIntent')
+    ]
+    stale = [
+        i
+        for i, c in commands
+        if isinstance(c, str) and c.startswith('rm -f jxl_done.txt')
+    ]
+    runs = [i for i, c in commands if 'jxlbatch' in repr(c)]
+    assert (
+        len(stale) == 1 and 'jxl_dates.txt' in dict(commands)[stale[0]].split()
+    )
+    assert stale[0] < formats[0] < rename < min(runs)
 
 
 def test_share_sheet_settings(gen, shortcuts):

@@ -7,6 +7,15 @@ for f in "$@"; do
   ln -s "${f:A}" "$WORK/jxl_in_$i.orig"
   printf '%d|%s\n' "$i" "${names[$i]:-${f:t}}" >> "$WORK/jxl_job.txt"
 done
+# The photos' dates in Photos, "index|2024-01-01T17:00:00-05:00" each (the
+# shortcut's Dates, one per line; none for a photo without one): jxlbatch
+# writes a date into the copy's EXIF when the original's capture date is
+# another moment or missing.
+DATES=$(cat <<'JXL_DATES'
+@DATES@
+JXL_DATES
+)
+[ -n "$DATES" ] && print -r -- "$DATES" > "$WORK/jxl_dates.txt"
 @RUN@
 # One line per converted photo, jxl_done.txt's "file|index|delete or keep|Name.jxl";
 # the shortcut reads each file from the work folder with Get File (the only

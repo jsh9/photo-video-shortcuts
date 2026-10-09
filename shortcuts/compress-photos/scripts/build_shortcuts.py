@@ -52,6 +52,7 @@ from wf import (  # noqa: E402
     copy_to_albums,
     keep_still_photos,
     output_of,
+    photo_date,
     plain_or_text,
     text,
     variable,
@@ -250,7 +251,7 @@ def save_results(b, originals=None, album=None):
     return b.count(lines)
 
 
-CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_done.txt jxl_started'
+CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started'
 
 
 def build_compress(sample):
@@ -276,26 +277,36 @@ def build_compress(sample):
     # in Stills are the job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
     quality = choose_quality(b)
-    # A stale album file from an unfinished run would put a photo into the
-    # wrong albums; jxl_in_* files are overwritten anyway.
+    # A stale album or dates file from an unfinished run would put a photo
+    # into the wrong albums or give it a wrong date; jxl_in_* files are
+    # overwritten anyway.
     b.ashell_execute(
-        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_started',
+        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started',
         keep_going=True,
         open_app='close',
     )
 
     # Only the original file goes to a-Shell: jxlbatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step.
+    # PNG itself, so there is no Convert Image step. Each photo's date in
+    # Photos goes too (jxl_dates.txt; see wf.photo_date).
     def per_photo():
         name = b.get_name(REPEAT_ITEM)
         b.ashell_put_file(
             b.set_name(REPEAT_ITEM, 'jxl_in_', REPEAT_INDEX, '.orig')
         )
         b.append_variable('Jobs', b.text(REPEAT_INDEX, '|', name))
+        photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
 
     b.repeat_each(photos, per_photo)
     b.ashell_put_file(
         b.set_name(b.combine(variable('Jobs'), '\n'), 'jxl_job.txt')
+    )
+    b.if_has_value(
+        variable('Dates'),
+        lambda: b.ashell_put_file(
+            b.set_name(b.combine(variable('Dates'), '\n'), 'jxl_dates.txt')
+        ),
+        lambda: None,
     )
 
     def from_share_sheet():

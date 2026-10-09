@@ -1,7 +1,8 @@
 -- @NAME@: imports the files the shell made, each into the albums its
--- original is in, and collects every imported file's original in the album
--- "@ORIGINALS_ALBUM@", for the user to review and delete (a script cannot
--- delete them). The log says which copies lack their original's HDR.
+-- original is in, with its original's date, and collects every imported
+-- file's original in the album "@ORIGINALS_ALBUM@", for the user to review
+-- and delete (a script cannot delete them). The log says which copies lack
+-- their original's HDR.
 --
 -- Input: one line per result, "path|original id|delete or keep|name" (the id
 -- may be empty when the exported file could not be matched to an item; the
@@ -102,6 +103,25 @@ on run {input, parameters}
 			end if
 		end repeat
 		set tImport to (current date) - t0
+	end if
+	-- Dates: each copy has its original's date in Photos, which jxlbatch
+	-- wrote into the file (EXIF) for Photos to read on import. Should Photos
+	-- have read another, the copy gets the original's (two calls per copy).
+	if (count of pairs) > 0 then
+		set redated to 0
+		tell application "Photos"
+			repeat with pair in pairs
+				try
+					set want to date of media item id ((item 1 of pair) as text)
+					set copyItem to item 2 of pair
+					if (date of copyItem) is not want then
+						set date of copyItem to want
+						set redated to redated + 1
+					end if
+				end try
+			end repeat
+		end tell
+		if redated > 0 then set problems to problems & "Photos dated " & redated & " copy(ies) differently from the original; they now have the original's date." & linefeed
 	end if
 	-- Albums: each new item joins every album its original is in. The albums'
 	-- contents are read one folder at a time (addToAlbums), one call for all of

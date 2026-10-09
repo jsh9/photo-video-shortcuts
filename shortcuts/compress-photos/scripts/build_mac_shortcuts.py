@@ -38,6 +38,7 @@ import wf  # noqa: E402
 from wf import (  # noqa: E402
     EFFORT,
     ORIGINALS_ALBUM,
+    REPEAT_INDEX,
     REPEAT_ITEM,
     SHORTCUT_INPUT,
     VERSION,
@@ -46,6 +47,7 @@ from wf import (  # noqa: E402
     collect_in_album,
     copy_to_albums,
     keep_still_photos,
+    photo_date,
     variable,
     workflow,
 )
@@ -137,15 +139,17 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # The placeholders that become Shortcuts variables, and the variable each one
 # is in the shortcut: the chosen quality (Match Text's Matches), the cores
 # choice (the variable Cores, see choose_cores), the lines of NAMES or PATHS
-# (Combine Text), and Skipped Echo (an echo of what the shortcut skipped;
-# empty when nothing was, which leaves ">> $LOG" alone, a command that only
-# touches the log).
+# (Combine Text), Skipped Echo (an echo of what the shortcut skipped; empty
+# when nothing was, which leaves ">> $LOG" alone, a command that only touches
+# the log), and the picker route's Dates ("index|date" lines, wf.photo_date; a
+# list in a text field is one item per line).
 SLOTS = {
     '@QUALITY@': 'Matches',
     '@CORES@': 'Cores',
     '@HDR@': 'HDR',
     '@LINES@': 'Combined Text',
     '@SKIPPED@': 'Skipped Echo',
+    '@DATES@': 'Dates',
 }
 
 
@@ -186,8 +190,9 @@ def work_check(work):
 
 def script_text(name, body, label, work):
     """
-    The script as one text with the five @SLOTS@ still in it: common.zsh, then
-    ``body`` (photos.zsh or files.zsh) with run.zsh at its @RUN@.
+    The script as one text with the @SLOTS@ still in it: common.zsh, then
+    ``body`` (photos.zsh, selection.zsh or files.zsh) with run.zsh at its
+    @RUN@.
     """
     text = (MAC / 'common.zsh').read_text() + (MAC / body).read_text()
     text = text.replace('@RUN@\n', (MAC / 'run.zsh').read_text())
@@ -254,18 +259,18 @@ def finish_script(work):
 
 
 def script(name, body, label, work, quality, cores, hdr, lines):
-    """The Run Shell Script text parts: strings and the five variables."""
+    """The Run Shell Script text parts: strings and the variables."""
     refs = {
         '@QUALITY@': quality,
         '@CORES@': cores,
         '@HDR@': hdr,
         '@LINES@': lines,
         '@SKIPPED@': variable('Skipped Echo'),
+        '@DATES@': variable('Dates'),
     }
     parts = []
     for piece in re.split(
-        '(@QUALITY@|@CORES@|@HDR@|@LINES@|@SKIPPED@)',
-        script_text(name, body, label, work),
+        '(' + '|'.join(SLOTS) + ')', script_text(name, body, label, work)
     ):
         if piece in refs:
             parts.append(refs[piece])
@@ -445,12 +450,15 @@ def picker_route(b):
         b.count(photos),
         ' photo(s)… A notification follows when they are saved.',
     )
+
     # The photos' names, one per line in job order: Shortcuts names the files
     # it passes to the script, and the JPEG XL copies keep the photos' names.
-    b.repeat_each(
-        photos,
-        lambda: b.append_variable('Names', b.text(b.get_name(REPEAT_ITEM))),
-    )
+    # And their dates in Photos (wf.photo_date), for jxl_dates.txt.
+    def per_photo():
+        b.append_variable('Names', b.text(b.get_name(REPEAT_ITEM)))
+        photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
+
+    b.repeat_each(photos, per_photo)
     result = b.run_shell_script(
         *script(
             NAME_PHOTOS,

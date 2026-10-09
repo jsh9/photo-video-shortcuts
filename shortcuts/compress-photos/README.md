@@ -27,6 +27,7 @@ ______________________________________________________________________
   - [2.1. Quality presets](#21-quality-presets)
 - [3. What is and isn't kept](#3-what-is-and-isnt-kept)
   - [3.1. HDR photos](#31-hdr-photos)
+  - [3.2. Dates](#32-dates)
 - [4. Troubleshooting](#4-troubleshooting)
 
 ______________________________________________________________________
@@ -102,8 +103,10 @@ it, and iCloud Photos syncs it to the iPhone.) Without it, the run stops with
   - iOS pauses a-Shell in the background.
   - When started from the Shortcuts app, switching back early makes the
     shortcut continue before the conversion is done. It then saves nothing.
-- The JXL copies sort next to the originals because they share the capture
-  date. A notification shows how many were saved.
+- The JXL copies get the date Photos shows for their originals, so they sort
+  next to them, also when you changed a photo's date in Photos or the photo has
+  no capture date of its own (see [Dates](#32-dates)). A notification shows how
+  many were saved.
 - **Albums:** each JXL is also added to every album its original is in. It's
   one photo, not a copy per album.
   - From the share sheet, the albums are passed to JXL-Import by name. If two
@@ -148,6 +151,8 @@ Kept:
 
 - all EXIF: date, time and time zone, GPS, camera and lens, exposure, maker
   notes;
+- the date Photos shows, also one you changed in Photos (see
+  [Dates](#32-dates));
 - XMP;
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
@@ -266,6 +271,27 @@ with an older `jxlbatch.wasm` offers none.
 
 Photos may list the JXL copies under **Duplicates**. Merging a duplicate pair
 keeps only one file, so check which one before you merge.
+
+### 3.2. Dates
+
+Each JXL gets the date Photos shows for its original, in Photos and in the file
+itself (its EXIF capture date, which other apps read too):
+
+- **A date you changed in Photos** (Adjust Date & Time) is kept. Photos keeps
+  such a change in its library, not in the original file, so a plain copy of
+  the file would have the camera's date again.
+- **A photo without a capture date of its own**, such as an image saved from an
+  app that removed it, or a screenshot, gets the date Photos shows for it
+  (usually when it was added to Photos), not the time of the conversion.
+- A photo whose capture date already is that date keeps its EXIF as it is.
+
+When a date is written, a-Shell's output says so, for example
+`date from Photos: 2024:01:01 17:00:00 -05:00 (the file had 2026:10:01 12:00:00 -04:00)`.
+A written date is in the time zone your iPhone is in (with that zone's offset
+on that date): Shortcuts doesn't say in which time zone a photo was taken. So a
+photo from another time zone whose date is written gets the right moment, and
+sorts the same, but its time reads as in your zone. This needs the shortcuts
+and `jxlbatch.wasm` from version 0.7.0.
 
 ## 4. Troubleshooting
 

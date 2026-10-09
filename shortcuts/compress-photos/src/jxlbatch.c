@@ -7,6 +7,11 @@
 // "delete" when the JXL lacks the original's HDR). A jxl_in_i.png converted
 // by Shortcuts is used only for other formats (older versions of the shortcut).
 //
+// jxl_dates.txt, if there, gives photos their date in Photos, one line
+// "i|2024-01-01T17:00:00.123-05:00" each: a photo whose capture date isn't
+// that moment (Photos' date was changed, or the file has none) gets it in its
+// EXIF (see exif_set_capture_date), so Photos and other apps show that date.
+//
 // Builds with threads (JXLBATCH_THREADS, the Mac) can convert several photos
 // at a time (-j), each with a share of the cores (-t); the output and
 // jxl_done.txt then read as with one at a time (see parallel_batch).
@@ -42,6 +47,7 @@
 #define JXLBATCH_VERSION "dev"
 #endif
 #define DONE_FILE "jxl_done.txt"
+#define DATES_FILE "jxl_dates.txt"
 // Created as soon as a batch starts. When a shortcut launches a-Shell, its
 // WebAssembly engine may not be loaded yet and the first command fails
 // without running; the shortcut then runs jxlbatch --retry, which does
@@ -607,6 +613,7 @@ static int encode_jxl(image_t *img, const encode_meta_t *em, const options_t *op
 typedef struct {
   unsigned index;
   char name[256];
+  char date[64];  // from jxl_dates.txt (see read_dates); "" if none
 } job_t;
 
 static void clean_name(char *name, unsigned index) {
@@ -649,6 +656,7 @@ static int parse_jobs(const uint8_t *data, size_t len, job_t **jobs_out, size_t 
     job_t job;
     job.index = idx;
     job.name[0] = 0;
+    job.date[0] = 0;
     if (a < b && data[a] == '|') {
       a++;
       while (a < b && data[a] == ' ') a++;
@@ -672,6 +680,43 @@ static int parse_jobs(const uint8_t *data, size_t len, job_t **jobs_out, size_t 
   *jobs_out = jobs;
   *count_out = count;
   return 0;
+}
+
+// Gives each job its line "i|date" of jxl_dates.txt, if that file is there
+// (the shortcuts write it from 0.7.0 on; checked when the photo is converted).
+static void read_dates(const char *dir, job_t *jobs, size_t count) {
+  char *path = path_join(dir, DATES_FILE);
+  uint8_t *data = NULL;
+  size_t len = 0;
+  if (!path || read_file(path, &data, &len) != 0) {
+    free(path);
+    return;
+  }
+  free(path);
+  size_t pos = 0;
+  while (pos < len) {
+    size_t end = pos;
+    while (end < len && data[end] != '\n') end++;
+    size_t a = pos, b = end;
+    pos = end + 1;
+    while (a < b && (data[a] == ' ' || data[a] == '\t' || data[a] == '\r')) a++;
+    while (b > a && (data[b - 1] == ' ' || data[b - 1] == '\t' || data[b - 1] == '\r')) b--;
+    unsigned idx = 0;
+    size_t digits = 0;
+    while (a < b && data[a] >= '0' && data[a] <= '9' && idx < 100000000u) {
+      idx = idx * 10 + (data[a++] - '0');
+      digits++;
+    }
+    if (!digits || a >= b || data[a] != '|') continue;
+    a++;
+    for (size_t i = 0; i < count; i++) {
+      if (jobs[i].index != idx) continue;
+      const size_t n = b - a < sizeof jobs[i].date ? b - a : sizeof jobs[i].date - 1;
+      memcpy(jobs[i].date, data + a, n);
+      jobs[i].date[n] = 0;
+    }
+  }
+  free(data);
 }
 
 typedef struct {
@@ -857,6 +902,36 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     if (xmp_reset_orientation(&xmp, &xmp_len) < 0) {
       snprintf(err, sizeof err, "out of memory");
       goto done;
+    }
+  }
+
+  // The date the photo has in Photos, if the shortcut gave it.
+  if (job->date[0]) {
+    photo_date_t date;
+    char was[64] = "";
+    uint8_t *dated = NULL;
+    size_t dated_len = 0;
+    const int rc = photo_date_parse(job->date, &date)
+                       ? exif_set_capture_date(exif, exif_len, &date, &dated, &dated_len, was, sizeof was)
+                       : -3;
+    if (rc == -1) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
+    if (rc == -3) say_wrap("  ", "! date not understood (%s); the file's date is kept", job->date);
+    if (rc == -2) say_wrap("  ", "! date not written: the EXIF can't be read; the file's date is kept");
+    if (rc == 1) {
+      free(exif);
+      exif = dated;
+      exif_len = dated_len;
+      char iso[64], text[64];
+      photo_date_iso_text(&date, iso, sizeof iso);
+      if (xmp && xmp_set_dates(&xmp, &xmp_len, iso) < 0) {
+        snprintf(err, sizeof err, "out of memory");
+        goto done;
+      }
+      photo_date_exif_text(&date, text, sizeof text);
+      say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
     }
   }
 
@@ -1185,6 +1260,7 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     return 1;
   }
   free(data);
+  read_dates(dir_for_files, jobs, count);
   char *started = path_join(dir_for_files, STARTED_FILE);
   if (started) write_file(started, (const uint8_t *)"", 0);
   free(started);
@@ -1517,7 +1593,9 @@ static void usage(void) {
 #ifndef JXLBATCH_THREADS
       "      (this build has no threads: -j and -t change nothing)\n"
 #endif
-      "  -C  folder holding JOBFILE and the jxl_in_* files\n"
+      "  -C  folder holding JOBFILE and the jxl_in_* files (and jxl_dates.txt, if any:\n"
+      "      \"i|2024-01-01T17:00:00-05:00\" per photo, its date in Photos, written to its EXIF\n"
+      "      when the file's capture date differs or is missing)\n"
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
       "  --grain  fine grain added to HDR outputs against banding, in percent of an 8-bit PQ step\n"

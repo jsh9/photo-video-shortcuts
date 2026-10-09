@@ -192,6 +192,32 @@ def choose_quality(b):
     return b.match_text(b.get_name(chosen), r'\d+')
 
 
+def photo_date(b, photo, index):
+    """
+    Appends "index|date" to the variable Dates: ``photo``'s date in Photos (Get
+    Details of Images ▸ Date Taken), formatted as ISO 8601 with the time
+    (``b.format_date``), for jxlbatch's jxl_dates.txt. jxlbatch writes it into
+    the JPEG XL's EXIF when the original's capture date is another moment or
+    missing (a date changed in Photos, or an image whose app removed it), so
+    the copy shows the date Photos shows for the original.
+
+    For a library photo, Date Taken is the asset's creationDate (ContentKit's
+    WFPhotoMediaContentItem, iOS 18.2: ``asset.creationDate``), which Photos'
+    Adjust Date and Time changes; for an image from another app it is the
+    file's own EXIF date (WFImageContentItem: ``dateTaken`` from the metadata),
+    or nothing, and then no line. Match Text turns the Date into matches (its
+    text) or none, for If, as with Is Favorite (see collect_in_album).
+    """
+    taken = b.photo_details(photo, 'Date Taken')
+    b.if_has_value(
+        b.match_text(taken, '.'),
+        lambda: b.append_variable(
+            'Dates', b.text(index, '|', b.format_date(taken))
+        ),
+        lambda: None,
+    )
+
+
 # The album the converted originals are collected in, on both platforms. The
 # shortcuts never delete photos: the user reviews the album and deletes.
 ORIGINALS_ALBUM = 'Compressed to JXL'
