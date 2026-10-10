@@ -76,12 +76,17 @@ def test_sky_does_not_band_with_the_default_grain(wasm, references, tmp_path):
     assert ok, scores
 
 
-@pytest.mark.parametrize('quality', ['88', '83', '72'])
+@pytest.mark.parametrize('quality', ['93', '88', '83', '72'])
 def test_grain_grows_as_quality_drops(wasm, tmp_path, quality):
     # Lower qualities remove more of the grain, so they get more (grain_auto).
     _, output = convert(wasm, tmp_path, '-q', quality, SKY)
     fine, coarse = map(int, re.search(r'grain (\d+)\+(\d+)', output).groups())
-    expected = {'88': (50, 33), '83': (60, 40), '72': (82, 54)}[quality]
+    expected = {
+        '93': (40, 26),
+        '88': (50, 33),
+        '83': (60, 40),
+        '72': (82, 54),
+    }[quality]
     assert (fine, coarse) == expected
 
 

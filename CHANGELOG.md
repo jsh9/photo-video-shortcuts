@@ -22,6 +22,7 @@ encoder. Every release includes the current files of all shortcuts.
   - Update both the shortcuts and the encoders (`jxlbatch.wasm`,
     `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
     shortcut gives none.
+  - A new quality preset above 88: *93*, "Placebo", on both platforms.
 
 ## [Compress Photos 0.6.0] - 2026-10-06
 

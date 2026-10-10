@@ -123,6 +123,7 @@ smaller text:
 
 | Quality          | What to expect                                                                                                              |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 93               | Placebo                                                                                                                     |
 | 88               | Almost placebo: very little visual degradation (even the most challenging scene, the sunset sky, can be rendered very well) |
 | **83** (default) | Go-to option for everyday scenes (almost perfect blue sky); film grains well preserved                                      |
 | 72               | Details well preserved, but tiny color banding in blue sky; film grains start to get affected                               |
