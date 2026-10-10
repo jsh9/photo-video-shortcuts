@@ -50,6 +50,11 @@
 #endif
 #define DONE_FILE "jxl_done.txt"
 #define DATES_FILE "jxl_dates.txt"
+// An HDR photo with at least this share of bright sky (grain_bright_sky), in
+// percent, gets a warning (--sky-warn): Photos shows faint pink patches in
+// such skies of HDR JPEG XLs. Calibrated on nine iPhone HDR photos: the one
+// the user noticed is 39% sky; 5% is a sky the size of a hand at arm's length.
+#define SKY_WARN_DEFAULT 5.0
 // Created as soon as a batch starts. When a shortcut launches a-Shell, its
 // WebAssembly engine may not be loaded yet and the first command fails
 // without running; the shortcut then runs jxlbatch --retry, which does
@@ -75,6 +80,7 @@ typedef struct {
   int threads;  // -t: threads per photo (0: the cores, shared by the photos); threads builds
   int grain;         // --grain: fine grain added to HDR outputs, in percent of an 8-bit PQ step (-1: from the quality)
   int grain_coarse;  // --grain-coarse: the coarse layer (-1: from the quality)
+  double sky_warn;   // --sky-warn: warn when at least this share (percent) of an HDR photo is bright sky; 0 = never
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -726,6 +732,7 @@ typedef struct {
   size_t apple_jpegs;  // originals that Photos sent as JPEG (see run_batch)
   size_t kept;         // originals marked "keep": their HDR isn't in the JXL
   size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
+  size_t bright_sky;   // HDR photos with much bright sky (Photos may show pink patches)
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -736,7 +743,7 @@ typedef struct {
 typedef struct {
   char name_out[64];
   int keep;  // the original had HDR that the JXL lacks: not to be deleted
-  int apple_jpeg, not_iphone;
+  int apple_jpeg, not_iphone, bright_sky;
   double bytes_in, bytes_out;
   // The photo's summary, printed once it is in jxl_done.txt: e.g.
   // "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s".
@@ -810,11 +817,27 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   int orient = 1;
   int transposed = 0;  // the stored pixels are turned by a quarter turn
   grain_opts_t grain = {0, 0};  // the grain added to an HDR output, for the log
+  int bright_sky = 0;           // much bright sky: Photos may show pink patches (see grain_bright_sky)
   const file_format_t pixel_format = decode_orig ? orig_format : FMT_PNG;
   if (orig_format == FMT_HEIF) {
     if (heif_decode(orig, orig_len, opt->sdr, &img, &color, &hdr, &transposed, err, sizeof err) != 0) goto done;
     if (hdr.note[0]) say_wrap("  ", "! HDR gain map not used (%s); saved as SDR", hdr.note);
     if (hdr.warning[0]) say_wrap("  ", "! %s", hdr.warning);
+    // A bright sky: Photos' own rendering of an HDR JPEG XL shows faint pink
+    // patches in one (an Apple issue; the file is right). Before the grain,
+    // which would be in the rendered rows.
+    if (hdr.headroom > 0 && opt->sky_warn > 0) {
+      const double sky = grain_bright_sky(&img);
+      if (sky < 0) {
+        snprintf(err, sizeof err, "out of memory");
+        goto done;
+      }
+      if (sky * 100 >= opt->sky_warn) {
+        bright_sky = 1;
+        say_wrap("  ", "! bright sky (%.0f%% of the photo): in Photos, the HDR copy may show faint pink patches there; %s avoids them (see README)",
+                 sky * 100, opt->mac ? "Drop HDR" : "--sdr");
+      }
+    }
     // Grain against banding in an HDR (PQ) output's smooth areas (grain.h);
     // not for lossless output, which keeps every bit of the original's.
     if (hdr.headroom > 0 && opt->quality < 100.0f) {
@@ -955,6 +978,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   res->keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
   res->apple_jpeg = apple_jpeg;
   res->not_iphone = hdr.not_iphone;
+  res->bright_sky = bright_sky;
   res->bytes_in = orig_size;
   res->bytes_out = (double)jxl_len;
   ok = 1;
@@ -1019,6 +1043,7 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
   batch->kept += res->keep;
   batch->apple_jpegs += res->apple_jpeg;
   batch->not_iphone += res->not_iphone;
+  batch->bright_sky += res->bright_sky;
   batch->bytes_in += res->bytes_in;
   batch->bytes_out += res->bytes_out;
   say_wrap("  ", "%s", res->info);
@@ -1329,6 +1354,11 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     const int one = batch.kept == 1;
     say_wrap("", "%zu original%s kept: %s HDR isn't in the JXL.", batch.kept, one ? "" : "s", one ? "its" : "their");
   }
+  if (batch.bright_sky) {
+    const int one = batch.bright_sky == 1;
+    say_wrap("", "%zu HDR photo%s with a bright sky: in Photos, %s may show faint pink patches there (an Apple issue; see README). %s avoids them.",
+             batch.bright_sky, one ? "" : "s", one ? "its copy" : "their copies", opt->mac ? "Drop HDR" : "--sdr");
+  }
   if (batch.not_iphone) {
     const int one = batch.not_iphone == 1;
     say_wrap("", "%zu HDR photo%s saved as SDR (not an iPhone camera photo); %s offered for deletion.",
@@ -1605,6 +1635,9 @@ static void usage(void) {
       "      when the file's capture date differs or is missing)\n"
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
+      "  --sky-warn  warn about an HDR photo whose bright sky (smooth, colored, above SDR white)\n"
+      "      covers at least this percent of it: Photos shows faint pink patches there\n"
+      "      (default 5; 0 = never)\n"
       "  --grain  fine grain added to HDR outputs against banding, in percent of an 8-bit PQ step\n"
       "           (default: from the quality; 0: no fine layer)\n"
       "  --grain-coarse  the coarse layer, drawn 4 pixels apart (default: from the quality;\n"
@@ -1613,7 +1646,7 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0, -1, -1};
+  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0, -1, -1, SKY_WARN_DEFAULT};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
   for (int i = 1; i < argc; i++) {
@@ -1667,6 +1700,13 @@ int main(int argc, char **argv) {
     } else if (!strcmp(a, "--grain-coarse") && i + 1 < argc) {
       opt.grain_coarse = atoi(argv[++i]);
       if (opt.grain_coarse < 0 || opt.grain_coarse > 400) {
+        usage();
+        return 2;
+      }
+    } else if (!strcmp(a, "--sky-warn") && i + 1 < argc) {
+      char *end = NULL;
+      opt.sky_warn = strtod(argv[++i], &end);
+      if (end == argv[i] || *end || opt.sky_warn < 0 || opt.sky_warn > 100) {
         usage();
         return 2;
       }

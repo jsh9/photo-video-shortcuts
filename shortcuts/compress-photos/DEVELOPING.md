@@ -489,6 +489,28 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   map's renderer only. Integer math only, so the native and WebAssembly builds
   still agree byte for byte. Photos converted before 0.6.0 keep their banding;
   only a new conversion from the original gets grain.
+- **Bright skies, and Apple's rendering of HDR JPEG XL.** Core Image (what
+  Photos uses) renders an HDR JXL through an SDR rendition and a gain map of
+  its own making, and that rendition's tone mapping shifts colors by 1-2% in
+  smooth patches across the whole picture; it shows as pink or lavender
+  blotches in bright blue skies and lit clouds. The file is exact (libjxl's
+  decode matches Apple's HDR decode of the HEIC within 0.4%), ImageIO's direct
+  `kCGImageSourceDecodeToHDR` is exact, and the same pixels as a Display P3 PQ
+  PNG render exactly through Core Image; the Apple HDR profile, XMP, maker
+  notes and the codestream layout make no difference (October 2026, macOS 27;
+  `docs/compress-photos-pink-sky.md` has the measurements). So `jxlbatch` warns
+  instead: `grain_bright_sky` (`grain.c`) renders one row of pixels per
+  16-pixel cell row of the HDR rendition (before the grain) and counts the
+  cells that aren't textured (the grain's weight above 0), average brighter
+  than SDR white, and colored (brightest channel over 1.2 times the darkest);
+  `--sky-warn PERCENT` (default 5, 0 = never) is the share of the photo from
+  which the warning is printed and counted at the end. Calibrated on nine
+  iPhone HDR photos: the one the user noticed the patches in is 39% sky, the
+  others 0-17%. One exception found in the same tests: Core Image renders a JXL
+  exactly when it has an Exif box, is stored portrait (height above width) and
+  holds more than 2^24 pixels; a landscape 24 MP photo stored rotated with the
+  codestream's orientation flag took that path and displayed upright. Not used
+  yet.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an

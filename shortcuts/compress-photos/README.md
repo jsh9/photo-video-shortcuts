@@ -261,6 +261,24 @@ doesn't offer it.
 Apps other than Apple's may show the HDR JXL without its highlights: few of
 them read HDR JPEG XL yet.
 
+**Known issue, pink patches in skies:** in Photos, an HDR JXL of a photo with a
+bright blue sky or bright clouds can show faint pink or lavender patches there,
+which neither the original nor an SDR copy shows. The file is fine: its pixels
+match the original's HDR rendering, and Apple's direct image decoder shows them
+exactly. The patches come from how Photos displays an HDR JPEG XL: it first
+makes an SDR version of the picture with a filter that shifts colors by 1 to 2%
+in patches, then builds the HDR view from that SDR version, so the shift stays
+on an HDR screen too. The original HEIC isn't affected, because its SDR version
+was made by the camera, and neither is the same picture in another HDR format,
+so it's specific to Apple's handling of JPEG XL (checked on macOS 27 in October
+2026). Until Apple changes it, convert such photos as SDR: Drop HDR on the Mac,
+or `--sdr` in a-Shell; the SDR copy has no patches. `jxlbatch` points them out:
+a photo whose bright sky (smooth, colored, brighter than SDR white) covers 5%
+or more of it gets the line
+`! bright sky (39% of the photo): in Photos, the HDR copy may show faint pink patches there`,
+and the end of the batch says how many there were. `--sky-warn 10` raises the
+bar to 10%; `--sky-warn 0` turns the warning off.
+
 **Originals kept:** when the JXL lacks the original's HDR, the shortcut doesn't
 offer to delete that original, and a-Shell says how many were kept. That
 happens when a photo's gain map can't be used (a note in a-Shell, see
@@ -317,3 +335,4 @@ from version 0.7.0.
 | `! HDR not kept (JPEG with a gain map ...)` in a-Shell                                                                                                                      | Photos sent this HDR photo as JPEG. Set Send As to Current in the share sheet (see [Use](#2-use)). Keep the original if you want its HDR.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `! orientation check` warning in a-Shell                                                                                                                                    | The converted pixels didn't match the original's orientation and size in its EXIF. Please report it with the photo's EXIF. (Photos edited in Photos keep the size from before the edit in their EXIF, so they aren't checked.)                                                                                                                                                                                                                                                                                                                                                                                    |
 | A green horizontal stripe near the bottom of a converted photo in Photos on a Mac (in the thumbnail and the preview, gone once the full photo loads; the iPhone shows none) | A bug in Photos, not in the file: when a 4032×3024 (12 MP) JPEG XL is saved to Photos on an iPhone, iOS 27 writes a 2048×1536 preview whose rows 1264–1327 are dimmed by about 2.5%, whatever made the JXL (XnConvert shows it too), SDR or HDR; 24 MP photos aren't affected, and the JXL itself is fine, as is the full-size view. Reported to Apple (October 2026). Until it's fixed, convert 12 MP photos on the Mac, or re-import the affected JXL on the Mac (export it as the unmodified original, delete the photo including from Recently Deleted, then File ▸ Import): the Mac makes a correct preview. |
+| Faint pink or lavender patches in a bright blue sky or in clouds of an HDR photo's copy, in Photos; the original and an SDR copy have none                                  | Apple's display of HDR JPEG XL, not the file: Photos makes an SDR version with a filter that shifts colors by 1-2% in patches and builds the HDR view from it, so the file's pixels (which match the original's HDR rendering) aren't what you see. See [HDR photos](#31-hdr-photos). Convert such photos as SDR: `--sdr` in a-Shell, or Drop HDR on the Mac.                                                                                                                                                                                                                                                     |

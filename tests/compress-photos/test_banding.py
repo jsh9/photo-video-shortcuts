@@ -142,8 +142,52 @@ def test_grain_is_reproducible(wasm, tmp_path):
     assert a.read_bytes() == b.read_bytes()
 
 
+def test_bright_sky_warning(wasm, tmp_path):
+    # An HDR photo with much bright sky (smooth, colored, above SDR white) gets
+    # a warning: Photos' rendering of an HDR JPEG XL shows faint pink patches
+    # there (README, "pink patches"). The sky fixture's bright part is about
+    # 1% of it (the gain map's blob), below the default of 5%.
+    _, output = convert(wasm, tmp_path / 'default', '-q', '83', SKY)
+    assert 'bright sky' not in output
+    _, output = convert(
+        wasm, tmp_path / 'low', '-q', '83', '--sky-warn', '0.5', SKY
+    )
+    said = ' '.join(output.split())
+    assert re.search(
+        r'! bright sky \(\d+% of the photo\): in Photos, the HDR copy may show faint pink patches there; --sdr avoids them \(see README\)',
+        said,
+    ), said
+    assert (
+        '1 HDR photo with a bright sky: in Photos, its copy may show faint pink patches there (an Apple issue; see README). --sdr avoids them.'
+        in said
+    )
+    _, output = convert(
+        wasm, tmp_path / 'mac', '--mac', '-q', '83', '--sky-warn', '0.5', SKY
+    )
+    assert 'Drop HDR avoids them' in ' '.join(output.split())
+    _, output = convert(
+        wasm, tmp_path / 'off', '-q', '83', '--sky-warn', '0', SKY
+    )
+    assert 'bright sky' not in output
+    _, output = convert(
+        wasm, tmp_path / 'sdr', '--sdr', '-q', '83', '--sky-warn', '0.5', SKY
+    )
+    assert 'bright sky' not in output  # an SDR copy has no patches
+    _, output = convert(
+        wasm, tmp_path / 'plain', '-q', '83', '--sky-warn', '0.5', SDR_PHOTO
+    )
+    assert 'bright sky' not in output  # not HDR
+
+
 @pytest.mark.parametrize(
-    'args', [['--grain', '-1'], ['--grain'], ['--grain-coarse', '500']]
+    'args',
+    [
+        ['--grain', '-1'],
+        ['--grain'],
+        ['--grain-coarse', '500'],
+        ['--sky-warn', '101'],
+        ['--sky-warn', 'abc'],
+    ],
 )
 def test_bad_grain_options(wasm, tmp_path, args):
     ph.stage(tmp_path, [SKY])

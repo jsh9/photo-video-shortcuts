@@ -23,6 +23,11 @@ encoder. Every release includes the current files of all shortcuts.
     `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
     shortcut gives none.
   - A new quality preset above 88: *93*, "Placebo", on both platforms.
+  - A warning for an HDR photo with much bright sky (smooth, colored, brighter
+    than SDR white; 5% of the photo or more, `--sky-warn` changes it): Photos'
+    own rendering of an HDR JPEG XL shows faint pink patches in such skies, an
+    Apple issue the file doesn't have (see the README's known issue). The
+    batch's end says how many; Drop HDR (`--sdr`) avoids the patches.
 - Changed
   - HDR photos at 88, and at the new 93, get the same grain against banding as
     at 83 (60+40), where the curve gave less above 83 (50+33 at 88): on the sky

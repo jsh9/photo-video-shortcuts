@@ -40,4 +40,13 @@ grain_opts_t grain_auto(float quality);
 // alpha, computed at once), or -1 if out of memory (left alone).
 int grain_attach(image_t *img, const grain_opts_t *opts);
 
+// The share of the photo (0 to 1) that is a bright sky: smooth (as for the
+// grain), colored, and brighter than SDR white, like a blue sky or lit clouds
+// in an HDR photo. Photos' own rendering of an HDR JPEG XL shifts colors in
+// faint patches everywhere, and such areas are where it shows (see README,
+// "pink patches"), so a photo with much of it gets a warning. For an image
+// from gainmap_prepare, before grain_attach (one row of pixels per cell is
+// rendered); 0 for any other image, -1 if out of memory.
+double grain_bright_sky(const image_t *img);
+
 #endif
