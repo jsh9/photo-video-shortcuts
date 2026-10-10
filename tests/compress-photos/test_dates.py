@@ -7,6 +7,7 @@ build (SIMD and scalar WebAssembly, native).
 
 import json
 import shutil
+import struct
 
 import photo_helpers as ph
 import pytest
@@ -14,12 +15,11 @@ from PIL import Image, PngImagePlugin
 
 # The test photos' own date (make_photo.swift): 2024-05-06 07:08:09.123 +02:00
 OWN = '2024:05:06 07:08:09'
-# The tags a new date sets; everything else in the EXIF must stay.
+# The tags a new date sets; everything else in the EXIF must stay (the
+# modification time too: IFD0:ModifyDate, OffsetTime and SubSecTime).
 DATE_TAGS = {
-    'IFD0:ModifyDate',
     'ExifIFD:DateTimeOriginal',
     'ExifIFD:CreateDate',
-    'ExifIFD:OffsetTime',
     'ExifIFD:OffsetTimeOriginal',
     'ExifIFD:OffsetTimeDigitized',
     'ExifIFD:SubSecTimeOriginal',
@@ -183,24 +183,119 @@ def test_same_moment_leaves_the_exif_as_it_is(encoder, photos, tmp_path, date):
     assert 'date from Photos' not in out
 
 
-def test_wall_time_compared_when_the_file_has_no_offset(
+def test_clock_time_compared_when_the_file_has_no_zone(
         encoder, photos, tmp_path
 ):
-    # png_alpha's EXIF: DateTimeOriginal 2024:05:06 07:08:09, no offset
+    # png_alpha's EXIF: DateTimeOriginal 2024:05:06 07:08:09, no offset, so
+    # its clock time can't be placed. The same clock time is the same moment
+    # (1). Photos' moment in another zone (whole quarter hours, up to 14 h
+    # from UTC) is that clock time there: kept, with that zone (2: 08:08:09
+    # -07:00 is 07:08:09 -08:00), as for a photo taken in another zone than
+    # the device's. Anything else is another moment, written in Photos' zone
+    # (3; 4: a day later).
     photo = photos['png_alpha']
-    _, jxl = convert(
+    out, jxl = convert(
         encoder,
         tmp_path / 'dated',
-        [photo, photo],
-        {1: '2024-05-06T07:08:09-07:00', 2: '2024-05-06T08:08:09-07:00'},
+        [photo] * 4,
+        {
+            1: '2024-05-06T07:08:09-07:00',
+            2: '2024-05-06T08:08:09-07:00',
+            3: '2024-05-06T08:10:09-07:00',
+            4: '2024-05-07T07:08:09-07:00',
+        },
     )
     _, plain = convert(encoder, tmp_path / 'plain', [photo])
     assert exif_box(jxl[1]) == exif_box(plain[1])
     assert 'ExifIFD:OffsetTimeOriginal' not in ph.exif_tags(jxl[1])
-    assert (
-        dates_of(jxl[2])['ExifIFD:DateTimeOriginal'] == '2024:05:06 08:08:09'
+
+    before, tags = ph.exif_tags(photo), ph.exif_tags(jxl[2])
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    assert tags['ExifIFD:CreateDate'] == '2024:05:06 07:08:09'
+    assert tags['ExifIFD:OffsetTimeOriginal'] == '-08:00'
+    assert tags['ExifIFD:OffsetTimeDigitized'] == '-08:00'
+    assert tags.get('ExifIFD:SubSecTimeOriginal') == before.get(
+        'ExifIFD:SubSecTimeOriginal'
     )
-    assert dates_of(jxl[2])['ExifIFD:OffsetTimeOriginal'] == '-07:00'
+    assert_others_kept(photo, jxl[2])
+    validate(jxl[2])
+
+    said = ' '.join(out.split())
+    assert (
+        'time zone from Photos: 2024:05:06 07:08:09 -08:00 '
+        '(the file had 2024:05:06 07:08:09, no time zone)'
+    ) in said
+    for i, when in [(3, '2024:05:06 08:10:09'), (4, '2024:05:07 07:08:09')]:
+        assert dates_of(jxl[i])['ExifIFD:DateTimeOriginal'] == when
+        assert dates_of(jxl[i])['ExifIFD:OffsetTimeOriginal'] == '-07:00'
+        assert f'date from Photos: {when} -07:00' in said
+
+
+def test_modification_time_stays(encoder, tmp_path):
+    # DateTime (ModifyDate), OffsetTime and SubSecTime are the file's
+    # modification time, not its capture date: kept, also when the capture
+    # date and its SubSecTimeOriginal are replaced.
+    photo = tmp_path / 'edited.png'
+    exif = Image.Exif()
+    exif[0x0132] = '2024:06:01 10:00:00'
+    exif[0x8769] = {
+        0x9003: OWN,
+        0x9010: '+02:00',
+        0x9290: '777',
+        0x9291: '123',
+    }
+    ph.scene(64, 48).save(photo, exif=exif.tobytes())
+    _, jxl = convert(
+        encoder, tmp_path / 'run', [photo], {1: '2024-01-01T17:00:00-05:00'}
+    )
+    tags = ph.exif_tags(jxl[1])
+    assert tags['IFD0:ModifyDate'] == '2024:06:01 10:00:00'
+    assert tags['ExifIFD:OffsetTime'] == '+02:00'
+    assert tags['ExifIFD:SubSecTime'] == 777
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
+    assert tags['ExifIFD:OffsetTimeOriginal'] == '-05:00'
+    assert 'ExifIFD:SubSecTimeOriginal' not in tags
+    assert_others_kept(photo, jxl[1])
+    validate(jxl[1])
+
+
+def test_exif_pointer_in_other_forms(encoder, tmp_path):
+    # IFD0's pointer to the Exif IFD typed IFD (13) rather than LONG, as some
+    # TIFF writers do: followed, and the Exif IFD's tags kept. One that can't
+    # be followed (a count of 2): the EXIF stays as it is, rather than a new
+    # Exif IFD losing the old one's tags.
+    exif = Image.Exif()
+    exif[0x010F] = 'TestMake'
+    exif[0x8769] = {0x9003: OWN, 0xA433: 'TestLens'}
+    data = exif.tobytes()
+
+    def entry(type_, count):  # the pointer entry's tag, type and count
+        return struct.pack(
+            '<HHI' if b'II' in data[:8] else '>HHI', 0x8769, type_, count
+        )
+
+    pointer = entry(4, 1)  # LONG
+    assert data.count(pointer) == 1
+    typed_ifd = tmp_path / 'ifd.png'
+    ph.scene(64, 48).save(typed_ifd, exif=data.replace(pointer, entry(13, 1)))
+    unreadable = tmp_path / 'bad.png'
+    ph.scene(64, 48).save(unreadable, exif=data.replace(pointer, entry(4, 2)))
+    out, jxl = convert(
+        encoder,
+        tmp_path / 'run',
+        [typed_ifd, unreadable],
+        {1: '2024-01-01T17:00:00-05:00', 2: '2024-01-01T17:00:00-05:00'},
+    )
+    tags = ph.exif_tags(jxl[1])
+    assert tags['IFD0:Make'] == 'TestMake'
+    assert tags['ExifIFD:LensMake'] == 'TestLens'
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
+    validate(jxl[1])
+    _, plain = convert(encoder, tmp_path / 'plain', [unreadable])
+    assert exif_box(jxl[2]) == exif_box(plain[1])
+    assert "! date not written: the EXIF can't be read" in ' '.join(
+        out.split()
+    )
 
 
 def test_no_exif_at_all(encoder, imageio, tmp_path):

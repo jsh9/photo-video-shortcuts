@@ -50,10 +50,15 @@ for f in "$WORK"/in/*(.N); do
   # The date for jxlbatch (jxl_dates.txt), with the offset the Mac's time
   # zone had on that date: "2024-01-01T17:00:00-0500". jxlbatch writes it
   # into the copy's EXIF when the original's capture date is another moment
-  # or missing.
+  # or missing. A clock time in the hour that repeats when daylight saving
+  # time ends is two moments (AppleScript's dates are clock times): no date
+  # then, so that no wrong moment is written; import.applescript gives the
+  # copy its original's date in Photos anyway.
   if [ -n "${dates[$name]}" ]; then
-    when=$(date -j -f '%Y-%m-%d %H:%M:%S' "${dates[$name]}" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null) &&
-      printf '%d|%s\n' "$n" "$when" >> "$WORK/jxl_dates.txt"
+    when=$(date -j -f '%Y-%m-%d %H:%M:%S' "${dates[$name]}" '+%s' 2>/dev/null) &&
+      [ "$(date -r $((when + 3600)) '+%Y-%m-%d %H:%M:%S')" != "${dates[$name]}" ] &&
+      [ "$(date -r $((when - 3600)) '+%Y-%m-%d %H:%M:%S')" != "${dates[$name]}" ] &&
+      printf '%d|%s\n' "$n" "$(date -r "$when" '+%Y-%m-%dT%H:%M:%S%z')" >> "$WORK/jxl_dates.txt"
   fi
 done
 skipped=''

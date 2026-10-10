@@ -10,7 +10,9 @@
 // jxl_dates.txt, if there, gives photos their date in Photos, one line
 // "i|2024-01-01T17:00:00.123-05:00" each: a photo whose capture date isn't
 // that moment (Photos' date was changed, or the file has none) gets it in its
-// EXIF (see exif_set_capture_date), so Photos and other apps show that date.
+// EXIF (see exif_set_capture_date), so Photos and other apps show that date;
+// a photo without a time zone whose clock time is that moment in some zone
+// keeps its time and gets the zone.
 //
 // Builds with threads (JXLBATCH_THREADS, the Mac) can convert several photos
 // at a time (-j), each with a share of the cores (-t); the output and
@@ -920,7 +922,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
     if (rc == -3) say_wrap("  ", "! date not understood (%s); the file's date is kept", job->date);
     if (rc == -2) say_wrap("  ", "! date not written: the EXIF can't be read; the file's date is kept");
-    if (rc == 1) {
+    if (rc > 0) {
       free(exif);
       exif = dated;
       exif_len = dated_len;
@@ -931,7 +933,12 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
         goto done;
       }
       photo_date_exif_text(&date, text, sizeof text);
-      say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
+      if (rc == 2) {
+        // The file's clock time is Photos' moment in that zone: kept, with the zone.
+        say_wrap("  ", "time zone from Photos: %s (the file had %s, no time zone)", text, was);
+      } else {
+        say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
+      }
     }
   }
 

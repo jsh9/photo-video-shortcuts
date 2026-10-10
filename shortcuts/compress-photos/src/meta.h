@@ -77,17 +77,22 @@ void photo_date_exif_text(const photo_date_t *d, char *buf, size_t buf_len);
 void photo_date_iso_text(const photo_date_t *d, char *buf, size_t buf_len);
 
 // Makes `date` the EXIF's capture date. When DateTimeOriginal already is that
-// moment (to the second, by its OffsetTimeOriginal if it has one, else by the
-// wall time), nothing changes and 0 is returned. Otherwise *out gets a new,
-// malloc'ed TIFF structure (from `tiff`, or from scratch when len is 0) with
-// DateTimeOriginal and CreateDate set to the date, OffsetTimeOriginal and
-// OffsetTimeDigitized (and OffsetTime, if present) to its offset, and the
-// SubSecTime tags to its milliseconds (removed when it has none); IFD0's
-// ModifyDate is changed too if present. The Exif IFD is rewritten at the end
-// of the data, so no other value moves (maker notes keep their offsets).
-// Returns 1 then. `was` gets the file's own date for a log ("" if none).
-// Returns -1 if out of memory, -2 if the EXIF can't be read.
-int exif_set_capture_date(const uint8_t *tiff, size_t len, const photo_date_t *date, uint8_t **out,
-                          size_t *out_len, char *was, size_t was_len);
+// moment (to the second, by its OffsetTimeOriginal, OffsetTimeDigitized or
+// OffsetTime if it has one, else by the clock time), nothing changes and 0 is
+// returned. Otherwise *out gets a new, malloc'ed TIFF structure (from `tiff`,
+// or from scratch when len is 0) with DateTimeOriginal and CreateDate set to
+// the date, OffsetTimeOriginal and OffsetTimeDigitized to its offset, and
+// SubSecTimeOriginal and SubSecTimeDigitized to its milliseconds (removed
+// when it has none); the modification time (DateTime, OffsetTime, SubSecTime)
+// stays. The Exif IFD is rewritten at the end of the data, so no other value
+// moves (maker notes keep their offsets). Returns 1 then.
+// A file without a time zone whose clock time is `date`'s moment in some zone
+// (whole quarter hours, up to 14 h from UTC) keeps that clock time and gets
+// that zone: *date becomes what was written, and 2 is returned.
+// `was` gets the file's own date for a log ("" if none).
+// Returns -1 if out of memory, -2 if the EXIF can't be read (or its Exif IFD
+// can't be followed from IFD0; the EXIF is then kept as it is).
+int exif_set_capture_date(const uint8_t *tiff, size_t len, photo_date_t *date, uint8_t **out, size_t *out_len,
+                          char *was, size_t was_len);
 
 #endif

@@ -13,10 +13,12 @@ encoder. Every release includes the current files of all shortcuts.
     no longer lost with the original; a photo without a capture date of its own
     (an image saved from an app that removed it, a screenshot) is no longer
     dated at the time of the conversion. A photo whose capture date already is
-    that moment keeps its EXIF byte for byte. The shortcuts pass the dates to
-    `jxlbatch` in `jxl_dates.txt` (`i|2024-01-01T17:00:00-05:00`); the log says
-    when a date was written. The Mac's selection route also checks each
-    imported copy's date in Photos.
+    that moment keeps its EXIF byte for byte; one without a time zone in its
+    EXIF whose time is that moment in some zone keeps its time and gets the
+    zone. The shortcuts pass the dates to `jxlbatch` in `jxl_dates.txt`
+    (`i|2024-01-01T17:00:00-05:00`); the log says when a date or zone was
+    written. The Mac's selection route also checks each imported copy's date in
+    Photos.
   - Update both the shortcuts and the encoders (`jxlbatch.wasm`,
     `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
     shortcut gives none.

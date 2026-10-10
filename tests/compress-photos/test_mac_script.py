@@ -451,16 +451,20 @@ def test_selection_gives_the_copies_their_dates_in_photos(mac):
     # Photos gives each photo's date on the Mac's clock (here New York's);
     # the script adds that zone's offset on that date (winter, summer), and
     # jxlbatch writes it into the copy's EXIF. A photo without one in IDS
-    # (notes.txt) or with an empty one gets none.
+    # (notes.txt) or with an empty one gets none, nor does a clock time in
+    # the hour that repeats when daylight saving time ends (1:30 on
+    # 2024-11-03 is 1:30 EDT and 1:30 EST): it is two moments.
     exported(mac, 'hdr/o1.heic', 'IMG_0001.HEIC')
     exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
     exported(mac, 'hdr/srgb.heic', 'IMG_0003.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0004.HEIC')
     mac.batch(
         'selection',
         lines=(
             'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
             'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
             'A3||IMG_0003.HEIC\n'
+            'A4|2024-11-03 01:30:00|IMG_0004.HEIC\n'
         ),
     )
     assert (mac.selection_work / 'jxl_dates.txt').read_text() == (

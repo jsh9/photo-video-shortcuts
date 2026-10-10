@@ -290,8 +290,11 @@ When a date is written, a-Shell's output says so, for example
 A written date is in the time zone your iPhone is in (with that zone's offset
 on that date): Shortcuts doesn't say in which time zone a photo was taken. So a
 photo from another time zone whose date is written gets the right moment, and
-sorts the same, but its time reads as in your zone. This needs the shortcuts
-and `jxlbatch.wasm` from version 0.7.0.
+sorts the same, but its time reads as in your zone. A photo whose file has no
+time zone (iPhones before iOS 13, most cameras) but whose time is that moment
+somewhere keeps its time and gets that zone instead
+(`time zone from Photos: ...`). This needs the shortcuts and `jxlbatch.wasm`
+from version 0.7.0.
 
 ## 4. Troubleshooting
 

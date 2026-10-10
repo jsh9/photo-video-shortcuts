@@ -143,7 +143,9 @@ Compress Photos (macOS)                      (shortcut)
    (common.zsh + selection.zsh, IDS = those lines) stages in/* (a photo plus
    a .mov of the same name is a Live Photo: skipped; a video alone: skipped),
    writes jxl_dates.txt (each date with the Mac's offset on that date, by
-   `date -j`), runs jxlbatch, renames each result to out/Name.jxl and prints
+   `date -j`; none for a clock time in the hour repeated when daylight
+   saving time ends), runs jxlbatch, renames each result to out/Name.jxl and
+   prints
    "path|id|delete or keep|Name.jxl"; Run AppleScript
    (lib/mac/import.applescript, input: those lines) has Photos import each file,
    give it its original's date should Photos have read another from the file,
@@ -596,26 +598,39 @@ accepted too). Where it comes from:
   it if Photos read another (two calls per copy).
 
 `jxlbatch` (`exif_set_capture_date` in `meta.c`) compares the date with the
-original's `DateTimeOriginal`: by the moment when the file has
-`OffsetTimeOriginal`, else by the clock time, to the second (a second apart
-counts as the same). The same: the EXIF stays byte for byte. Missing or another
-moment: `DateTimeOriginal` and `CreateDate` get the date, `OffsetTimeOriginal`
-and `OffsetTimeDigitized` (and `OffsetTime`, if there) its offset, the
-`SubSecTime` tags its fraction (removed without one), IFD0's `ModifyDate` the
-date if it has one; a copy without EXIF gets a new one (IFD0 and an Exif IFD),
-and XMP capture dates the file already has (`xmp:CreateDate`,
+original's `DateTimeOriginal`: by the moment when the file has a time zone
+(`OffsetTimeOriginal`, else `OffsetTimeDigitized` or `OffsetTime`), else by the
+clock time, to the second (a second apart counts as the same). The same: the
+EXIF stays byte for byte. Missing or another moment: `DateTimeOriginal` and
+`CreateDate` get the date, `OffsetTimeOriginal` and `OffsetTimeDigitized` its
+offset, `SubSecTimeOriginal` and `SubSecTimeDigitized` its fraction (removed
+without one); the modification time (`ModifyDate`, `OffsetTime`, `SubSecTime`)
+is not the capture date and stays; a copy without EXIF gets a new one (IFD0 and
+an Exif IFD), and XMP capture dates the file already has (`xmp:CreateDate`,
 `photoshop:DateCreated`, `exif:DateTimeOriginal`, `exif:DateTimeDigitized`) get
 the date too (`xmp_set_dates`), none added. The Exif IFD is written anew at the
 end of the EXIF and IFD0's pointer moved to it; every other value stays where
 it was, so maker notes, whose values some cameras address from the start of the
-EXIF, keep working. The log says
+EXIF, keep working. An Exif IFD that IFD0's pointer can't lead to leaves the
+EXIF as it is (`! date not written`), rather than a new Exif IFD losing the old
+one's tags. The log says
 `date from Photos: 2024:01:01 17:00:00 -05:00 (the file had ...)`. The
 arithmetic is plain (days from the civil date), so every build writes the same
 bytes. `test_dates.py` checks this on every build.
 
-A photo whose own time zone isn't the device's gets the right moment, so it
-sorts the same, but its clock time in the device's zone: neither Shortcuts nor
-Photos' AppleScript gives a photo's time zone.
+Neither Shortcuts nor Photos' AppleScript gives a photo's time zone, so a
+written date is in the device's zone. A photo without a time zone in its EXIF
+(iPhones before iOS 13, most cameras) is held by Photos in the zone it was
+taken in, and the device's clock time for it differs from the file's wherever
+the device is in another zone, though it is the same moment: when the file's
+clock time is Photos' moment in some zone (whole quarter hours, up to 14 h from
+UTC), `jxlbatch` keeps that clock time and writes that zone instead (the log:
+`time zone from Photos: ...`), so such a photo keeps the time it was taken at.
+A photo whose date is another moment gets it in the device's zone: it sorts the
+same, but its time reads as in that zone. On the Mac, a clock time in the hour
+that repeats when daylight saving time ends is two moments (AppleScript's dates
+are clock times): `selection.zsh` gives no date for it, and
+`import.applescript` dates the copy in Photos.
 
 ## 2. Layout
 

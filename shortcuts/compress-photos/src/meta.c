@@ -861,7 +861,7 @@ static void w32(const tiff_t *t, size_t o, uint32_t v) {
   }
 }
 
-enum { TIFF_SHORT = 3, TIFF_LONG = 4 };
+enum { TIFF_SHORT = 3, TIFF_LONG = 4, TIFF_IFD = 13 };  // IFD: a sub-IFD pointer, as some TIFF writers type it
 
 // Offset of the 12-byte entry for `tag` in the IFD at `ifd`, or 0.
 static size_t ifd_find(const tiff_t *t, uint32_t ifd, uint16_t tag) {
@@ -882,7 +882,7 @@ static int entry_uint(const tiff_t *t, size_t e, uint32_t *v) {
     *v = t16(t, e + 8);
     return 1;
   }
-  if (type == TIFF_LONG) {
+  if (type == TIFF_LONG || type == TIFF_IFD) {
     *v = t32(t, e + 8);
     return 1;
   }
@@ -1250,15 +1250,26 @@ static int ifd_ok(const tiff_t *t, uint32_t ifd) {
   return ifd >= 8 && (size_t)ifd + 2 <= t->n && (size_t)ifd + 2 + (size_t)t16(t, ifd) * 12 + 4 <= t->n;
 }
 
-// The Exif IFD's date tags, rewritten together: DateTimeOriginal, CreateDate,
-// OffsetTime, OffsetTimeOriginal, OffsetTimeDigitized, SubSecTimeOriginal
-// and SubSecTimeDigitized.
+// The Exif IFD's capture date tags, rewritten together: DateTimeOriginal,
+// CreateDate, OffsetTimeOriginal, OffsetTimeDigitized, SubSecTimeOriginal
+// and SubSecTimeDigitized. (DateTime, OffsetTime and SubSecTime, the file's
+// modification time, are not the capture date and stay.)
 static int is_date_tag(uint16_t tag) {
-  return tag == 0x9003 || tag == 0x9004 || tag == 0x9010 || tag == 0x9011 || tag == 0x9012 || tag == 0x9291 ||
-         tag == 0x9292;
+  return tag == 0x9003 || tag == 0x9004 || tag == 0x9011 || tag == 0x9012 || tag == 0x9291 || tag == 0x9292;
 }
 
-int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, uint8_t **out, size_t *out_len,
+// A SubSecTime value's first three digits as milliseconds, or -1 if none.
+static int subsec_millis(const char *s) {
+  int ms = 0, k = 0;
+  for (; s[k] >= '0' && s[k] <= '9'; k++) {
+    if (k < 3) ms = ms * 10 + (s[k] - '0');
+  }
+  if (!k) return -1;
+  for (; k < 3; k++) ms *= 10;
+  return ms;
+}
+
+int exif_set_capture_date(const uint8_t *p, size_t n, photo_date_t *date, uint8_t **out, size_t *out_len,
                           char *was, size_t was_len) {
   // No EXIF: a TIFF header and an empty IFD0, which then gets an Exif IFD.
   static const uint8_t kEmpty[14] = {'M', 'M', 0, 42, 0, 0, 0, 8};
@@ -1271,24 +1282,44 @@ int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, 
   if (!tiff_open(&t, p, n)) return -2;
   const uint32_t ifd0 = t32(&t, 4);
   if (!ifd_ok(&t, ifd0)) return -2;
-  uint32_t exif = exif_ifd_offset(&t);
-  if (exif && !ifd_ok(&t, exif)) exif = 0;  // unreadable: a new one replaces it
+  // The Exif IFD IFD0 points to. A pointer that can't be followed leaves the
+  // EXIF as it is: a new Exif IFD in its place would lose every tag of the
+  // old one (exposure, lens, maker note).
+  const uint32_t exif = exif_ifd_offset(&t);
+  if ((!exif && ifd_find(&t, ifd0, 0x8769)) || (exif && !ifd_ok(&t, exif))) return -2;
 
-  // The file's own date: nothing to do when it is the same moment.
+  // The file's own date: nothing to do when it is the same moment. A file
+  // without a time zone can't place its clock time: when that time is
+  // Photos' moment in some zone (whole quarter hours, up to 14 h from UTC),
+  // the clock time is kept and that zone written, so a photo taken in
+  // another zone keeps the time it was taken at.
+  int zone_only = 0;
   if (exif) {
-    char dto[32], oto[16];
-    const char *s = dto, *o = oto;
+    char dto[32], oto[16], sub[16];
+    const char *s = dto;
     photo_date_t had;
     if (entry_text(&t, ifd_find(&t, exif, 0x9003), dto, sizeof dto) && parse_wall(&s, &had)) {
-      const int has_offset =
-          entry_text(&t, ifd_find(&t, exif, 0x9011), oto, sizeof oto) && parse_offset(&o, &had.offset);
-      if (was_len) snprintf(was, was_len, "%s%s%s", dto, has_offset ? " " : "", has_offset ? oto : "");
-      long long a = wall_seconds(&had), b = wall_seconds(date);
-      if (has_offset) {
-        a -= had.offset * 60LL;
-        b -= date->offset * 60LL;
+      // The original's offset, else the digitized one's or the file's.
+      static const uint16_t kOffsetTags[] = {0x9011, 0x9012, 0x9010};
+      int has_offset = 0;
+      for (size_t i = 0; i < sizeof kOffsetTags / sizeof *kOffsetTags && !has_offset; i++) {
+        const char *o = oto;
+        has_offset = entry_text(&t, ifd_find(&t, exif, kOffsetTags[i]), oto, sizeof oto) && parse_offset(&o, &had.offset);
       }
-      if (llabs(a - b) <= 1) return 0;
+      if (was_len) snprintf(was, was_len, "%s%s%s", dto, has_offset ? " " : "", has_offset ? oto : "");
+      const long long file = wall_seconds(&had), moment = wall_seconds(date) - date->offset * 60LL;
+      if (has_offset) {
+        if (llabs(file - had.offset * 60LL - moment) <= 1) return 0;
+      } else {
+        const long long zone = file - moment;  // the file's offset, were it that moment
+        if (llabs(zone - date->offset * 60LL) <= 1) return 0;  // the same clock time
+        if (zone % 900 == 0 && llabs(zone) <= 14 * 3600) {
+          had.offset = (int)(zone / 60);
+          had.millis = entry_text(&t, ifd_find(&t, exif, 0x9291), sub, sizeof sub) ? subsec_millis(sub) : -1;
+          *date = had;
+          zone_only = 1;
+        }
+      }
     }
   }
 
@@ -1301,14 +1332,7 @@ int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, 
   wall_text(date, wall, sizeof wall);
   offset_text(date->offset, offset, sizeof offset);
   snprintf(millis, sizeof millis, "%03d", date->millis >= 0 ? date->millis % 1000 : 0);
-
-  // IFD0's ModifyDate, in place.
   tiff_t nt = {buf, len, le};
-  const size_t modify = ifd_find(&nt, ifd0, 0x0132);
-  if (modify && t16(&nt, modify + 2) == TIFF_ASCII && t32(&nt, modify + 4) >= 20) {
-    const size_t at = t32(&nt, modify + 8);
-    if (at <= len && len - at >= 20) memcpy(buf + at, wall, 20);
-  }
 
   // The Exif IFD: its entries but the date tags, then those, new.
   const size_t old = exif ? t16(&nt, exif) : 0;
@@ -1318,17 +1342,13 @@ int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, 
     return -1;
   }
   size_t count = 0;
-  int offset_time = 0;  // OffsetTime (the file's time zone) was there
   for (size_t i = 0; i < old; i++) {
     const size_t e = exif + 2 + i * 12;
-    const uint16_t tag = t16(&nt, e);
-    offset_time |= tag == 0x9010;
-    if (!is_date_tag(tag)) entry_copy(&entries[count++], &nt, e);
+    if (!is_date_tag(t16(&nt, e))) entry_copy(&entries[count++], &nt, e);
   }
   if (!exif) entry_set(&entries[count++], le, 0x9000, TIFF_UNDEFINED, 4, "0232", 4);  // ExifVersion
   entry_set(&entries[count++], le, 0x9003, TIFF_ASCII, 20, wall, 20);
   entry_set(&entries[count++], le, 0x9004, TIFF_ASCII, 20, wall, 20);
-  if (offset_time) entry_set(&entries[count++], le, 0x9010, TIFF_ASCII, 7, offset, 7);
   entry_set(&entries[count++], le, 0x9011, TIFF_ASCII, 7, offset, 7);
   entry_set(&entries[count++], le, 0x9012, TIFF_ASCII, 7, offset, 7);
   if (date->millis >= 0) {
@@ -1346,13 +1366,13 @@ int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, 
   nt.n = len;
 
   if (exif) {
-    // IFD0's pointer, in place (a LONG now, should it have been a SHORT).
+    // IFD0's pointer, in place (a LONG now, should it have been a SHORT or
+    // an IFD).
     const size_t e = ifd_find(&nt, ifd0, 0x8769);
     w16(&nt, e + 2, TIFF_LONG);
     w32(&nt, e + 8, new_exif);
   } else {
-    // A new IFD0 too, with its entries and the pointer (in place of an
-    // unreadable one).
+    // A new IFD0 too, with its entries and the pointer.
     const size_t old0 = t16(&nt, ifd0);
     entry_t *entries0 = (entry_t *)calloc(old0 + 1, sizeof *entries0);
     if (!entries0) {
@@ -1378,5 +1398,5 @@ int exif_set_capture_date(const uint8_t *p, size_t n, const photo_date_t *date, 
   }
   *out = buf;
   *out_len = len;
-  return 1;
+  return zone_only ? 2 : 1;
 }

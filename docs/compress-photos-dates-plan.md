@@ -50,7 +50,17 @@ file's EXIF and in Photos, on the Mac and the iPhone.
 - A written date is in the device's time zone (with its offset on that date):
   neither Shortcuts nor Photos' AppleScript gives a photo's time zone. Using
   the file's old offset instead would be wrong across daylight saving time (a
-  summer photo moved to January).
+  summer photo moved to January). A file without a time zone whose clock time
+  is Photos' moment in some zone (whole quarter hours, up to 14 h from UTC)
+  keeps that clock time and gets that zone: Photos holds such a photo in the
+  zone it was taken in, so the device's clock time for it differs wherever the
+  device is elsewhere, though the date was never changed (review, 2026-10-10).
+- The modification time (IFD0's `ModifyDate`, `OffsetTime`, `SubSecTime`) is
+  not the capture date and stays (review, 2026-10-10).
+- On the Mac, a clock time in the hour repeated when daylight saving time ends
+  is two moments (AppleScript's dates are clock times, so Photos' `date of`
+  can't tell them apart): no date for it; `import.applescript` dates the copy
+  in Photos (review, 2026-10-10).
 - The Mac's selection route also checks each imported copy's date in Photos
   against its original's and sets it if they differ (a safety net; two calls
   per copy).
@@ -91,7 +101,7 @@ file's EXIF and in Photos, on the Mac and the iPhone.
    (`test_dates.py`); to confirm in Photos with the first runs below.
 4. **Which tags Photos' own JPEG export rewrites for a changed date
    (optional):** `jxlbatch` changes `DateTimeOriginal`, `CreateDate`, their
-   offsets and sub-seconds, and IFD0's `ModifyDate` if present.
+   offsets and sub-seconds, and not the modification time.
 
 ## 5. Verification
 
