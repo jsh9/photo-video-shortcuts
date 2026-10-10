@@ -121,27 +121,27 @@ it, and iCloud Photos syncs it to the iPhone.) Without it, the run stops with
 The shortcut lists these JPEG XL qualities, each with a short description in
 smaller text:
 
-| Quality          | What to expect                                                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 93               | Placebo                                                                                                                     |
-| 88               | Almost placebo: very little visual degradation (even the most challenging scene, the sunset sky, can be rendered very well) |
-| **83** (default) | Go-to option for everyday scenes (almost perfect blue sky); film grains well preserved                                      |
-| 72               | Details well preserved, but tiny color banding in blue sky; film grains start to get affected                               |
-| 63               | Details well preserved; a bit more color banding in blue sky                                                                |
-| 52               | Small losses in details; more color banding in blue sky                                                                     |
-| 40               | Visible losses in details; color blotches in blue sky                                                                       |
-| 30               | More losses in details; bigger color blotches in blue sky                                                                   |
-| 20               | Details get smudged; color artifacts in blue sky                                                                            |
-| 10               | It’s like watching RMVB videos in 2002                                                                                      |
-| 5                | It’s like watching bad RMVB videos in 2002                                                                                  |
+| Quality          | What to expect                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 93               | Placebo: no visible difference from the original, even in the sunset sky; files about 40% larger than at 88, and can be larger than the original |
+| 88               | Almost placebo: very little visual degradation (even the most challenging scene, the sunset sky, can be rendered very well)                      |
+| **83** (default) | Go-to option for everyday scenes (almost perfect blue sky); film grains well preserved                                                           |
+| 72               | Details well preserved, but tiny color banding in blue sky; film grains start to get affected                                                    |
+| 63               | Details well preserved; a bit more color banding in blue sky                                                                                     |
+| 52               | Small losses in details; more color banding in blue sky                                                                                          |
+| 40               | Visible losses in details; color blotches in blue sky                                                                                            |
+| 30               | More losses in details; bigger color blotches in blue sky                                                                                        |
+| 20               | Details get smudged; color artifacts in blue sky                                                                                                 |
+| 10               | It’s like watching RMVB videos in 2002                                                                                                           |
+| 5                | It’s like watching bad RMVB videos in 2002                                                                                                       |
 
 - Shortcuts menus show only a title and can't pre-select an option. So each
   preset is a contact card: the number is the name, and the description is the
   company line shown under it. The default is marked "(default)" in its title.
 - Tapping a preset picks it and continues.
 - To change the presets, edit the first Text action in *Compress Photos* on the
-  phone, or `QUALITY_PRESETS` in `scripts/build_shortcuts.py` and rebuild (see
-  [DEVELOPING.md](DEVELOPING.md)).
+  phone, or `QUALITY_PRESETS` in `scripts/wf.py` (shared with the Mac
+  shortcuts) and rebuild (see [DEVELOPING.md](DEVELOPING.md)).
 
 Effort is fixed at 7, `cjxl`'s default. To trade a little size for speed, edit
 the Execute Command action in *Compress Photos* and change `-e 7` to `-e 5`.

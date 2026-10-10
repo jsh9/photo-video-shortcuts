@@ -477,9 +477,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   less than a level of 255, none above 2.5 levels (texture hides the steps
   anyway, and grain there would only cost bytes; a night photo's own grain
   counts too), feathered between cells. The amounts are the standard deviation
-  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 50+33 at q88,
-  60+40 at q83, 82+54 at q72, tuned on a sunset skyline in
-  `docs/compress-photos-banding-plan.md`), or `--grain FINE` and
+  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 60+40 from
+  q83 up, so at 88 and 93 too, 82+54 at q72, tuned on a sunset skyline in
+  `docs/compress-photos-banding-plan.md`; the line's lower amounts above q83
+  left the sky fixture banding at the phone scale), or `--grain FINE` and
   `--grain-coarse COARSE` (0 for none). The log says `grain 60+40` after the
   headroom. An HDR file grows by about 10-15%; the encode takes about 4%
   longer. Not grained: SDR outputs, lossless output, `--sdr`, an HDR photo with
@@ -717,7 +718,8 @@ python3 scripts/build_mac_shortcuts.py --guess
   iPhone. `build_shortcuts.py --fetch <iCloud link>` saves it as
   `scripts/sample/JXL Sample.plist`, and later runs copy the exact format from
   it.
-- The quality presets are `QUALITY_PRESETS` near the top of the script.
+- The quality presets are `QUALITY_PRESETS` in `scripts/wf.py`, shared with the
+  Mac shortcuts.
 - `scripts/build_mac_shortcuts.py` writes and signs the two Mac `.shortcut`
   files the same way. Its `--guess` templates are the built-in actions only (no
   a-Shell). To check the Mac actions' format against a real shortcut, build one

@@ -23,6 +23,12 @@ encoder. Every release includes the current files of all shortcuts.
     `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
     shortcut gives none.
   - A new quality preset above 88: *93*, "Placebo", on both platforms.
+- Changed
+  - HDR photos at 88, and at the new 93, get the same grain against banding as
+    at 83 (60+40), where the curve gave less above 83 (50+33 at 88): on the sky
+    fixture the lower amounts left banding at the phone's viewing scale. The
+    files grow by about 1% more at 88 and 3% more at 93; the banding test now
+    runs at every preset.
 
 ## [Compress Photos 0.6.0] - 2026-10-06
 

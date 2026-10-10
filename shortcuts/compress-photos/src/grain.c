@@ -33,10 +33,15 @@ grain_opts_t grain_auto(float quality) {
   // package C): lower qualities remove more of the grain, so they get more;
   // the file grows by about 10-15% at each quality. The user chose the
   // lightest of the candidates whose banding looked the same (60+40 at q83);
-  // the coarse layer is 2/3 of the fine one.
+  // the coarse layer is 2/3 of the fine one. Above q83 the amount stays: a
+  // higher quality keeps hardly more of a sky's faint grain (q93 without
+  // grain bands like q83 without), and the line's lower values failed the
+  // banding check at the phone scale (tests/compress-photos/banding.py: q93 at
+  // 40+26 closed 58% of the gap and q88 at 50+33 76%, where 80% is required;
+  // 60+40 closes it at both).
   grain_opts_t g;
   float fine = 60.0f + (83.0f - quality) * 2.0f;
-  if (fine < 40.0f) fine = 40.0f;
+  if (fine < 60.0f) fine = 60.0f;
   if (fine > 130.0f) fine = 130.0f;
   g.fine = (int)(fine + 0.5f);
   g.coarse = g.fine * 2 / 3;

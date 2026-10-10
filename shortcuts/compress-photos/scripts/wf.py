@@ -29,7 +29,10 @@ HELP_URL = 'https://github.com/jsh9/photo-video-shortcuts/tree/main/shortcuts/co
 # The quality choices offered, as (quality, description). Shortcuts can't
 # preselect a choice, so the default is marked in its title.
 QUALITY_PRESETS = [
-    (93, 'Placebo'),
+    (
+        93,
+        'Placebo: no visible difference from the original, even in the sunset sky; files about 40% larger than at 88, and can be larger than the original',
+    ),
     (
         88,
         'Almost placebo: very little visual degradation (even the most challenging scene, the sunset sky, can be rendered very well)',

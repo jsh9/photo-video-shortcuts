@@ -177,6 +177,13 @@ no-grain output and the reference that the grained output closes: 40% at the
 Mac scale, 80% at the phone scale, which is what this default does on the sky
 fixture (0.63 of 0.92 → 0.32; 0.59 of 0.81 → 0.58).
 
+**Update (2026-10-10, with the 93 preset):** above q83 the line stays at 60+40
+(`fine = max(60, 60 + (83 - q) × 2)`). Its lower amounts failed the phone-scale
+rule on the sky fixture: q93 at 40+26 closed 58% of the gap and q88 at 50+33
+76%, since a higher quality keeps hardly more of the sky's faint grain (q93
+without grain: 0.80 of 0.81 at the phone scale). At q93, 50+33 closes 81% and
+60+40 103% (87% at the Mac scale). The banding test now runs at every preset.
+
 ## 5. Out of scope
 
 - Mac and WebAssembly encoders differ by a few bytes on `IMG_1976` although

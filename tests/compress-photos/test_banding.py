@@ -67,23 +67,30 @@ def test_sky_bands_without_grain(references):
         assert ours > theirs + gap, (scale, ours, theirs)
 
 
-def test_sky_does_not_band_with_the_default_grain(wasm, references, tmp_path):
-    jxl, output = convert(wasm, tmp_path, '-q', '83', SKY)
+@pytest.mark.parametrize('quality', ['93', '88', '83', '72'])
+def test_sky_does_not_band_with_the_default_grain(
+        wasm, references, tmp_path, quality
+):
+    # At every preset the grain the quality gets (grain_auto) closes the gap:
+    # the amounts are checked by their outcome, not only their numbers.
+    jxl, output = convert(wasm, tmp_path, '-q', quality, SKY)
     assert re.search(r'HDR \d+\.\d×, grain \d+\+\d+', output), output
     ok, scores = banding.passes(
         pq_green(jxl, tmp_path / 'out.ppm'), *references
     )
-    assert ok, scores
+    assert ok, (quality, scores)
 
 
 @pytest.mark.parametrize('quality', ['93', '88', '83', '72'])
-def test_grain_grows_as_quality_drops(wasm, tmp_path, quality):
-    # Lower qualities remove more of the grain, so they get more (grain_auto).
+def test_grain_grows_as_quality_drops_below_83(wasm, tmp_path, quality):
+    # Lower qualities remove more of the grain, so they get more; above 83
+    # the amount stays, as the line's lower values left the sky banding at
+    # the phone scale (grain_auto).
     _, output = convert(wasm, tmp_path, '-q', quality, SKY)
     fine, coarse = map(int, re.search(r'grain (\d+)\+(\d+)', output).groups())
     expected = {
-        '93': (40, 26),
-        '88': (50, 33),
+        '93': (60, 40),
+        '88': (60, 40),
         '83': (60, 40),
         '72': (82, 54),
     }[quality]
