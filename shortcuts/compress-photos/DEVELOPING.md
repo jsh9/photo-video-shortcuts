@@ -509,8 +509,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   others 0-17%. One exception found in the same tests: Core Image renders a JXL
   exactly when it has an Exif box, is stored portrait (height above width) and
   holds more than 2^24 pixels; a landscape 24 MP photo stored rotated with the
-  codestream's orientation flag took that path and displayed upright. Not used
-  yet.
+  codestream's orientation flag took that path and displayed upright, but
+  Photos still showed the patches in it: the exact path is Core Image's in a
+  standalone process, not what Photos uses. Not used.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an

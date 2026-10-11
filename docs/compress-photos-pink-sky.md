@@ -75,8 +75,14 @@ render exactly already. A landscape 24 MP photo stored rotated by 90° with the
 JXL orientation flag took the exact path and displayed upright (a transpose
 displays mirrored: rotate, don't transpose). 12 MP photos (4032×3024, either
 way) can't reach it. On an SDR screen both paths differ from the HEIC's SDR
-rendition by about the same (chroma 0.017-0.019). Not implemented in
-`jxlbatch`.
+rendition by about the same (chroma 0.017-0.019).
+
+**But Photos doesn't take that path.** Viewing the files by eye (2026-10-10),
+the user saw the patches in the rotated 24 MP file as in the plain one, and
+fainter but present patches in the 10-bit and HLG files. The exact path is a
+property of Core Image's `expandToHDR` in a standalone process, as the test
+helper calls it, not of what Photos shows. Nothing to implement; the warning
+stands.
 
 ## 3. The warning (`--sky-warn`)
 

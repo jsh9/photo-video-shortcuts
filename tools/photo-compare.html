@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo Compare</title>
+<!--
+  A viewer for comparing two photos pixel for pixel, in one HTML file.
+  Open it in Safari (which decodes HEIC, AVIF and JPEG XL itself, tiles
+  assembled, with Apple's own decoder) and drop files on it, or pick them.
+  Nothing leaves the browser.
+
+  Side by side, a wipe line, flicker (space bar) and an amplified difference,
+  all with one zoom and pan: scroll or pinch to zoom around the cursor, drag to
+  pan. Magnified pixels are drawn as squares, never smoothed. Shows the color
+  values under the cursor from both files.
+
+  Keys: space flicker   1 / 2 show A / B   s side by side   w wipe   d difference
+        f fit   0 one image pixel per screen pixel   + / - zoom   [ ] amplify
+  Query: photo-compare.html?a=URL&b=URL loads two files from the same origin.
+
+  Shows the SDR picture of a gain-map HEIC and Safari's own rendering of a
+  PQ file: for the HDR view, use Photos.
+-->
+<style>
+  :root {
+    --bg: #1b1b1d; --panel: #262629; --text: #e8e8ea; --muted: #9a9aa0; --accent: #5aa9ff; --line: #3a3a3f;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header .group { display: flex; gap: 6px; align-items: center; }
+  button, label.btn { background: #333338; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); color: #0a0a0c; border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  input[type=file] { display: none; }
+  #files { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: flex; gap: 6px; align-items: center; background: #303035; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+  .chip .name { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .meta { color: var(--muted); font-size: 11px; }
+  .chip button { padding: 1px 6px; font-size: 11px; }
+  .chip button.close { color: var(--muted); padding: 1px 5px; font-size: 13px; line-height: 1; }
+  .chip button.close:hover { color: var(--text); border-color: var(--muted); }
+  main { position: relative; flex: 1; min-height: 0; }
+  #view { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  #view.dragging { cursor: grabbing; }
+  #drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; text-align: center; padding: 24px; pointer-events: none; }
+  #drop.hidden { display: none; }
+  body.over main { outline: 3px dashed var(--accent); outline-offset: -6px; }
+  footer { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 6px 12px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
+  footer b { color: var(--text); font-weight: 600; }
+  #help { color: var(--muted); font-size: 11px; }
+  @media (max-width: 700px) { header { padding: 8px 16px; } footer { padding: 6px 16px; } .chip .name { max-width: 18ch; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="group">
+    <label class="btn" for="pick">Add photos…</label>
+    <input id="pick" type="file" multiple accept="image/*,.heic,.heif,.avif,.jxl,.png,.jpg,.jpeg,.tif,.tiff,.webp">
+  </div>
+  <div id="files"></div>
+  <div class="group" id="modes">
+    <button data-mode="side" class="on" title="s">Side by side</button>
+    <button data-mode="wipe" title="w">Wipe</button>
+    <button data-mode="flicker" title="space">Flicker</button>
+    <button data-mode="diff" title="d">Difference</button>
+  </div>
+  <div class="group">
+    <button id="fit" title="f">Fit</button>
+    <button id="one" title="0">1:1</button>
+    <button id="zout" title="-">−</button>
+    <button id="zin" title="+">+</button>
+    <span id="amp" style="display:none">amplify <b id="ampv">8</b>× <button id="ampdown" title="[">−</button><button id="ampup" title="]">+</button></span>
+  </div>
+</header>
+<main>
+  <canvas id="view"></canvas>
+  <div id="drop">Drop two or more photos here, or use “Add photos…”.<br>Mark one as A and one as B, then scroll to zoom and drag to pan.</div>
+</main>
+<footer>
+  <span>zoom <b id="zoom">–</b></span>
+  <span>pixel <b id="pos">–</b></span>
+  <span>A <b id="valA">–</b></span>
+  <span>B <b id="valB">–</b></span>
+  <span id="showing"></span>
+  <span id="help">space flicker · 1/2 A/B · s w d modes · f fit · 0 1:1 · +/− zoom · [ ] amplify</span>
+</footer>
+<script>
+(() => {
+  'use strict';
+  const view = document.getElementById('view');
+  const ctx = view.getContext('2d', { colorSpace: 'display-p3' }) || view.getContext('2d');
+  const filesEl = document.getElementById('files'), dropEl = document.getElementById('drop');
+  const zoomEl = document.getElementById('zoom'), posEl = document.getElementById('pos');
+  const valAEl = document.getElementById('valA'), valBEl = document.getElementById('valB'), showingEl = document.getElementById('showing');
+  const ampEl = document.getElementById('amp'), ampvEl = document.getElementById('ampv');
+
+  const photos = [];           // {name, size, img, w, h}
+  let a = -1, b = -1;          // indices into photos
+  let mode = 'side';           // side | wipe | flicker | diff
+  let flick = 0;               // 0 shows A, 1 shows B (flicker mode)
+  let amplify = 8;
+  let zoom = 0;                // image pixels -> device pixels; 0 = fit
+  let cx = 0, cy = 0;          // image point at the centre of a pane
+  let wipe = 0.5;              // wipe line, as a fraction of the pane width
+  let dpr = window.devicePixelRatio || 1;
+  let dragging = null, wipeDrag = false, cursor = null, raf = 0;
+  const sample = document.createElement('canvas'); sample.width = sample.height = 1;
+  const sctx = sample.getContext('2d', { willReadFrequently: true, colorSpace: 'display-p3' }) || sample.getContext('2d', { willReadFrequently: true });
+  const offA = document.createElement('canvas'), offB = document.createElement('canvas');
+  const octxA = offA.getContext('2d', { willReadFrequently: true }), octxB = offB.getContext('2d', { willReadFrequently: true });
+
+  function fmtSize(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + ' MB' : Math.round(n / 1e3) + ' KB'; }
+
+  async function addFiles(list) {
+    for (const file of list) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = url;
+      const entry = { name: file.name, size: file.size, url, img, w: 0, h: 0, error: null };
+      photos.push(entry);
+      try { await img.decode(); entry.w = img.naturalWidth; entry.h = img.naturalHeight; }
+      catch (e) { entry.error = 'this browser can’t decode it (Safari reads HEIC, AVIF and JPEG XL)'; }
+      const i = photos.indexOf(entry);  // it may have been closed, or others before it, while decoding
+      if (i >= 0 && !entry.error) { if (a < 0) a = i; else if (b < 0 && i !== a) b = i; }
+      renderChips();
+      if (!zoom) fit(); else schedule();
+    }
+  }
+
+  function removePhoto(i) {
+    URL.revokeObjectURL(photos[i].url);
+    photos.splice(i, 1);
+    a = a === i ? -1 : a > i ? a - 1 : a;
+    b = b === i ? -1 : b > i ? b - 1 : b;
+    if (!photos.length) zoom = 0;  // the next photo added fits the view again
+    renderChips(); schedule();
+  }
+
+  function renderChips() {
+    filesEl.innerHTML = '';
+    photos.forEach((p, i) => {
+      const chip = document.createElement('div'); chip.className = 'chip';
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = p.name; name.title = p.name;
+      const meta = document.createElement('span'); meta.className = 'meta';
+      meta.textContent = p.error ? p.error : `${fmtSize(p.size)} · ${p.w}×${p.h}`;
+      const ba = document.createElement('button'); ba.textContent = 'A'; ba.className = i === a ? 'on' : ''; ba.disabled = !!p.error;
+      const bb = document.createElement('button'); bb.textContent = 'B'; bb.className = i === b ? 'on' : ''; bb.disabled = !!p.error;
+      ba.onclick = () => { a = i; renderChips(); schedule(); };
+      bb.onclick = () => { b = i; renderChips(); schedule(); };
+      const bx = document.createElement('button'); bx.textContent = '×'; bx.className = 'close'; bx.title = 'Close this photo';
+      bx.onclick = () => removePhoto(i);
+      chip.append(name, meta, ba, bb, bx); filesEl.append(chip);
+    });
+    dropEl.classList.toggle('hidden', photos.length > 0);
+  }
+
+  function paneRect(which) {
+    // the pane in device pixels: both panes in side-by-side mode, else the whole canvas
+    const W = view.width, H = view.height;
+    if (mode === 'side') return which === 0 ? { x: 0, y: 0, w: Math.floor(W / 2) - 1, h: H } : { x: Math.floor(W / 2) + 1, y: 0, w: W - Math.floor(W / 2) - 1, h: H };
+    return { x: 0, y: 0, w: W, h: H };
+  }
+
+  function fit() {
+    const p = photos[a] || photos[b]; if (!p) return;
+    const r = paneRect(0);
+    zoom = Math.min(r.w / p.w, r.h / p.h);
+    cx = p.w / 2; cy = p.h / 2; schedule();
+  }
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const rect = view.getBoundingClientRect();
+    view.width = Math.max(1, Math.round(rect.width * dpr)); view.height = Math.max(1, Math.round(rect.height * dpr));
+    if (!zoom) fit(); else schedule();
+  }
+
+  // Draws photo p into pane r of context c, with the shared view (zoom, cx, cy).
+  function drawPhoto(c, p, r, clipFrom) {
+    if (!p || !p.w) return;
+    c.save();
+    c.beginPath();
+    const x0 = clipFrom === undefined ? r.x : clipFrom;
+    c.rect(x0, r.y, r.x + r.w - x0, r.h); c.clip();
+    c.imageSmoothingEnabled = zoom < 1;
+    c.imageSmoothingQuality = 'high';
+    // the image rectangle visible in the pane
+    const left = cx - (r.w / 2) / zoom, top = cy - (r.h / 2) / zoom;
+    const sx = Math.max(0, Math.floor(left)), sy = Math.max(0, Math.floor(top));
+    const sw = Math.min(p.w, Math.ceil(left + r.w / zoom) + 1) - sx, sh = Math.min(p.h, Math.ceil(top + r.h / zoom) + 1) - sy;
+    if (sw <= 0 || sh <= 0) { c.restore(); return; }
+    c.drawImage(p.img, sx, sy, sw, sh, r.x + (sx - left) * zoom, r.y + (sy - top) * zoom, sw * zoom, sh * zoom);
+    c.restore();
+  }
+
+  function drawDiff(r) {
+    const pa = photos[a], pb = photos[b]; if (!pa || !pb || !pa.w || !pb.w) return;
+    const w = Math.min(r.w, 2400), h = Math.min(r.h, 1600);  // cap the work per frame
+    const sx = r.w / w, sy = r.h / h;
+    for (const [off, oc, p] of [[offA, octxA, pa], [offB, octxB, pb]]) {
+      off.width = w; off.height = h; oc.clearRect(0, 0, w, h);
+      oc.save(); oc.scale(1 / sx, 1 / sy);
+      drawPhoto(oc, p, { x: 0, y: 0, w: r.w, h: r.h });
+      oc.restore();
+    }
+    const da = octxA.getImageData(0, 0, w, h), db = octxB.getImageData(0, 0, w, h), out = octxA.createImageData(w, h);
+    const A = da.data, B = db.data, O = out.data;
+    for (let i = 0; i < A.length; i += 4) {
+      O[i] = Math.min(255, Math.abs(A[i] - B[i]) * amplify);
+      O[i + 1] = Math.min(255, Math.abs(A[i + 1] - B[i + 1]) * amplify);
+      O[i + 2] = Math.min(255, Math.abs(A[i + 2] - B[i + 2]) * amplify);
+      O[i + 3] = 255;
+    }
+    octxA.putImageData(out, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(offA, 0, 0, w, h, r.x, r.y, r.w, r.h);
+  }
+
+  function draw() {
+    raf = 0;
+    const W = view.width, H = view.height;
+    ctx.fillStyle = '#1b1b1d'; ctx.fillRect(0, 0, W, H);
+    const pa = photos[a], pb = photos[b];
+    if (!pa && !pb) return;
+    if (mode === 'side') {
+      drawPhoto(ctx, pa, paneRect(0)); drawPhoto(ctx, pb, paneRect(1));
+      ctx.fillStyle = '#3a3a3f'; ctx.fillRect(Math.floor(W / 2) - 1, 0, 2, H);
+      showingEl.innerHTML = 'left <b>A</b> · right <b>B</b>';
+    } else if (mode === 'wipe') {
+      const r = paneRect(0), x = Math.round(r.w * wipe);
+      drawPhoto(ctx, pa, r); drawPhoto(ctx, pb, r, x);
+      ctx.fillStyle = '#5aa9ff'; ctx.fillRect(x - 1, 0, 2, H);
+      showingEl.innerHTML = '<b>A</b> left of the line · <b>B</b> right';
+    } else if (mode === 'flicker') {
+      drawPhoto(ctx, flick ? pb : pa, paneRect(0));
+      showingEl.innerHTML = `showing <b>${flick ? 'B' : 'A'}</b> (space to flip)`;
+    } else {
+      drawDiff(paneRect(0));
+      showingEl.innerHTML = `|A − B| × ${amplify}`;
+    }
+    zoomEl.textContent = zoom >= 1 ? `${(zoom).toFixed(zoom >= 4 ? 0 : 2)}:1` : `1:${(1 / zoom).toFixed(2)}`;
+    updateReadout();
+  }
+  function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
+
+  function imagePoint(devX, devY) {
+    // the image coordinate under a device-pixel position, for either pane
+    let r = paneRect(0);
+    if (mode === 'side' && devX >= paneRect(1).x) r = paneRect(1);
+    return { x: cx + (devX - r.x - r.w / 2) / zoom, y: cy + (devY - r.y - r.h / 2) / zoom, r };
+  }
+
+  function pixelValue(p, x, y) {
+    if (!p || !p.w || x < 0 || y < 0 || x >= p.w || y >= p.h) return '–';
+    sctx.clearRect(0, 0, 1, 1); sctx.drawImage(p.img, x, y, 1, 1, 0, 0, 1, 1);
+    const d = sctx.getImageData(0, 0, 1, 1).data;
+    return `${d[0]} ${d[1]} ${d[2]}`;
+  }
+
+  function updateReadout() {
+    if (!cursor) { posEl.textContent = '–'; valAEl.textContent = '–'; valBEl.textContent = '–'; return; }
+    const pt = imagePoint(cursor.x, cursor.y), x = Math.floor(pt.x), y = Math.floor(pt.y);
+    posEl.textContent = `${x}, ${y}`;
+    valAEl.textContent = pixelValue(photos[a], x, y); valBEl.textContent = pixelValue(photos[b], x, y);
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll('#modes button').forEach(el => el.classList.toggle('on', el.dataset.mode === m));
+    ampEl.style.display = m === 'diff' ? '' : 'none';
+    if (m === 'side' || mode !== 'side') { /* keep the view */ }
+    schedule();
+  }
+
+  function zoomAt(factor, devX, devY) {
+    const before = imagePoint(devX, devY);
+    zoom = Math.min(64, Math.max(0.01, zoom * factor));
+    const after = imagePoint(devX, devY);
+    cx += before.x - after.x; cy += before.y - after.y; schedule();
+  }
+
+  // events
+  document.getElementById('pick').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+  document.querySelectorAll('#modes button').forEach(el => el.addEventListener('click', () => setMode(el.dataset.mode)));
+  document.getElementById('fit').onclick = fit;
+  document.getElementById('one').onclick = () => { zoom = 1; schedule(); };
+  document.getElementById('zin').onclick = () => zoomAt(2, view.width / 2, view.height / 2);
+  document.getElementById('zout').onclick = () => zoomAt(0.5, view.width / 2, view.height / 2);
+  document.getElementById('ampup').onclick = () => { amplify = Math.min(64, amplify * 2); ampvEl.textContent = amplify; schedule(); };
+  document.getElementById('ampdown').onclick = () => { amplify = Math.max(1, amplify / 2); ampvEl.textContent = amplify; schedule(); };
+
+  view.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = view.getBoundingClientRect(), devX = (e.clientX - rect.left) * dpr, devY = (e.clientY - rect.top) * dpr;
+    // a pinch arrives as a wheel event with ctrlKey; a scroll wheel as deltaY
+    const factor = e.ctrlKey ? Math.exp(-e.deltaY * 0.01) : Math.exp(-e.deltaY * 0.002);
+    zoomAt(factor, devX, devY);
+  }, { passive: false });
+
+  view.addEventListener('pointerdown', e => {
+    const rect = view.getBoundingClientRect(), devX = (e.clientX - rect.left) * dpr;
+    view.setPointerCapture(e.pointerId);
+    if (mode === 'wipe' && Math.abs(devX - view.width * wipe) < 12 * dpr) { wipeDrag = true; return; }
+    dragging = { x: e.clientX, y: e.clientY, cx, cy }; view.classList.add('dragging');
+  });
+  view.addEventListener('pointermove', e => {
+    const rect = view.getBoundingClientRect();
+    cursor = { x: (e.clientX - rect.left) * dpr, y: (e.clientY - rect.top) * dpr };
+    if (wipeDrag) { wipe = Math.min(1, Math.max(0, cursor.x / view.width)); schedule(); return; }
+    if (dragging) { cx = dragging.cx - (e.clientX - dragging.x) * dpr / zoom; cy = dragging.cy - (e.clientY - dragging.y) * dpr / zoom; schedule(); return; }
+    updateReadout();
+  });
+  const endDrag = () => { dragging = null; wipeDrag = false; view.classList.remove('dragging'); };
+  view.addEventListener('pointerup', endDrag); view.addEventListener('pointercancel', endDrag);
+  view.addEventListener('pointerleave', () => { cursor = null; updateReadout(); });
+
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    const k = e.key;
+    if (k === ' ') { e.preventDefault(); if (mode !== 'flicker') setMode('flicker'); flick ^= 1; schedule(); }
+    else if (k === '1') { setMode('flicker'); flick = 0; schedule(); }
+    else if (k === '2') { setMode('flicker'); flick = 1; schedule(); }
+    else if (k === 's') setMode('side'); else if (k === 'w') setMode('wipe'); else if (k === 'd') setMode('diff');
+    else if (k === 'f') fit(); else if (k === '0') { zoom = 1; schedule(); }
+    else if (k === '+' || k === '=') zoomAt(2, view.width / 2, view.height / 2); else if (k === '-') zoomAt(0.5, view.width / 2, view.height / 2);
+    else if (k === ']') document.getElementById('ampup').click(); else if (k === '[') document.getElementById('ampdown').click();
+    else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+      const step = 50 / zoom; if (k === 'ArrowLeft') cx -= step; if (k === 'ArrowRight') cx += step; if (k === 'ArrowUp') cy -= step; if (k === 'ArrowDown') cy += step; schedule();
+    }
+  });
+
+  ['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); document.body.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); document.body.classList.remove('over'); }));
+  document.addEventListener('drop', e => { if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+  new ResizeObserver(resize).observe(view);
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ?a=URL&b=URL: files served next to this page (for scripts and tests)
+  const q = new URLSearchParams(location.search);
+  if (q.get('a') || q.get('b')) {
+    (async () => {
+      for (const key of ['a', 'b']) {
+        const u = q.get(key); if (!u) continue;
+        try { const res = await fetch(u); const blob = await res.blob(); await addFiles([new File([blob], u.split('/').pop(), { type: blob.type })]); }
+        catch (e) { console.error('could not load', u, e); }
+      }
+    })();
+  }
+})();
+</script>
+</body>
+</html>
