@@ -123,7 +123,7 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
 
 // A new HEIC: one picture as a grid of HEVC tiles (a single 'hvc1' item when
 // the one tile is the picture), with an ICC profile or an nclx color, and
-// an Exif item when given.
+// an Exif item and an XMP ('mime') item when given.
 typedef struct {
   uint32_t w, h;
   uint32_t tile_w, tile_h, rows, cols;
@@ -135,6 +135,8 @@ typedef struct {
   hevc_vui_t nclx;
   const uint8_t *exif;  // TIFF data, or NULL
   size_t exif_len;
+  const uint8_t *xmp;  // an XMP packet, or NULL
+  size_t xmp_len;
 } hb_new_t;
 
 int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len);

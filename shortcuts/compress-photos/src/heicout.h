@@ -41,10 +41,10 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
 
 // Writes a new SDR HEIC from `img` (8-bit, 3 channels, stored pixels; an
 // alpha channel is dropped, gray expanded) with its color (an ICC profile,
-// else CICP, else sRGB) and the Exif (TIFF data, or NULL), as a grid of
-// 512-pixel HEVC tiles. Returns 0, or -1 with the reason in err.
+// else CICP, else sRGB), the Exif (TIFF data, or NULL) and the XMP (or NULL),
+// as a grid of 512-pixel HEVC tiles. Returns 0, or -1 with the reason in err.
 int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *exif, size_t exif_len,
-                     const heic_opts_t *opt, uint8_t **out, size_t *out_len, heic_info_t *info, char *err,
-                     size_t err_len);
+                     const uint8_t *xmp, size_t xmp_len, const heic_opts_t *opt, uint8_t **out, size_t *out_len,
+                     heic_info_t *info, char *err, size_t err_len);
 
 #endif

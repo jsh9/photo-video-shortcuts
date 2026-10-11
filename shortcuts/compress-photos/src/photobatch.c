@@ -905,12 +905,27 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
       goto done;
     }
     image_drop_opaque_alpha(&img);
+    if (img.channels == 2 || img.channels == 4) {
+      // A HEIC written here has no alpha: the picture would come out opaque,
+      // with whatever color the transparent pixels hide. Nothing is written,
+      // so the original stays.
+      snprintf(err, sizeof err, "a transparent image (alpha) can't be saved as HEIC; choose JPEG XL for it");
+      goto done;
+    }
     if (image_orient(&img, orient) != 0 || (!img.data && image_make_packed(&img) != 0)) {
       snprintf(err, sizeof err, "out of memory");
       goto done;
     }
-    if (exif) exif_patch(exif, exif_len, img.w, img.h);  // the pixels are upright now
-    if (heic_from_pixels(&img, &color, exif, exif_len, &ho, &heic, &heic_len, &info, err, sizeof err) != 0) goto done;
+    // The metadata matches the upright pixels now.
+    if (exif) exif_patch(exif, exif_len, img.w, img.h);
+    if (xmp && xmp_reset_orientation(&xmp, &xmp_len) < 0) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
+    if (heic_from_pixels(&img, &color, exif, exif_len, xmp, xmp_len, &ho, &heic, &heic_len, &info, err, sizeof err) !=
+        0) {
+      goto done;
+    }
   }
   free(orig);
   orig = NULL;
@@ -936,7 +951,7 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
     const char *what = transcoded ? (info.kept_gain_map ? ", HDR kept" : info.had_gain_map ? ", HDR dropped" : "")
                                   : ", SDR HEIC";
     snprintf(res->info, sizeof res->info, "%s %ux%u%s, %d tile%s%s", format_name(format), info.w, info.h, what,
-             info.tiles, info.tiles == 1 ? "" : "s", exif_len ? "" : ", no metadata");
+             info.tiles, info.tiles == 1 ? "" : "s", exif_len || xmp_len ? "" : ", no metadata");
     snprintf(res->sizes, sizeof res->sizes, "%s -> %s (%.0f%%), %.1f s", in_s, out_s,
              orig_len > 0 ? 100.0 * heic_len / orig_len : 0.0, now_seconds() - t0);
   }
@@ -1787,7 +1802,7 @@ static int selftest_heic(const options_t *opt) {
     return -1;
   }
   out = NULL;
-  if (heic_from_pixels(&img, &color, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
+  if (heic_from_pixels(&img, &color, NULL, 0, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
     say("  FAILED: %s\n", err);
     bad = 1;
   } else {
@@ -1878,7 +1893,7 @@ static int selftest(const options_t *opt) {
     heic_info_t info;
     out = NULL;
     const double t1 = now_seconds();
-    if (heic_from_pixels(&img, &color, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
+    if (heic_from_pixels(&img, &color, NULL, 0, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
       say("  FAILED: %s\n", err);
       image_free(&img);
       return 1;

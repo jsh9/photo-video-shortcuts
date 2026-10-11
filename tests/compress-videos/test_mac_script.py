@@ -499,8 +499,9 @@ def test_skip_rules(mac, fake):
     # file; probed videos: slo-mo (marked so, or fast and not marked either
     # way), spatial, sound ffmpeg can't read, Dolby Vision this ffmpeg can't
     # carry.
+    # the exporter's "id|date|filename" lines (an older one's "id|filename")
     ids = '\n'.join(
-        f'{i}|{n}'
+        f'{i}|2024-01-01 17:00:00|{n}' if i % 2 else f'{i}|{n}'
         for i, n in enumerate([
             'IMG_0001.HEIC',
             'IMG_0002.JPG',

@@ -155,14 +155,17 @@ def script(lines):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@ and @ORIGINALS_ALBUM@ filled in.
-    Plain text: a Shortcuts variable inside a Run AppleScript's text keeps it
-    from compiling (it then produces no output and no error; seen on macOS 26),
-    so values go in through the action's input.
+    lib/mac/<name>.applescript, with @NAME@ and @ORIGINALS_ALBUM@ filled in
+    (and @OLD_ORIGINALS_ALBUM@, an earlier version's review album, which
+    Compress Videos never had: the same album again). Plain text: a Shortcuts
+    variable inside a Run AppleScript's text keeps it from compiling (it then
+    produces no output and no error; seen on macOS 26), so values go in through
+    the action's input.
     """
     text = (LIB_MAC / f'{name}.applescript').read_text()
     text = text.replace('@NAME@', NAME)
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
+    text = text.replace('@OLD_ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text
 

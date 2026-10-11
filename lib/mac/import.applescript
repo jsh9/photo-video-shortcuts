@@ -181,10 +181,10 @@ on addToAlbums(albumList, albumIds, folderList, pairs)
 		repeat with pair in pairs
 			if (item i of albumIds) contains (item 1 of pair) then set end of members to item 2 of pair
 		end repeat
-		-- The review album "@ORIGINALS_ALBUM@" holds originals already
-		-- converted once; a copy must not join it, or it could be deleted
-		-- with them.
-		if (count of members) > 0 and (name of (item i of albumList)) is not "@ORIGINALS_ALBUM@" then
+		-- The review albums "@ORIGINALS_ALBUM@" and "@OLD_ORIGINALS_ALBUM@"
+		-- (an earlier version's) hold originals already converted once; a
+		-- copy must not join them, or it could be deleted with them.
+		if (count of members) > 0 and (name of (item i of albumList)) is not in {"@ORIGINALS_ALBUM@", "@OLD_ORIGINALS_ALBUM@"} then
 			tell application "Photos"
 				try
 					add members to (item i of albumList)

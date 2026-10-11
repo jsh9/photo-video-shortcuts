@@ -38,6 +38,7 @@ sys.path.insert(0, str(HERE))
 import wf  # noqa: E402
 from wf import (  # noqa: E402
     EFFORT,
+    OLD_ORIGINALS_ALBUM,
     ORIGINALS_ALBUM,
     REPEAT_INDEX,
     REPEAT_ITEM,
@@ -227,15 +228,16 @@ def script_text(name, body, label, work):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@ and @ORIGINALS_ALBUM@ filled in.
-    Plain text: a Shortcuts variable inside a Run AppleScript's text keeps it
-    from compiling (it then produces no output and no error; seen on macOS 26),
-    so values go in through the action's input
+    lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@ and
+    @OLD_ORIGINALS_ALBUM@ filled in. Plain text: a Shortcuts variable inside a
+    Run AppleScript's text keeps it from compiling (it then produces no output
+    and no error; seen on macOS 26), so values go in through the action's input
     (``wf.Builder.run_applescript``).
     """
     text = (LIB_MAC / f'{name}.applescript').read_text()
     text = text.replace('@NAME@', NAME_PHOTOS)
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
+    text = text.replace('@OLD_ORIGINALS_ALBUM@', OLD_ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text
 

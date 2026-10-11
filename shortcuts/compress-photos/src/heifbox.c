@@ -648,9 +648,11 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         } else {
           bb_u32(b, item->id);
         }
-        if (v >= 1) bb_u16(b, (unsigned)item->method);
+        // Replaced data is in 'mdat', wherever the old data was.
+        const int in_mdat = item->method == 0 || replacement(r, item->id) != NULL;
+        if (v >= 1) bb_u16(b, in_mdat ? 0 : (unsigned)item->method);
         bb_u16(b, 0);  // data_reference_index
-        if (item->method == 0) {
+        if (in_mdat) {
           bb_u16(b, 1);
           bb_u32(b, (uint32_t)(mdat_start + r->offsets[i]));
           bb_u32(b, (uint32_t)r->lengths[i]);
@@ -733,10 +735,13 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     }
   }
   // The data's order in the new 'mdat': the kept items with file data, by
-  // where their data was (replaced data in the place of the old).
+  // where their data was (replaced data in the place of the old), and the
+  // replaced items that were in 'idat' (their new data goes to 'mdat').
   size_t n_order = 0;
   for (size_t i = 0; i < f->num_items; i++) {
-    if (r.kept[i] && f->items[i].located && f->items[i].method == 0) order[n_order++] = i;
+    if (r.kept[i] && f->items[i].located && (f->items[i].method == 0 || replacement(&r, f->items[i].id))) {
+      order[n_order++] = i;
+    }
   }
   for (size_t a = 1; a < n_order; a++) {  // insertion sort by first extent offset
     const size_t x = order[a];
@@ -819,6 +824,18 @@ static void put_infe(bb_t *b, uint32_t id, uint32_t flags, uint32_t type) {
   bb_end(b, s);
 }
 
+// An 'infe' for a 'mime' item, with its content type.
+static void put_infe_mime(bb_t *b, uint32_t id, uint32_t flags, const char *content_type) {
+  const size_t s = bb_begin(b, FOURCC('i', 'n', 'f', 'e'));
+  put_fullbox(b, 2, flags);
+  bb_u16(b, id);
+  bb_u16(b, 0);  // protection
+  bb_u32(b, FOURCC('m', 'i', 'm', 'e'));
+  bb_u8(b, 0);  // name
+  bb_put(b, content_type, strlen(content_type) + 1);
+  bb_end(b, s);
+}
+
 static void put_ispe(bb_t *b, uint32_t w, uint32_t h) {
   const size_t s = bb_begin(b, FOURCC('i', 's', 'p', 'e'));
   put_fullbox(b, 0, 0);
@@ -832,10 +849,12 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
   *out_len = 0;
   const size_t num_tiles = (size_t)n->rows * n->cols;
   const int single = num_tiles == 1 && n->tile_w == n->w && n->tile_h == n->h;
-  // items: tiles 1..T, then the grid (unless single), then Exif
+  // items: tiles 1..T, then the grid (unless single), then Exif, then XMP
   const uint32_t grid_id = single ? 1 : (uint32_t)num_tiles + 1;
   const uint32_t primary = grid_id;
   const uint32_t exif_id = primary + 1;
+  const uint32_t xmp_id = exif_id + (n->exif ? 1 : 0);
+  const unsigned extra = (n->exif ? 1 : 0) + (n->xmp ? 1 : 0);  // metadata items
   // properties: 1 ispe (tile), 2 hvcC, 3 colr, 4 pixi, 5 ispe (picture)
   const uint32_t P_ISPE_TILE = 1, P_HVCC = 2, P_COLR = 3, P_PIXI = 4, P_ISPE = 5;
   bb_t b = {NULL, 0, 0, 0};
@@ -871,7 +890,7 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
     // iinf
     s = bb_begin(&b, FOURCC('i', 'i', 'n', 'f'));
     put_fullbox(&b, 0, 0);
-    bb_u16(&b, (unsigned)(single ? 1 : num_tiles + 1) + (n->exif ? 1 : 0));
+    bb_u16(&b, (unsigned)(single ? 1 : num_tiles + 1) + extra);
     if (single) {
       put_infe(&b, 1, 0, FOURCC('h', 'v', 'c', '1'));
     } else {
@@ -879,9 +898,10 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
       put_infe(&b, grid_id, 0, FOURCC('g', 'r', 'i', 'd'));
     }
     if (n->exif) put_infe(&b, exif_id, 1, FOURCC('E', 'x', 'i', 'f'));
+    if (n->xmp) put_infe_mime(&b, xmp_id, 1, "application/rdf+xml");
     bb_end(&b, s);
     // iref
-    if (!single || n->exif) {
+    if (!single || extra) {
       s = bb_begin(&b, FOURCC('i', 'r', 'e', 'f'));
       put_fullbox(&b, 0, 0);
       if (!single) {
@@ -894,6 +914,13 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
       if (n->exif) {
         const size_t rs = bb_begin(&b, FOURCC('c', 'd', 's', 'c'));
         bb_u16(&b, exif_id);
+        bb_u16(&b, 1);
+        bb_u16(&b, primary);
+        bb_end(&b, rs);
+      }
+      if (n->xmp) {
+        const size_t rs = bb_begin(&b, FOURCC('c', 'd', 's', 'c'));
+        bb_u16(&b, xmp_id);
         bb_u16(&b, 1);
         bb_u16(&b, primary);
         bb_end(&b, rs);
@@ -976,7 +1003,7 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
     put_fullbox(&b, 1, 0);
     bb_u8(&b, 0x44);
     bb_u8(&b, 0x00);
-    bb_u16(&b, (unsigned)(single ? 1 : num_tiles + 1) + (n->exif ? 1 : 0));
+    bb_u16(&b, (unsigned)(single ? 1 : num_tiles + 1) + extra);
     uint64_t pos = mdat_start;
     for (size_t t = 0; t < num_tiles; t++) {
       bb_u16(&b, (unsigned)t + 1);
@@ -1002,6 +1029,15 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
       bb_u16(&b, 1);
       bb_u32(&b, (uint32_t)pos);
       bb_u32(&b, (uint32_t)(4 + n->exif_len));
+      pos += 4 + n->exif_len;
+    }
+    if (n->xmp) {
+      bb_u16(&b, xmp_id);
+      bb_u16(&b, 0);
+      bb_u16(&b, 0);
+      bb_u16(&b, 1);
+      bb_u32(&b, (uint32_t)pos);
+      bb_u32(&b, (uint32_t)n->xmp_len);
     }
     bb_end(&b, s);
     bb_end(&b, meta);
@@ -1014,6 +1050,7 @@ int hb_write_new(const hb_new_t *n, uint8_t **out, size_t *out_len) {
     bb_u32(&b, 0);  // offset of the TIFF header
     bb_put(&b, n->exif, n->exif_len);
   }
+  if (n->xmp) bb_put(&b, n->xmp, n->xmp_len);
   bb_end(&b, s);
   if (b.oom) {
     free(b.data);

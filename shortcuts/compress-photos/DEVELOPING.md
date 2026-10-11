@@ -706,7 +706,10 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   x265's smallest, with its coding tree unit shrunk below 64 pixels) and
   written as a new file (`hb_write_new`: `ftyp`, `meta` with a `grid` item in
   `idat`, `ispe`, `pixi`, `colr` with the source's ICC profile or an nclx, one
-  shared `hvcC`, an Exif item). Always SDR: a gain map isn't carried.
+  shared `hvcC`, an Exif item and an XMP `mime` item, the orientation reset in
+  both as the pixels are upright). Always SDR: a gain map isn't carried, and a
+  picture with transparency is refused (no alpha image is written; the JPEG XL
+  route keeps it).
 - Threads: `-t` threads encode a photo's tiles at the same time (one x265
   encoder each); the WebAssembly build runs them one after the other.
 - A real iPhone file's bytes are the test oracle:

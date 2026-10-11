@@ -32,6 +32,14 @@ def replace(root, rel, old, new):
     if new in text:
         return
 
+    # A checkout patched before the rename to photobatch: the same edit, with
+    # the old name in its comments. Renamed, not patched again.
+    legacy = new.replace('photobatch', 'jxlbatch')
+    if legacy != new and legacy in text:
+        path.write_text(text.replace(legacy, new, 1))
+        print(f'renamed the patch in {root.name}/{rel}')
+        return
+
     if old not in text:
         sys.exit(
             f'{root.name}/{rel}: expected code not found; check the patch for this version'

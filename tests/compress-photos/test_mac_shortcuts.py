@@ -713,7 +713,10 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     assert len(selection) == 1
     assert '"$HOME/Pictures/.compress-photos-macos"' in selection[0]
     assert 'rm -rf "$WORK"' not in selection[0]  # Photos exported into it
-    assert gen.ORIGINALS_ALBUM in gen.applescript_text('import')
+    script = gen.applescript_text('import')
+    assert gen.ORIGINALS_ALBUM in script
+    # an original already in the old review album: its copy must not join it
+    assert gen.OLD_ORIGINALS_ALBUM in script
 
 
 def test_photos_selection_route_notifies_without_a_picker(shortcuts):

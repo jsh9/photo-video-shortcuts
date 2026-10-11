@@ -50,7 +50,9 @@ encoder. Every release includes the current files of all shortcuts.
     tuned for quality 83).
   - The album the converted originals are collected in is *Compressed
     originals* (it was *Compressed to JXL*); a copy is never added to either.
-    Notifications are titled *Compress Photos*.
+    On the iPhone, create the album once in Photos, or rename the old one (the
+    shortcut can't create it; the Mac shortcut does). Notifications are titled
+    *Compress Photos*.
   - Update both the shortcuts and the encoders: an older shortcut has no format
     question, and an older `photobatch` has no `--heic`.
 

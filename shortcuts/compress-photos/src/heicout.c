@@ -536,8 +536,8 @@ done:
 static uint8_t clamp8(double v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)(v + 0.5); }
 
 int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *exif, size_t exif_len,
-                     const heic_opts_t *opt, uint8_t **out, size_t *out_len, heic_info_t *info, char *err,
-                     size_t err_len) {
+                     const uint8_t *xmp, size_t xmp_len, const heic_opts_t *opt, uint8_t **out, size_t *out_len,
+                     heic_info_t *info, char *err, size_t err_len) {
   *out = NULL;
   *out_len = 0;
   memset(info, 0, sizeof *info);
@@ -627,6 +627,8 @@ int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *ex
   n.nclx = job.vui;
   n.exif = exif;
   n.exif_len = exif_len;
+  n.xmp = xmp;
+  n.xmp_len = xmp_len;
   if (hb_write_new(&n, out, out_len) != 0) goto oom;
   rc = 0;
   goto done;

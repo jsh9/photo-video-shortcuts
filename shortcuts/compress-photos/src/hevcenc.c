@@ -182,6 +182,21 @@ static int next_nal(const hevc_buf_t *b, size_t *pos, const uint8_t **nal, size_
   return 1;
 }
 
+// The start of a NAL unit's payload without its emulation-prevention bytes
+// (the 0x03 after two zero bytes), up to `cap` bytes; returns how many.
+static size_t unescape(const uint8_t *nal, size_t len, uint8_t *out, size_t cap) {
+  size_t n = 0, zeros = 0;
+  for (size_t i = 0; i < len && n < cap; i++) {
+    if (zeros >= 2 && nal[i] == 3) {
+      zeros = 0;
+      continue;
+    }
+    out[n++] = nal[i];
+    zeros = nal[i] == 0 ? zeros + 1 : 0;
+  }
+  return n;
+}
+
 int hevc_make_hvcc(const hevc_buf_t *ps, uint8_t **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
@@ -197,8 +212,11 @@ int hevc_make_hvcc(const hevc_buf_t *ps, uint8_t **out, size_t *out_len) {
       set_len[type - 32] = len;
     }
   }
-  if (!sets[0] || !sets[1] || !sets[2] || set_len[0] < 18) return -1;
-  const uint8_t *vps = sets[0];
+  if (!sets[0] || !sets[1] || !sets[2]) return -1;
+  // The VPS's fields are read from its payload with the emulation-prevention
+  // bytes removed (its profile_tier_level, mostly zero bytes, has them).
+  uint8_t vps[32];
+  if (unescape(sets[0], set_len[0], vps, sizeof vps) < 18) return -1;
   const size_t total = 23 + 3 * 5 + set_len[0] + set_len[1] + set_len[2];
   uint8_t *rec = (uint8_t *)malloc(total);
   if (!rec) return -1;
