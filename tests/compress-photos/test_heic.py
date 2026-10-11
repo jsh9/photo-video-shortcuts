@@ -467,7 +467,7 @@ def test_transparent_image_is_refused_for_heic(encoder, tmp_path):
     scene.save(clear, 'PNG')
     ph.stage(tmp_path, [opaque, clear])
     result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
-    assert result.returncode == 1
+    assert result.returncode == 0, result.stdout  # one of the two converted
     log = ' '.join(result.stdout.split())
     assert "a transparent image (alpha) can't be saved as HEIC" in log
     assert '1 failed; see the messages above.' in log
