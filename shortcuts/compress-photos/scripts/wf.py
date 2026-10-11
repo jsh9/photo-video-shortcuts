@@ -55,6 +55,72 @@ QUALITY_PRESETS = [
 ]
 DEFAULT_QUALITY = 83
 
+# The HEIC route's choices: x265's RF (CRF; lower is better and larger), as
+# (rf, description). Measured on a 24 MP iPhone photo (testdata/heic-quality-2):
+# RF 22 is the point where the user saw no difference from the original.
+HEIC_PRESETS = [
+    (
+        22,
+        'Placebo: no visible difference from the original, even in the sky; saves only about 15%',
+    ),
+    (
+        24,
+        'Almost placebo: very little visual degradation; about 70% of the original’s size',
+    ),
+    (
+        26,
+        'Go-to option for everyday scenes: smooth sky, film grain and fine texture kept; about 60% of the original',
+    ),
+    (
+        28,
+        'Details well preserved; the finest texture starts to soften; about half the original',
+    ),
+    (
+        29,
+        'Details well preserved; fine texture a little softer; about 45% of the original',
+    ),
+    (
+        30,
+        'Fine texture softens; tiny steps may show in a clear blue sky; about 40% of the original',
+    ),
+    (
+        31,
+        'Small losses in details; faint steps in blue sky; about 38% of the original',
+    ),
+    (
+        32,
+        'Small losses in details; visible banding in blue sky; about a third of the original',
+    ),
+    (
+        34,
+        'Visible losses in details; blotches in blue sky; about 30% of the original',
+    ),
+    (
+        36,
+        'More losses in details; bigger blotches; edges start to ring; about a quarter of the original',
+    ),
+    (38, 'Details get smudged; blocky sky; about 23% of the original'),
+    (40, 'It’s like watching RMVB videos in 2002; about 20% of the original'),
+]
+DEFAULT_RF = 26
+
+# The first question: the output format, as a menu whose cases set the
+# variable Format to the value (what the shell reads) and ask that format's
+# quality (choose_format).
+FORMAT_PROMPT = 'Format'
+FORMATS = [
+    ('HEIC: Apple’s own format; HDR shows exactly as the original', 'heic'),
+    (
+        'JPEG XL: HDR copies can show pink patches in bright skies (an Apple issue)',
+        'jxl',
+    ),
+]
+# What each format is called in notifications.
+FORMAT_NAMES = {'heic': 'HEIC', 'jxl': 'JPEG XL'}
+# The notifications' title: the shortcut, since the format isn't known yet
+# when the first ones are shown.
+TITLE = 'Compress Photos'
+
 
 # ---------------------------------------------------------------------------
 # Shared parts of the shortcuts
@@ -139,7 +205,7 @@ def keep_still_photos(b, photos):
             b.combine(variable('Skipped'), ', '),
             ': only still photos are converted.',
         )
-        b.notification('JPEG XL', note)
+        b.notification(TITLE, note)
         if not prefix:
             # The notification is gone as soon as a-Shell comes to the front,
             # so the shell prints the note too.
@@ -150,7 +216,7 @@ def keep_still_photos(b, photos):
         b.if_has_value(
             variable('Skipped'),
             lambda: say_skipped('Nothing to convert. '),
-            lambda: b.notification('JPEG XL', 'Nothing to convert.'),
+            lambda: b.notification(TITLE, 'Nothing to convert.'),
         )
         b.stop()
 
@@ -166,21 +232,39 @@ def vcard_escape(value):
     return value.replace('\\', '\\\\').replace(';', '\\;')
 
 
-def choose_quality(b):
+# Each format's quality list: the presets, the default, the prompt and the
+# contact-card file's name.
+QUALITY_LISTS = {
+    'jxl': (
+        QUALITY_PRESETS,
+        DEFAULT_QUALITY,
+        'JPEG XL quality',
+        'quality.vcf',
+    ),
+    'heic': (
+        HEIC_PRESETS,
+        DEFAULT_RF,
+        'HEIC quality (RF: lower is better)',
+        'quality-heic.vcf',
+    ),
+}
+
+
+def choose_quality(b, fmt='jxl'):
     """
-    Shows QUALITY_PRESETS as a list and returns the chosen quality.
+    Shows the format's presets (QUALITY_LISTS) as a list and sets the variable
+    Quality to the chosen number; returns the variable.
 
     Menus in Shortcuts show only a title. So each preset is a contact card
     instead (a well-known Shortcuts technique): the name (N) is the title, and
-    the company (ORG) is shown below it in small grey text.
+    the company (ORG) is shown below it in small grey text. A variable, not
+    Match Text's own output, because each format's list is in its own case of
+    the Format menu (choose_format), and what follows reads one Quality.
     """
+    presets, default, prompt, file_name = QUALITY_LISTS[fmt]
     cards = []
-    for quality, description in QUALITY_PRESETS:
-        title = (
-            f'{quality} (default)'
-            if quality == DEFAULT_QUALITY
-            else str(quality)
-        )
+    for quality, description in presets:
+        title = f'{quality} (default)' if quality == default else str(quality)
         cards.append(
             'BEGIN:VCARD\nVERSION:3.0\n'  # 3.0 for Unicode
             f'N;CHARSET=utf-8:{vcard_escape(title)}\n'
@@ -188,12 +272,31 @@ def choose_quality(b):
             'END:VCARD'
         )
 
-    cards_file = b.set_name(b.text('\n'.join(cards)), 'quality.vcf')
-    chosen = b.choose_from_list(
-        b.contacts_from_input(cards_file), 'JPEG XL quality'
-    )
+    cards_file = b.set_name(b.text('\n'.join(cards)), file_name)
+    chosen = b.choose_from_list(b.contacts_from_input(cards_file), prompt)
     # The title's number: "83 (default)" -> "83".
-    return b.match_text(b.get_name(chosen), r'\d+')
+    b.set_variable('Quality', b.match_text(b.get_name(chosen), r'\d+'))
+    return variable('Quality')
+
+
+def choose_format(b):
+    """
+    The first question, a menu of FORMATS: its cases set the variable Format to
+    the chosen value ("heic" or "jxl") and ask that format's quality
+    (choose_quality, the variable Quality). Returns (Format, Quality).
+    """
+
+    def case(value):
+        def body():
+            b.set_variable('Format', b.text(value))
+            choose_quality(b, value)
+
+        return body
+
+    b.choose_from_menu(
+        FORMAT_PROMPT, {title: case(value) for title, value in FORMATS}
+    )
+    return variable('Format'), variable('Quality')
 
 
 def photo_date(b, photo, index):
@@ -224,8 +327,12 @@ def photo_date(b, photo, index):
 
 # The album the converted originals are collected in, on both platforms. The
 # shortcuts never delete photos: the user reviews the album and deletes.
-ORIGINALS_ALBUM = 'Compressed to JXL'
+ORIGINALS_ALBUM = 'Compressed originals'
+# The album's name before 0.7.0 (when JPEG XL was the only format): a copy
+# must not land there either (copy_to_albums).
+OLD_ORIGINALS_ALBUM = 'Compressed to JXL'
 assert re.fullmatch(r'[\w ]+', ORIGINALS_ALBUM)  # used in a regex as is
+assert re.fullmatch(r'[\w ]+', OLD_ORIGINALS_ALBUM)
 
 
 def copy_to_albums(b, copy, albums):
@@ -238,7 +345,9 @@ def copy_to_albums(b, copy, albums):
 
     def per_album():
         b.if_has_value(
-            b.match_text(REPEAT_ITEM_2, f'^{ORIGINALS_ALBUM}$'),
+            b.match_text(
+                REPEAT_ITEM_2, f'^({ORIGINALS_ALBUM}|{OLD_ORIGINALS_ALBUM})$'
+            ),
             lambda: None,
             lambda: b.save_to_album(copy, REPEAT_ITEM_2),
         )

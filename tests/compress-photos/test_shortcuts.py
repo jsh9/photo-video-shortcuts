@@ -14,6 +14,11 @@ def gen():
 
 
 @pytest.fixture(scope='module')
+def wf():
+    return ph.load_generator('wf')
+
+
+@pytest.fixture(scope='module')
 def shortcuts(gen):
     sample = gen.Sample(gen.guessed_workflow())
     return {
@@ -60,26 +65,60 @@ def test_ashell_actions(shortcuts, name):
             assert 'IntentAppDefinition' not in ph.params(action)
 
 
-def test_quality_presets(gen, shortcuts):
-    cards_text = next(
+def test_quality_presets(gen, wf, shortcuts):
+    # One contact-card list per format, in the Format menu's cases: HEIC
+    # (the RF presets) first, then JPEG XL.
+    texts = [
         ph.render(ph.params(a)['WFTextActionText'], {})
         for a in shortcuts[gen.NAME_A]
         if ph.ident(a) == 'is.workflow.actions.gettext'
         and 'BEGIN:VCARD' in str(ph.params(a)['WFTextActionText'])
-    )
-    cards = cards_text.split('END:VCARD')[:-1]
-    assert len(cards) == len(gen.QUALITY_PRESETS)
-    for card, (quality, description) in zip(
-        cards, gen.QUALITY_PRESETS, strict=True
-    ):
-        fields = dict(
-            line.split(':', 1) for line in card.strip().splitlines()[1:]
-        )
-        title = fields['N;CHARSET=utf-8']
-        default = ' (default)' if quality == gen.DEFAULT_QUALITY else ''
-        assert title == f'{quality}{default}'
-        org = fields['ORG;CHARSET=utf-8'].replace('\\;', ';')
-        assert org == description
+    ]
+    assert len(texts) == 2
+    lists = [
+        (wf.HEIC_PRESETS, wf.DEFAULT_RF),
+        (wf.QUALITY_PRESETS, wf.DEFAULT_QUALITY),
+    ]
+    for cards_text, (presets, default_value) in zip(texts, lists, strict=True):
+        cards = cards_text.split('END:VCARD')[:-1]
+        assert len(cards) == len(presets)
+        for card, (quality, description) in zip(cards, presets, strict=True):
+            fields = dict(
+                line.split(':', 1) for line in card.strip().splitlines()[1:]
+            )
+            title = fields['N;CHARSET=utf-8']
+            default = ' (default)' if quality == default_value else ''
+            assert title == f'{quality}{default}'
+            org = fields['ORG;CHARSET=utf-8'].replace('\\;', ';')
+            assert org == description
+
+
+def test_format_menu_sets_jxlbatch_args(gen, wf, shortcuts):
+    # The Format menu's cases set Format; an If on it then sets Args, what
+    # the a-Shell command passes to jxlbatch: "--heic --rf <Quality>" or
+    # "-q <Quality> -e 7".
+    actions = shortcuts[gen.NAME_A]
+    menus = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.choosefrommenu'
+        and ph.params(a).get('WFControlFlowMode') == 0
+    ]
+    assert [ph.params(m)['WFMenuPrompt'] for m in menus] == [wf.FORMAT_PROMPT]
+    assert ph.params(menus[0])['WFMenuItems'] == [t for t, _ in wf.FORMATS]
+    args = [
+        ph.render(ph.params(a)['WFTextActionText'], {'Quality': 'Q'})
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.gettext'
+        and ph.ident(actions[i + 1]) == 'is.workflow.actions.setvariable'
+        and ph.params(actions[i + 1])['WFVariableName'] == 'Args'
+    ]
+    assert args == ['--heic --rf Q', f'-q Q -e {gen.EFFORT}']
+    commands = ph.ashell_commands(actions, {'Args': 'A', 'Skipped Echo': ''})
+    runs = [c for c in commands if 'jxlbatch A jxl_job.txt' in c]
+    assert len(runs) == 2  # the share-sheet route and the picker route
+    for c in runs:
+        assert 'jxlbatch --retry A jxl_job.txt' in c
 
 
 def test_notes_show_version(gen, shortcuts):
@@ -94,7 +133,7 @@ def test_import_shortcut_started_by_name(gen, shortcuts):
     # a-Shell opens JXL-Import by URL, so its name must not change.
     assert gen.NAME_B == 'JXL-Import'
     commands = ph.ashell_commands(
-        shortcuts[gen.NAME_A], {'Matches': 83, 'Skipped Echo': ''}
+        shortcuts[gen.NAME_A], {'Args': '-q 83 -e 7', 'Skipped Echo': ''}
     )
     assert any(
         c.endswith('open shortcuts://run-shortcut?name=JXL-Import')

@@ -3,9 +3,22 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
-## [Compress Photos 0.7.0] - 2026-10-09
+## [Compress Photos 0.7.0] - 2026-10-11
 
 - Added
+  - A second output format, **HEIC**, on both platforms: the shortcuts first
+    ask the format (HEIC or JPEG XL), then that format's quality. A HEIC copy
+    is the camera's own file with its HEVC tiles re-encoded by x265 (preset
+    slow, at the chosen RF: 22 "placebo" to 40, default 26); the gain map,
+    `tmap` item, thumbnail, Exif and XMP stay byte for byte, so Photos shows
+    the copy exactly as the original, without the pink patches an HDR JPEG XL
+    shows in bright skies. Apple's Photographic Styles data (about 0.3 MB) is
+    dropped. *Drop HDR* leaves the gain map out; a JPEG, a PNG, or a HEIF whose
+    picture isn't 8-bit 4:2:0 HEVC tiles is written anew as an SDR HEIC.
+    `jxlbatch --heic [--rf RF]`; x265 is linked into every build (the
+    WebAssembly build runs it on the calling thread, about 20 s per 24 MP photo
+    under wasmtime on an M4 Pro), which makes the encoders GPL as the
+    repository is. The self-test checks a HEIC round trip.
   - Each JPEG XL copy gets the date Photos shows for its original, in Photos
     and in its EXIF capture date (`DateTimeOriginal`, `CreateDate` and their
     time zone), on both platforms. A date changed in Photos (Adjust Date and
@@ -27,13 +40,18 @@ encoder. Every release includes the current files of all shortcuts.
     than SDR white; 5% of the photo or more, `--sky-warn` changes it): Photos'
     own rendering of an HDR JPEG XL shows faint pink patches in such skies, an
     Apple issue the file doesn't have (see the README's known issue). The
-    batch's end says how many; Drop HDR (`--sdr`) avoids the patches.
+    batch's end says how many; the HEIC route avoids the patches.
 - Changed
-  - HDR photos at 88, and at the new 93, get the same grain against banding as
-    at 83 (60+40), where the curve gave less above 83 (50+33 at 88): on the sky
-    fixture the lower amounts left banding at the phone's viewing scale. The
-    files grow by about 1% more at 88 and 3% more at 93; the banding test now
-    runs at every preset.
+  - No grain is added to HDR JPEG XL copies any more. It only hid the steps of
+    Apple's 8-bit rendering of an HDR JPEG XL, which shows the pink patches
+    above anyway; the HEIC route avoids that rendering.
+    `--grain FINE --grain-coarse COARSE` still add it (60+40 were the amounts
+    tuned for quality 83).
+  - The album the converted originals are collected in is *Compressed
+    originals* (it was *Compressed to JXL*); a copy is never added to either.
+    Notifications are titled *Compress Photos*.
+  - Update both the shortcuts and the encoders: an older shortcut has no format
+    question, and an older `jxlbatch` has no `--heic`.
 
 ## [Compress Photos 0.6.0] - 2026-10-06
 

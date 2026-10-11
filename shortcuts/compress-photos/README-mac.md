@@ -1,4 +1,4 @@
-# Compress Photos (macOS): JPEG XL for Photos and Finder on the Mac
+# Compress Photos (macOS): smaller HEIC or JPEG XL copies, for Photos and Finder on the Mac
 
 Two shortcuts for the Mac, with the same encoder and the same results as the
 iPhone's [Compress Photos](README.md):
@@ -6,17 +6,18 @@ iPhone's [Compress Photos](README.md):
 - **Compress Photos (macOS)**: select photos in Photos ▸ Share ▸ *Compress
   Photos (macOS)* (or right-click ▸ Shortcuts), or run it from the Shortcuts
   app, the menu bar or a keyboard shortcut and pick the photos in its photo
-  picker. Pick a quality preset (83 is the everyday choice), how to use the
-  cores, and whether to keep HDR. JPEG XL copies are saved to Photos, into the
-  same albums as the originals, keeping the original's metadata (capture date,
-  location, camera, lens, exposure, maker notes, XMP) and, if you keep it, its
-  HDR. The converted originals are collected in the album *Compressed to JXL*
-  for you to review and delete; the shortcut deletes nothing. Only still photos
-  are converted; Live Photos and videos are skipped.
+  picker. Pick a format (HEIC or JPEG XL) and its quality preset (RF 26 or 83
+  are the everyday choices), how to use the cores, and whether to keep HDR. The
+  copies are saved to Photos, into the same albums as the originals, keeping
+  the original's metadata (capture date, location, camera, lens, exposure,
+  maker notes, XMP) and, if you keep it, its HDR. The converted originals are
+  collected in the album *Compressed originals* for you to review and delete;
+  the shortcut deletes nothing. Only still photos are converted; Live Photos
+  and videos are skipped.
 - **Compress Photo Files (macOS)**: select image files or folders in Finder ▸
-  right-click ▸ Quick Actions ▸ *Compress Photo Files (macOS)*. Each `.jxl` is
-  written next to its original, under the original's name. Nothing is deleted,
-  and Photos is not involved.
+  right-click ▸ Quick Actions ▸ *Compress Photo Files (macOS)*. Each `.heic` or
+  `.jxl` is written next to its original, under the original's name. Nothing is
+  deleted, and Photos is not involved.
 
 On the Mac, Shortcuts runs the encoder itself: its Run Shell Script action runs
 `jxlbatch`, a native build of the same encoder a-Shell runs on the iPhone, and
@@ -112,10 +113,10 @@ iPhone's need a-Shell, these need Run Shell Script.
   The first time, macOS asks whether Shortcuts may control Photos: click OK.
   - Photos exports the **original files** (the HEIC as it was imported, with
     its HDR), the copies are imported into the originals' albums, and the
-    originals of the imported copies go into the album **Compressed to JXL**.
-    Review that album and delete its photos when you are done (a shortcut
-    cannot delete photos on this path). The album stays, empty, for the next
-    run.
+    originals of the imported copies go into the album **Compressed
+    originals**. Review that album and delete its photos when you are done (a
+    shortcut cannot delete photos on this path). The album stays, empty, for
+    the next run.
   - An **edited photo** is converted from its unedited original on this path:
     the edits aren't applied. To convert the edited version, use the picker.
     - Shortcuts never sees the photos Photos would hand over through the Share
@@ -128,13 +129,14 @@ iPhone's need a-Shell, these need Run Shell Script.
   shortcut you give it) while Photos is not in front: a photo picker opens,
   without videos. Pick the photos there. This path converts each photo as it
   looks now (edits applied) and saves the copies to Photos. The originals of
-  the saved copies go into the album **Compressed to JXL** too (a photo already
-  in it isn't added twice).
+  the saved copies go into the album **Compressed originals** too (a photo
+  already in it isn't added twice).
 - Only still photos are converted, screenshots included; Live Photos and videos
   in the selection are skipped and a notification counts them. To convert the
   still image of a Live Photo, duplicate it as a still photo first.
-- Pick a quality (see [Quality presets](README.md#21-quality-presets); they are
-  the same as on the iPhone).
+- Pick a format, **HEIC** or **JPEG XL**, then its quality (see
+  [Quality presets](README.md#21-quality-presets); they are the same as on the
+  iPhone).
 - Then pick how to use the Mac's cores. *All cores (fast)*, the usual choice,
   converts several photos at a time, each with a share of the cores (two at a
   time on an 8-core Mac, three on 14 cores or more, fewer with little memory).
@@ -147,20 +149,19 @@ iPhone's need a-Shell, these need Run Shell Script.
 - Each JPEG XL copy is saved to Photos with its original's name, into every
   album its original is in (one photo, not a copy per album). Shared albums and
   built-in ones such as Favorites aren't handled.
-- The second question, **Cores to use**, and the third, **HDR**: *Keep HDR*
-  converts an HDR photo to an HDR JPEG XL (see
-  [HDR photos](README.md#31-hdr-photos)); *Drop HDR* saves every photo as an
-  ordinary SDR JPEG XL, smaller, without the color banding an HDR JPEG XL can
-  show in smooth skies, and shown correctly by viewers that can't tone-map HDR
-  (XnView MP, for example). The originals keep their HDR either way until you
-  delete them.
+- After the format and quality come **Cores to use** and **HDR**: *Keep HDR*
+  keeps an HDR photo's HDR, as the camera's gain map in a HEIC or as an HDR
+  JPEG XL (see [HDR photos](README.md#31-hdr-photos)); *Drop HDR* saves every
+  photo as an ordinary SDR file, smaller, and shown correctly by viewers that
+  can't tone-map HDR (XnView MP, for example). The originals keep their HDR
+  either way until you delete them.
 - If the encoder noted anything (an HDR photo converted as SDR, a photo that
   failed, an error), its log opens in a Quick Look window first, so you can
   read it before deciding about the originals. Close it to continue.
-- The converted originals are collected in the album *Compressed to JXL* (from
-  Photos, found by their photo id; from the picker, by the photos themselves),
-  whether or not their JPEG XL has their HDR: the log says which don't
-  (`! HDR gain map not used`; with *Drop HDR*, none has it, and the log's
+- The converted originals are collected in the album *Compressed originals*
+  (from Photos, found by their photo id; from the picker, by the photos
+  themselves), whether or not their JPEG XL has their HDR: the log says which
+  don't (`! HDR gain map not used`; with *Drop HDR*, none has it, and the log's
   `HEIF` lines show no `HDR`). Nothing is deleted by the shortcut: review the
   album, select all, delete. (Shortcuts' Delete Photos action needs a prompt
   the Shortcuts app usually can't show on macOS 26, so the Mac shortcut doesn't
@@ -194,13 +195,13 @@ iPhone's need a-Shell, these need Run Shell Script.
 ### 3.2. Compress Photo Files (macOS)
 
 - Select files or folders in Finder, right-click ▸ Quick Actions ▸ *Compress
-  Photo Files (macOS)*, and pick a quality and how to use the cores (as above).
-  For a folder, its image files (HEIF, JPEG, PNG) are converted; subfolders
-  aren't entered.
-- Each result is written next to its original as `Name.jxl`. A file is never
-  replaced: if `Name.jxl` exists, the result is `Name 2.jxl`. If the folder
-  can't be written, or Shortcuts didn't say where a file came from, the result
-  goes to `~/Pictures/JPEG XL`.
+  Photo Files (macOS)*, and pick a format, its quality, how to use the cores
+  and whether to keep HDR (as above). For a folder, its image files (HEIF,
+  JPEG, PNG) are converted; subfolders aren't entered.
+- Each result is written next to its original as `Name.heic` or `Name.jxl`. A
+  file is never replaced: if `Name.heic` exists, the result is `Name 2.heic`.
+  If the folder can't be written, or Shortcuts didn't say where a file came
+  from, the result goes to `~/Pictures/HEIC` or `~/Pictures/JPEG XL`.
 - A Terminal window follows the progress (as above); the log opens in Quick
   Look when something was noted or failed; a notification says how many files
   were written. The originals are never touched.
@@ -239,7 +240,7 @@ check the encoder's version and note a mismatch in the log.
 | `! not saved to Photos: <name>` in the log                                                                                                     | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing.                                                                                                                                                             |
 | Run from Photos' Share menu, but asked to pick photos                                                                                          | Photos wasn't in front with a selection when the shortcut asked it (the shortcut gets nothing through the Share menu itself: Photos passes a JPEG copy that Shortcuts can't read). Select the photos in Photos and run it again from there.                                                                                                            |
 | "Shortcuts is not allowed to send keystrokes" or Photos not responding to the shortcut                                                         | Allow Shortcuts to control Photos: System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.                                                                                                                                                                                                                                             |
-| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                                                                        | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. Their originals are in the album *Compressed to JXL* like the others; the notes tell you which to keep.                                                                                                                                                     |
-| Results in `~/Pictures/JPEG XL` instead of next to the files                                                                                   | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                                                                                                                            |
+| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                                                                        | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. Their originals are in the album *Compressed originals* like the others; the notes tell you which to keep.                                                                                                                                                  |
+| Results in `~/Pictures/HEIC` or `~/Pictures/JPEG XL` instead of next to the files                                                              | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                                                                                                                            |
 | A green horizontal stripe near the bottom of a photo converted on the iPhone (thumbnail and preview; gone once the full photo loads)           | A bug in Photos on iOS 27, which writes a faulty 2048×1536 preview for 12 MP JPEG XL files saved to Photos on an iPhone, whatever made them; the JXL is fine, and photos converted or imported on the Mac get a correct preview. See [Troubleshooting](README.md#4-troubleshooting) on the iPhone page for the details and how to fix affected photos. |
 | Faint pink or lavender patches in a bright blue sky or in clouds of an HDR photo's copy, in Photos; the original and a Drop HDR copy have none | Apple's display of HDR JPEG XL, not the file (see [HDR photos](README.md#31-hdr-photos) on the iPhone page). The log points such photos out (`! bright sky (39% of the photo): ...`, and a count at the end). Convert them with Drop HDR.                                                                                                              |

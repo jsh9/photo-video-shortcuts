@@ -39,6 +39,8 @@
 
 #include "gainmap.h"
 #include "grain.h"
+#include "heicout.h"
+#include "hevcenc.h"
 #include "meta.h"
 #include "pixels.h"
 #include "selftest_hdr_heic.h"
@@ -81,6 +83,8 @@ typedef struct {
   int grain;         // --grain: fine grain added to HDR outputs, in percent of an 8-bit PQ step (-1: from the quality)
   int grain_coarse;  // --grain-coarse: the coarse layer (-1: from the quality)
   double sky_warn;   // --sky-warn: warn when at least this share (percent) of an HDR photo is bright sky; 0 = never
+  int heic;          // --heic: HEIC output (x265) instead of JPEG XL
+  double rf;         // --rf: x265's CRF for HEIC output
 } options_t;
 
 #ifdef JXLBATCH_THREADS
@@ -100,6 +104,7 @@ static THREAD_LOCAL textbuf_t *t_out;  // this thread's buffer; NULL: stdout
 #ifdef JXLBATCH_THREADS
 static THREAD_LOCAL void *t_runner;  // this thread's libjxl thread pool; NULL: one thread
 #endif
+static THREAD_LOCAL int t_threads;  // threads for this thread's photo (HEIC tiles); 0: one
 
 static int textbuf_vprintf(textbuf_t *b, const char *fmt, va_list ap) {
   va_list copy;
@@ -742,7 +747,8 @@ typedef struct {
 // at a time, in job order.
 typedef struct {
   char name_out[64];
-  int keep;  // the original had HDR that the JXL lacks: not to be deleted
+  char ext[8];  // the output's extension, "jxl" or "heic"
+  int keep;     // the original had HDR that the copy lacks: not to be deleted
   int apple_jpeg, not_iphone, bright_sky;
   double bytes_in, bytes_out;
   // The photo's summary, printed once it is in jxl_done.txt: e.g.
@@ -750,14 +756,205 @@ typedef struct {
   char info[192], sizes[96];
 } outcome_t;
 
+// The date the photo has in Photos, if the shortcut gave it, written into
+// `exif` (the photo's TIFF data, replaced by a new, malloc'ed one; the
+// caller frees either), with its log lines. Returns 1 when a date was
+// written, 0 when not, -1 if out of memory.
+static int apply_photo_date(const job_t *job, uint8_t **exif, size_t *exif_len, uint8_t **xmp, size_t *xmp_len) {
+  if (!job->date[0]) return 0;
+  photo_date_t date;
+  char was[64] = "";
+  uint8_t *dated = NULL;
+  size_t dated_len = 0;
+  const int rc = photo_date_parse(job->date, &date)
+                     ? exif_set_capture_date(*exif, *exif_len, &date, &dated, &dated_len, was, sizeof was)
+                     : -3;
+  if (rc == -1) return -1;
+  if (rc == -3) say_wrap("  ", "! date not understood (%s); the file's date is kept", job->date);
+  if (rc == -2) say_wrap("  ", "! date not written: the EXIF can't be read; the file's date is kept");
+  if (rc <= 0) return 0;
+  free(*exif);
+  *exif = dated;
+  *exif_len = dated_len;
+  char iso[64], text[64];
+  photo_date_iso_text(&date, iso, sizeof iso);
+  if (xmp && *xmp && xmp_set_dates(xmp, xmp_len, iso) < 0) return -1;
+  photo_date_exif_text(&date, text, sizeof text);
+  if (rc == 2) {
+    // The file's clock time is Photos' moment in that zone: kept, with the zone.
+    say_wrap("  ", "time zone from Photos: %s (the file had %s, no time zone)", text, was);
+  } else {
+    say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
+  }
+  return 1;
+}
+
+// Converts one photo to HEIC (--heic): jxl_in_N.orig to jxl_out_N.heic,
+// printing its lines (heicout.h). A HEIF whose picture is HEVC tiles keeps
+// its container, gain map and metadata and gets its tiles re-encoded; any
+// other photo is decoded and written anew, as SDR. Returns 1 and fills `res`
+// when the file was written.
+static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_t total, const options_t *opt,
+                            outcome_t *res) {
+  char name_orig[64], name_out[64];
+  snprintf(name_orig, sizeof name_orig, "jxl_in_%u.orig", job->index);
+  snprintf(name_out, sizeof name_out, "jxl_out_%u.heic", job->index);
+  char *p_orig = path_join(dir, name_orig), *p_out = path_join(dir, name_out);
+  uint8_t *orig = NULL, *heic = NULL, *exif = NULL;
+  size_t orig_len = 0, heic_len = 0, exif_len = 0;
+  meta_t mo;
+  memset(&mo, 0, sizeof mo);
+  image_t img;
+  memset(&img, 0, sizeof img);
+  color_t color;
+  memset(&color, 0, sizeof color);
+  hdr_info_t hdr;
+  memset(&hdr, 0, sizeof hdr);
+  heic_info_t info;
+  memset(&info, 0, sizeof info);
+  char err[256] = "";
+  int ok = 0, transcoded = 0;
+  const double t0 = now_seconds();
+
+  say("\n[%zu/%zu] %s\n", pos, total, job->name);
+  if (!p_orig || !p_out) {
+    snprintf(err, sizeof err, "out of memory");
+    goto done;
+  }
+  if (read_file(p_orig, &orig, &orig_len) != 0) {
+    snprintf(err, sizeof err, "cannot read %s (%s)", name_orig, strerror(errno));
+    goto done;
+  }
+  const file_format_t format = detect_format(orig, orig_len);
+  if (format == FMT_UNKNOWN) {
+    snprintf(err, sizeof err, "unsupported format: only HEIF, JPEG and PNG photos can be converted");
+    goto done;
+  }
+  if (meta_extract(orig, orig_len, &mo, err, sizeof err) != 0) goto done;
+  char make[32] = "";
+  if (mo.exif.size) exif_string(mo.exif.data, mo.exif.size, 0x010F, make, sizeof make);
+  const int apple_jpeg = format == FMT_JPEG && strcmp(make, "Apple") == 0;
+  if (mo.exif.size) {
+    exif = (uint8_t *)malloc(mo.exif.size);
+    if (!exif) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
+    memcpy(exif, mo.exif.data, mo.exif.size);
+    exif_len = mo.exif.size;
+  }
+  const int dated = apply_photo_date(job, &exif, &exif_len, NULL, NULL);
+  if (dated < 0) {
+    snprintf(err, sizeof err, "out of memory");
+    goto done;
+  }
+  const heic_opts_t ho = {opt->rf, opt->sdr, t_threads > 0 ? t_threads : 1};
+
+  if (format == FMT_HEIF) {
+    // Its own container, with the tiles re-encoded.
+    const int rc = heic_transcode(orig, orig_len, &ho, dated ? exif : NULL, dated ? exif_len : 0, &heic, &heic_len,
+                                  &info, err, sizeof err);
+    if (rc < 0) goto done;
+    if (rc == 0) {
+      transcoded = 1;
+    } else {
+      say_wrap("  ", "! not re-encoded in its own container (%s); written anew, as SDR", info.note);
+    }
+  }
+  if (!transcoded) {
+    // Decoded (upright, SDR) and written anew.
+    int orient = 1;
+    if (format == FMT_HEIF) {
+      if (heif_decode(orig, orig_len, 1, &img, &color, &hdr, NULL, err, sizeof err) != 0) goto done;
+      if (hdr.has_gain_map && !opt->sdr) say_wrap("  ", "! HDR not kept; saved as SDR");
+    } else {
+      if (format == FMT_JPEG && jpeg_has_gain_map(orig, orig_len)) {
+        hdr.has_gain_map = 1;
+        if (!opt->sdr) {
+          say_wrap("  ", opt->mac ? "! HDR not kept (JPEG with a gain map)"
+                                  : "! HDR not kept (JPEG with a gain map; send as Current to keep it)");
+        }
+      }
+      if (stb_decode(orig, orig_len, &img, err, sizeof err) != 0) goto done;
+      orient = mo.exif.size ? exif_orientation(mo.exif.data, mo.exif.size) : 0;
+      if (!orient && mo.xmp.size) orient = xmp_orientation(mo.xmp.data, mo.xmp.size);
+      if (!orient) orient = 1;
+      if (mo.icc.size) {
+        color.icc.data = (uint8_t *)malloc(mo.icc.size);
+        if (!color.icc.data) {
+          snprintf(err, sizeof err, "out of memory");
+          goto done;
+        }
+        memcpy(color.icc.data, mo.icc.data, mo.icc.size);
+        color.icc.size = mo.icc.size;
+      }
+      color.cicp_present = mo.png_cicp_present;
+      memcpy(color.cicp, mo.png_cicp, sizeof color.cicp);
+    }
+    if (img.bytes_per_sample != 1 || img.bits > 8) {
+      snprintf(err, sizeof err, "unsupported for HEIC output: %d-bit pixels (8-bit only)", img.bits);
+      goto done;
+    }
+    image_drop_opaque_alpha(&img);
+    if (image_orient(&img, orient) != 0 || (!img.data && image_make_packed(&img) != 0)) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
+    if (exif) exif_patch(exif, exif_len, img.w, img.h);  // the pixels are upright now
+    if (heic_from_pixels(&img, &color, exif, exif_len, &ho, &heic, &heic_len, &info, err, sizeof err) != 0) goto done;
+  }
+  free(orig);
+  orig = NULL;
+  if (write_file(p_out, heic, heic_len) != 0) {
+    snprintf(err, sizeof err, "cannot write %s (%s)", name_out, strerror(errno));
+    goto done;
+  }
+  snprintf(res->name_out, sizeof res->name_out, "%s", name_out);
+  snprintf(res->ext, sizeof res->ext, "heic");
+  // The original is kept (not offered for deletion) when it had HDR that
+  // the copy lacks.
+  res->keep = transcoded ? info.had_gain_map && !info.kept_gain_map : hdr.has_gain_map;
+  res->apple_jpeg = apple_jpeg;
+  res->not_iphone = 0;
+  res->bright_sky = 0;
+  res->bytes_in = (double)orig_len;
+  res->bytes_out = (double)heic_len;
+  ok = 1;
+  {
+    char in_s[32], out_s[32];
+    fmt_bytes(in_s, sizeof in_s, (double)orig_len);
+    fmt_bytes(out_s, sizeof out_s, (double)heic_len);
+    const char *what = transcoded ? (info.kept_gain_map ? ", HDR kept" : info.had_gain_map ? ", HDR dropped" : "")
+                                  : ", SDR HEIC";
+    snprintf(res->info, sizeof res->info, "%s %ux%u%s, %d tile%s%s", format_name(format), info.w, info.h, what,
+             info.tiles, info.tiles == 1 ? "" : "s", exif_len ? "" : ", no metadata");
+    snprintf(res->sizes, sizeof res->sizes, "%s -> %s (%.0f%%), %.1f s", in_s, out_s,
+             orig_len > 0 ? 100.0 * heic_len / orig_len : 0.0, now_seconds() - t0);
+  }
+
+done:
+  if (!ok) say_wrap("  ", "FAILED: %s", err);
+  image_free(&img);
+  color_free(&color);
+  meta_free(&mo);
+  free(orig);
+  free(heic);
+  free(exif);
+  free(p_orig);
+  free(p_out);
+  return ok;
+}
+
 // Converts one photo: jxl_in_N.orig to jxl_out_N.jxl, printing its lines.
 // Returns 1 and fills `res` when the file was written.
 static int process_job(const char *dir, const job_t *job, size_t pos, size_t total,
                        const options_t *opt, outcome_t *res) {
+  if (opt->heic) return process_heic_job(dir, job, pos, total, opt, res);
   char name_orig[64], name_png[64], name_out[64];
   snprintf(name_orig, sizeof name_orig, "jxl_in_%u.orig", job->index);
   snprintf(name_png, sizeof name_png, "jxl_in_%u.png", job->index);
   snprintf(name_out, sizeof name_out, "jxl_out_%u.jxl", job->index);
+  snprintf(res->ext, sizeof res->ext, "jxl");
   char *p_orig = path_join(dir, name_orig), *p_png = path_join(dir, name_png);
   char *p_out = path_join(dir, name_out);
   uint8_t *orig = NULL, *png = NULL, *jxl = NULL, *exif = NULL, *xmp = NULL;
@@ -834,8 +1031,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
       }
       if (sky * 100 >= opt->sky_warn) {
         bright_sky = 1;
-        say_wrap("  ", "! bright sky (%.0f%% of the photo): in Photos, the HDR copy may show faint pink patches there; %s avoids them (see README)",
-                 sky * 100, opt->mac ? "Drop HDR" : "--sdr");
+        say_wrap("  ", "! bright sky (%.0f%% of the photo): in Photos, the HDR copy may show faint pink patches there; the HEIC route avoids them (see README)",
+                 sky * 100);
       }
     }
     // Grain against banding in an HDR (PQ) output's smooth areas (grain.h);
@@ -931,38 +1128,9 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
 
   // The date the photo has in Photos, if the shortcut gave it.
-  if (job->date[0]) {
-    photo_date_t date;
-    char was[64] = "";
-    uint8_t *dated = NULL;
-    size_t dated_len = 0;
-    const int rc = photo_date_parse(job->date, &date)
-                       ? exif_set_capture_date(exif, exif_len, &date, &dated, &dated_len, was, sizeof was)
-                       : -3;
-    if (rc == -1) {
-      snprintf(err, sizeof err, "out of memory");
-      goto done;
-    }
-    if (rc == -3) say_wrap("  ", "! date not understood (%s); the file's date is kept", job->date);
-    if (rc == -2) say_wrap("  ", "! date not written: the EXIF can't be read; the file's date is kept");
-    if (rc > 0) {
-      free(exif);
-      exif = dated;
-      exif_len = dated_len;
-      char iso[64], text[64];
-      photo_date_iso_text(&date, iso, sizeof iso);
-      if (xmp && xmp_set_dates(&xmp, &xmp_len, iso) < 0) {
-        snprintf(err, sizeof err, "out of memory");
-        goto done;
-      }
-      photo_date_exif_text(&date, text, sizeof text);
-      if (rc == 2) {
-        // The file's clock time is Photos' moment in that zone: kept, with the zone.
-        say_wrap("  ", "time zone from Photos: %s (the file had %s, no time zone)", text, was);
-      } else {
-        say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
-      }
-    }
+  if (apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len) < 0) {
+    snprintf(err, sizeof err, "out of memory");
+    goto done;
   }
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len, hdr.peak * GAINMAP_SDR_WHITE_NITS};
@@ -1036,8 +1204,8 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
       return 0;
     }
   }
-  fprintf(batch->done_file, "%s%s|%u|%s|%s.jxl", batch->done ? "\n" : "", res->name_out, job->index,
-          res->keep ? "keep" : "delete", job->name);
+  fprintf(batch->done_file, "%s%s|%u|%s|%s.%s", batch->done ? "\n" : "", res->name_out, job->index,
+          res->keep ? "keep" : "delete", job->name, res->ext);
   fflush(batch->done_file);
   batch->done++;
   batch->kept += res->keep;
@@ -1127,6 +1295,7 @@ typedef struct {
 static void *pool_worker(void *arg) {
   pool_t *pool = (pool_t *)arg;
   t_runner = runner_create(pool->threads);
+  t_threads = pool->threads;
   for (;;) {
     pthread_mutex_lock(&pool->lock);
     const size_t i = pool->next < pool->count ? pool->next++ : pool->count;
@@ -1249,9 +1418,12 @@ static void print_header(const options_t *opt) {
   uint32_t v = JxlEncoderVersion();
   char heif[64];
   heif_decoder_version(heif, sizeof heif);
-  say_wrap("", "jxlbatch %s (libjxl %u.%u.%u, %s, %s)", JXLBATCH_VERSION, v / 1000000, (v / 1000) % 1000, v % 1000,
-           heif, BUILD_KIND);
-  if (opt->quality >= 100.0f) {
+  const char *x265 = hevc_encoder_version();
+  say_wrap("", "jxlbatch %s (libjxl %u.%u.%u, %s%s%s, %s)", JXLBATCH_VERSION, v / 1000000, (v / 1000) % 1000,
+           v % 1000, heif, x265[0] ? ", " : "", x265, BUILD_KIND);
+  if (opt->heic) {
+    say_wrap("", "HEIC, RF %g (x265, preset slow)", opt->rf);
+  } else if (opt->quality >= 100.0f) {
     say_wrap("", "quality 100 (lossless), effort %d", opt->effort);
   } else {
     say_wrap("", "quality %g (distance %.2f), effort %d", opt->quality, JxlEncoderDistanceFromQuality(opt->quality),
@@ -1307,7 +1479,9 @@ static int run_batch(const options_t *opt, const char *job_arg) {
     snprintf(how, sizeof how, ", 1 thread");
   }
 #endif
-  if (opt->quality >= 100.0f) {
+  if (opt->heic) {
+    say_wrap("", "jxlbatch: %zu photo%s, HEIC, RF %g%s", count, count == 1 ? "" : "s", opt->rf, how);
+  } else if (opt->quality >= 100.0f) {
     say_wrap("", "jxlbatch: %zu photo%s, lossless, effort %d%s", count, count == 1 ? "" : "s", opt->effort, how);
   } else {
     say_wrap("", "jxlbatch: %zu photo%s, quality %g, effort %d%s", count, count == 1 ? "" : "s", opt->quality,
@@ -1320,6 +1494,7 @@ static int run_batch(const options_t *opt, const char *job_arg) {
 #ifdef JXLBATCH_THREADS
   if (workers == 1 || parallel_batch(dir_for_files, jobs, count, opt, &batch, workers, threads) != 0) {
     t_runner = runner_create(threads);
+    t_threads = threads;
     serial_batch(dir_for_files, jobs, count, opt, &batch);
     if (t_runner) JxlThreadParallelRunnerDestroy(t_runner);
     t_runner = NULL;
@@ -1352,12 +1527,13 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   }
   if (batch.kept) {
     const int one = batch.kept == 1;
-    say_wrap("", "%zu original%s kept: %s HDR isn't in the JXL.", batch.kept, one ? "" : "s", one ? "its" : "their");
+    say_wrap("", "%zu original%s kept: %s HDR isn't in the %s.", batch.kept, one ? "" : "s", one ? "its" : "their",
+             opt->heic ? "HEIC" : "JXL");
   }
   if (batch.bright_sky) {
     const int one = batch.bright_sky == 1;
-    say_wrap("", "%zu HDR photo%s with a bright sky: in Photos, %s may show faint pink patches there (an Apple issue; see README). %s avoids them.",
-             batch.bright_sky, one ? "" : "s", one ? "its copy" : "their copies", opt->mac ? "Drop HDR" : "--sdr");
+    say_wrap("", "%zu HDR photo%s with a bright sky: in Photos, %s may show faint pink patches there (an Apple issue; see README). The HEIC route avoids them.",
+             batch.bright_sky, one ? "" : "s", one ? "its copy" : "their copies");
   }
   if (batch.not_iphone) {
     const int one = batch.not_iphone == 1;
@@ -1539,6 +1715,89 @@ static int selftest_hdr(const options_t *opt) {
   return bad ? -1 : 0;
 }
 
+// HEIC output: the HDR test photo re-encoded in its own container keeps its
+// gain map (the same headroom) and its HDR picture (within what a lossy
+// base allows), and a picture written from pixels decodes again.
+static int selftest_heic(const options_t *opt) {
+  say("\nHEIC encoding:\n");
+  heic_opts_t ho = {opt->rf, 0, t_threads > 0 ? t_threads : 1};
+  heic_info_t info;
+  uint8_t *out = NULL;
+  size_t out_len = 0;
+  char err[256] = "";
+  const int rc = heic_transcode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, &ho, NULL, 0, &out, &out_len, &info,
+                                err, sizeof err);
+  if (rc != 0) {
+    say("  FAILED: %s\n", rc > 0 ? info.note : err);
+    return -1;
+  }
+  image_t img;
+  color_t color;
+  hdr_info_t hdr;
+  int bad = 0;
+  if (heif_decode(out, out_len, 0, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
+    say("  FAILED: the HEIC written can't be decoded (%s)\n", err);
+    free(out);
+    return -1;
+  }
+  if (!info.kept_gain_map || hdr.note[0] || fabs(hdr.headroom - kSelftestHdrHeadroom) > 0.01 || img.w != 64 ||
+      img.h != 48) {
+    say_wrap("  ", "FAILED: the HEIC isn't HDR as the original (%ux%u, headroom %.3f; %s)", img.w, img.h,
+             hdr.headroom, hdr.note[0] ? hdr.note : "no note");
+    bad = 1;
+  }
+  int worst = 0;
+  for (size_t i = 0; !bad && i < sizeof kSelftestHdrPixels / sizeof kSelftestHdrPixels[0]; i++) {
+    const unsigned *want = kSelftestHdrPixels[i];
+    uint16_t px[4];
+    if (img.render(img.owner, want[0], want[1], 1, 1, (uint8_t *)px, sizeof px) != 0) {
+      say("  FAILED: out of memory\n");
+      bad = 1;
+      break;
+    }
+    for (int c = 0; c < 3; c++) {
+      const int d = abs((int)px[c] - (int)want[2 + c]);
+      if (d > worst) worst = d;
+    }
+  }
+  // 16-bit PQ values; the base is 8-bit and lossy, so a few 8-bit levels
+  if (!bad && worst > 2500) {
+    say_wrap("  ", "FAILED: the HEIC's HDR pixels are off by up to %d (of 65535)", worst);
+    bad = 1;
+  }
+  if (!bad) say_wrap("  ", "ok: HDR %.1f× kept, %d tile%s, pixels within %d", hdr.headroom, info.tiles, info.tiles == 1 ? "" : "s", worst);
+  image_free(&img);
+  color_free(&color);
+  free(out);
+  if (bad) return -1;
+  // from pixels: the SDR picture of the same photo, written anew
+  if (heif_decode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, 1, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
+    say("  FAILED: %s\n", err);
+    return -1;
+  }
+  out = NULL;
+  if (heic_from_pixels(&img, &color, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
+    say("  FAILED: %s\n", err);
+    bad = 1;
+  } else {
+    image_t again;
+    color_t color2;
+    hdr_info_t hdr2;
+    if (heif_decode(out, out_len, 1, &again, &color2, &hdr2, NULL, err, sizeof err) != 0 || again.w != 64 || again.h != 48) {
+      say("  FAILED: the SDR HEIC written can't be decoded (%s)\n", err);
+      bad = 1;
+    } else {
+      say_wrap("  ", "ok: written from pixels, %d tile%s", info.tiles, info.tiles == 1 ? "" : "s");
+      image_free(&again);
+      color_free(&color2);
+    }
+  }
+  free(out);
+  image_free(&img);
+  color_free(&color);
+  return bad ? -1 : 0;
+}
+
 static int selftest(const options_t *opt) {
   print_header(opt);
   say("\nEnvironment:\n  PWD=%s\n  SHORTCUTS=%s\n  HOME=%s\n", getenv("PWD") ? getenv("PWD") : "(unset)",
@@ -1551,6 +1810,7 @@ static int selftest(const options_t *opt) {
   if (selftest_large_io(opt->dir ? opt->dir : ".") != 0) return 1;
   if (selftest_heif() != 0) return 1;
   if (selftest_hdr(opt) != 0) return 1;
+  if (hevc_available() && selftest_heic(opt) != 0) return 1;
 
   // Synthetic 12 MP photo-like image: smooth gradients plus sensor-like noise.
   const uint32_t w = 4032, h = 3024;
@@ -1596,6 +1856,27 @@ static int selftest(const options_t *opt) {
   fmt_bytes(out_s, sizeof out_s, (double)out_len);
   say("  ok: %s in %.1f s (%.2f MP/s)\n", out_s, secs, (w * (double)h / 1e6) / secs);
   free(out);
+  if (hevc_available()) {
+    // The same picture to HEIC (its top-left 1024x768: a whole 12 MP photo
+    // takes a while without threads), for the speed.
+    image_crop(&img, 0, 0, 1024, 768);
+    say("\nEncoding its top-left 1024x768 to HEIC at RF %g...\n", opt->rf);
+    color_t color;
+    memset(&color, 0, sizeof color);
+    heic_opts_t ho = {opt->rf, 0, t_threads > 0 ? t_threads : 1};
+    heic_info_t info;
+    out = NULL;
+    const double t1 = now_seconds();
+    if (heic_from_pixels(&img, &color, NULL, 0, &ho, &out, &out_len, &info, err, sizeof err) != 0) {
+      say("  FAILED: %s\n", err);
+      image_free(&img);
+      return 1;
+    }
+    const double secs2 = now_seconds() - t1;
+    fmt_bytes(out_s, sizeof out_s, (double)out_len);
+    say("  ok: %s in %.1f s (%.2f MP/s, %d tiles)\n", out_s, secs2, (1024.0 * 768 / 1e6) / secs2, info.tiles);
+    free(out);
+  }
   image_free(&img);
   say("\nSelf-test passed.\n");
   return 0;
@@ -1621,10 +1902,14 @@ static int memtest(void) {
 static void usage(void) {
   say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [--grain FINE]\n"
       "                [--grain-coarse COARSE] [-C DIR] JOBFILE\n"
+      "       jxlbatch --heic [--rf RF] [--retry] [--sdr] [--mac] [-j PHOTOS] [-t THREADS] [-C DIR] JOBFILE\n"
       "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-t THREADS] [-C DIR]\n"
       "       jxlbatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
+      "  --heic  write HEIC instead of JPEG XL: the photo's HEVC tiles re-encoded with x265 in\n"
+      "      its own file (gain map, thumbnail and metadata kept); other photos written anew as SDR\n"
+      "  --rf  x265's quality for --heic, 1-51 (default 26; lower is better and larger)\n"
       "  -j  photos converted at a time, 0-64 (default 1; 0: from the number of cores)\n"
       "  -t  threads per photo, 0-64 (default 0: the cores, shared by the photos)\n"
 #ifndef JXLBATCH_THREADS
@@ -1646,13 +1931,28 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0, -1, -1, SKY_WARN_DEFAULT};
+  options_t opt = {83.0f, 7, NULL, 0, 0, 0, 1, 0, -1, -1, SKY_WARN_DEFAULT, 0, 26.0};
   const char *job = NULL;
   int mode = 0;  // 0 = batch, 1 = selftest, 2 = memtest
+  int rf_given = 0;
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
-    if ((!strcmp(a, "-q") || !strcmp(a, "-e") || !strcmp(a, "-C") || !strcmp(a, "-j") || !strcmp(a, "-t")) &&
-        i + 1 < argc) {
+    if (!strcmp(a, "--heic")) {
+      opt.heic = 1;
+    } else if (!strcmp(a, "--rf") && i + 1 < argc) {
+      char num[32];
+      snprintf(num, sizeof num, "%s", argv[++i]);
+      char *comma = strchr(num, ',');  // Shortcuts may format "26,5" in some locales
+      if (comma) *comma = '.';
+      char *end = NULL;
+      opt.rf = strtod(num, &end);
+      if (end == num || *end || opt.rf < 1 || opt.rf > 51) {
+        say("ERROR: RF must be between 1 and 51 (got \"%s\")\n", argv[i]);
+        return 2;
+      }
+      rf_given = 1;
+    } else if ((!strcmp(a, "-q") || !strcmp(a, "-e") || !strcmp(a, "-C") || !strcmp(a, "-j") || !strcmp(a, "-t")) &&
+               i + 1 < argc) {
       const char *v = argv[++i];
       char *end = NULL;
       if (a[1] == 'q') {
@@ -1729,10 +2029,19 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
+  if (rf_given && !opt.heic) {
+    say("ERROR: --rf is for --heic (HEIC output); -q sets the JPEG XL quality\n");
+    return 2;
+  }
+  if (opt.heic && !hevc_available()) {
+    say("ERROR: HEIC output is not in this build of jxlbatch\n");
+    return 2;
+  }
   int rc;
   if (mode == 1) {
 #ifdef JXLBATCH_THREADS
     t_runner = runner_create(opt.threads > 0 ? opt.threads : cpu_count());  // a batch plans its own
+    t_threads = opt.threads > 0 ? opt.threads : cpu_count();
 #endif
     rc = selftest(&opt);
   } else if (mode == 2) {

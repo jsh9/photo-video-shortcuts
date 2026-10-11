@@ -4,26 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "boxes.h"
+
 // stb_image's zlib decoder (compiled in pixels.c); returns a malloc'ed buffer.
 char *stbi_zlib_decode_malloc_guesssize_headerflag(const char *buffer, int len,
                                                    int initial_size,
                                                    int *outlen,
                                                    int parse_header);
-
-#define FOURCC(a, b, c, d)                                             \
-  (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | \
-   (uint32_t)(d))
-
-static uint16_t rd16be(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
-static uint32_t rd32be(const uint8_t *p) {
-  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-         ((uint32_t)p[2] << 8) | p[3];
-}
-static uint64_t rdNbe(const uint8_t *p, int n) {
-  uint64_t v = 0;
-  for (int i = 0; i < n; i++) v = (v << 8) | p[i];
-  return v;
-}
 
 static int is_tiff(const uint8_t *p, size_t n) {
   if (n < 8) return 0;
@@ -74,37 +61,7 @@ const char *format_name(file_format_t f) {
 // ---------------------------------------------------------------------------
 // ISOBMFF / HEIF
 
-typedef struct {
-  const uint8_t *p;
-  size_t n;
-} span_t;
-
-typedef struct {
-  const uint8_t *p;
-  size_t n;
-  size_t pos;
-} box_iter_t;
-
-static int box_next(box_iter_t *it, uint32_t *type, span_t *payload) {
-  if (it->pos > it->n || it->n - it->pos < 8) return 0;
-  const uint8_t *b = it->p + it->pos;
-  uint64_t size = rd32be(b);
-  uint32_t t = rd32be(b + 4);
-  size_t hdr = 8;
-  if (size == 1) {
-    if (it->n - it->pos < 16) return 0;
-    size = rdNbe(b + 8, 8);
-    hdr = 16;
-  } else if (size == 0) {
-    size = it->n - it->pos;
-  }
-  if (size < hdr || size > it->n - it->pos) return 0;
-  *type = t;
-  payload->p = b + hdr;
-  payload->n = (size_t)(size - hdr);
-  it->pos += (size_t)size;
-  return 1;
-}
+// (span_t, box_iter_t and box_next are in boxes.h)
 
 typedef struct {
   uint32_t id;

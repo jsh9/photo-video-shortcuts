@@ -112,6 +112,7 @@ class Mac:
             quality='83',
             lines='',
             skipped='',
+            fmt='jxl',
             cores='all',
             hdr='keep',
             dates='',
@@ -120,7 +121,8 @@ class Mac:
         return ph.shell_scripts(
             self.shortcuts['photos' if shortcut == 'selection' else shortcut],
             {
-                'Matches': quality,
+                'Format': fmt,  # the format menu's value
+                'Quality': quality,
                 'Cores': cores,  # the cores menu's value
                 'HDR': hdr,  # the HDR menu's value
                 'Combined Text': lines,
@@ -672,6 +674,71 @@ def test_files_name_and_place_from_the_real_path(mac):
     assert out.splitlines()[-1] == 'Wrote 1 JPEG XL file(s).'
     assert (album / 'Holiday.jxl').exists()
     assert not list(mac.tmp.glob('*.jxl'))
+
+
+@pytest.mark.parametrize(
+    ('fmt', 'options'),
+    [
+        ('heic', ['--heic', '--rf', '26']),  # HEIC: x265 at the RF
+        ('jxl', ['-q', '26', '-e', '7']),  # JPEG XL at the quality
+        ('', ['-q', '26', '-e', '7']),  # anything else: JPEG XL
+    ],
+)
+def test_format_choice_becomes_jxlbatch_options(mac, fmt, options):
+    # The shortcut's first question (HEIC / JPEG XL) reaches the script as
+    # FORMAT with the chosen number in QUALITY; run.zsh turns them into
+    # jxlbatch --heic --rf or -q -e.
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script('photos', fmt=fmt, quality='26'),
+        a,
+        jxlbatch=fake_jxlbatch(mac),
+    )
+    assert result.returncode == 0, result.stderr
+    args = (mac.root / 'args.txt').read_text().splitlines()
+    assert args == [
+        '--mac',
+        *options,
+        '-j',
+        '0',
+        '-C',
+        str(mac.work),
+        'jxl_job.txt',
+    ]
+
+
+def test_files_heic_route_writes_heic_next_to_originals(mac):
+    # The HEIC route: .heic copies next to the originals, "Name 2.heic" when
+    # a file is there, the fallback folder ~/Pictures/HEIC, and the count
+    # names the format.
+    album = mac.root / 'My Photos'
+    a = photo(album, 'hdr/o1.heic', 'a b.heic')
+    copy = photo(mac.tmp, 'hdr/srgb.heic', 'copy.heic')
+    out = mac.batch('files', a, copy, fmt='heic', quality='30', lines=f'{a}\n')
+    assert out.splitlines()[-1] == 'Wrote 2 HEIC file(s).'
+    assert 'jxlbatch: 2 photos, HEIC, RF 30' in out
+    assert (album / 'a b 2.heic').exists()  # "a b.heic" is the original
+    assert (mac.home / 'Pictures' / 'HEIC' / 'copy.heic').exists()
+    assert not list(mac.root.rglob('*.jxl'))
+    mac.batch('files', a, fmt='heic', quality='30', lines=f'{a}\n')
+    assert (album / 'a b 3.heic').exists()
+
+
+def test_photos_heic_route_names_the_copies_heic(mac):
+    # The picker route's lines for the shortcut end in the copy's name with
+    # the HEIC extension.
+    a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script(
+            'photos', fmt='heic', quality='26', lines='IMG_0001.HEIC\n'
+        ),
+        a,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == (
+        'jxl_out_1.heic|1|delete|IMG_0001.heic'
+    )
+    assert (mac.work / 'jxl_out_1.heic').exists()
 
 
 def test_files_unwritable_folder_falls_back(mac):

@@ -150,7 +150,9 @@ class Shortcuts:
             )
         elif kind == 'exit':
             raise Stopped
-        elif kind == 'choosefromlist':
+        elif kind in ('choosefromlist', 'choosefrommenu'):
+            # the format question (a menu whose cases hold the quality
+            # lists): the photos were accepted
             raise QualityAsked
         elif kind in ('setitemname', 'detect.contacts'):
             pass  # the quality list's contact cards

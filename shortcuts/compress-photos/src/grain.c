@@ -39,22 +39,14 @@ typedef struct {
 } grained_t;
 
 grain_opts_t grain_auto(float quality) {
-  // From the tuning on a sunset skyline (docs/compress-photos-banding-plan.md,
-  // package C): lower qualities remove more of the grain, so they get more;
-  // the file grows by about 10-15% at each quality. The user chose the
-  // lightest of the candidates whose banding looked the same (60+40 at q83);
-  // the coarse layer is 2/3 of the fine one. Above q83 the amount stays: a
-  // higher quality keeps hardly more of a sky's faint grain (q93 without
-  // grain bands like q83 without), and the line's lower values failed the
-  // banding check at the phone scale (tests/compress-photos/banding.py: q93 at
-  // 40+26 closed 58% of the gap and q88 at 50+33 76%, where 80% is required;
-  // 60+40 closes it at both).
-  grain_opts_t g;
-  float fine = 60.0f + (83.0f - quality) * 2.0f;
-  if (fine < 60.0f) fine = 60.0f;
-  if (fine > 130.0f) fine = 130.0f;
-  g.fine = (int)(fine + 0.5f);
-  g.coarse = g.fine * 2 / 3;
+  // None, since 0.7.0: the grain only hid the steps of Apple's rendering of
+  // an HDR JPEG XL, which shows worse artifacts anyway (pink patches, see
+  // README); the HEIC route avoids that rendering altogether, and the JPEG
+  // XL route keeps the photo as it is. --grain and --grain-coarse still add
+  // it. (The amounts that were tuned, docs/compress-photos-banding-plan.md:
+  // fine 60 + (83 - quality) * 2, clamped to 60-130, coarse 2/3 of it.)
+  (void)quality;
+  grain_opts_t g = {0, 0};
   return g;
 }
 

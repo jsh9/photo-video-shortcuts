@@ -82,7 +82,10 @@ the user saw the patches in the rotated 24 MP file as in the plain one, and
 fainter but present patches in the 10-bit and HLG files. The exact path is a
 property of Core Image's `expandToHDR` in a standalone process, as the test
 helper calls it, not of what Photos shows. Nothing to implement; the warning
-stands.
+stands. The way out is another format: 0.7.0's HEIC route keeps the camera's
+gain map byte for byte and re-encodes only the base picture's HEVC tiles, so
+Photos shows the copy through the camera's own path, with no patches
+(`testdata/heic-quality-2`, verified by eye on 2026-10-11).
 
 ## 3. The warning (`--sky-warn`)
 

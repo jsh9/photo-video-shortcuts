@@ -42,8 +42,9 @@ from wf import (  # noqa: E402
     REPEAT_ITEM,
     SHORTCUT_INPUT,
     VERSION,
+    TITLE,
     Sample,
-    choose_quality,
+    choose_format,
     collect_in_album,
     copy_to_albums,
     keep_still_photos,
@@ -105,7 +106,9 @@ ROUTES = {
     WORK_FILES: 'files',
 }
 # Where the file shortcut saves when it can't write next to the original.
-FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
+FALLBACK_FOLDER = (
+    '"$HOME/Pictures/$FORMAT_NAME"'  # ~/Pictures/HEIC or ~/Pictures/JPEG XL
+)
 # A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
 WARNINGS = r'(^|\n) *(!|ERROR|[0-9]+ failed)'
 # The question after the quality: how the Mac's cores are used, as a menu
@@ -144,7 +147,8 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # the log), and the picker route's Dates ("index|date" lines, wf.photo_date; a
 # list in a text field is one item per line).
 SLOTS = {
-    '@QUALITY@': 'Matches',
+    '@FORMAT@': 'Format',
+    '@QUALITY@': 'Quality',
     '@CORES@': 'Cores',
     '@HDR@': 'HDR',
     '@LINES@': 'Combined Text',
@@ -258,9 +262,10 @@ def finish_script(work):
     )
 
 
-def script(name, body, label, work, quality, cores, hdr, lines):
+def script(name, body, label, work, fmt, quality, cores, hdr, lines):
     """The Run Shell Script text parts: strings and the variables."""
     refs = {
+        '@FORMAT@': fmt,
         '@QUALITY@': quality,
         '@CORES@': cores,
         '@HDR@': hdr,
@@ -314,7 +319,7 @@ def build_photos(sample):
     b = wf.Builder(sample)
     b.comment(
         f'{NAME_PHOTOS} {VERSION}. '
-        'Converts photos to JPEG XL with jxlbatch (Run Shell Script), keeping their '
+        'Converts photos to HEIC or JPEG XL with jxlbatch (Run Shell Script), keeping their '
         'metadata. Only still photos are converted: Live Photos and videos are '
         'skipped. Started while Photos is in front with photos selected (Share menu, '
         'right-click > Shortcuts, menu bar), it converts that selection: Photos '
@@ -337,7 +342,7 @@ def build_photos(sample):
             # shown, so the user knows why the picker opens instead.
             b.if_has_value(
                 b.match_text(probe, '^ERROR'),
-                lambda: b.notification('JPEG XL', probe),
+                lambda: b.notification(TITLE, probe),
                 lambda: None,
             )
             b.set_variable('Photos', b.select_photos())
@@ -368,12 +373,12 @@ def selection_route(b):
     them, and Photos imports the results into the originals' albums and
     collects the converted originals in ORIGINALS_ALBUM.
     """
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     count = b.match_text(variable('Selection'), r'\d+')
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         count,
         ' photo(s) selected in Photos… A notification follows when they are saved.',
@@ -389,6 +394,7 @@ def selection_route(b):
             'selection.zsh',
             'IDS',
             WORK_SELECTION,
+            fmt,
             quality,
             cores,
             hdr,
@@ -416,7 +422,7 @@ def selection_route(b):
     b.if_has_value(
         b.match_text(b.item_at_index(lines, 2), '^collected=[1-9]'),
         lambda: b.notification(
-            'JPEG XL',
+            TITLE,
             'Saved ',
             imported,
             ' photo(s) to Photos. ',
@@ -424,7 +430,7 @@ def selection_route(b):
             f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
         ),
         lambda: b.notification(
-            'JPEG XL', 'Saved ', imported, ' photo(s) to Photos.'
+            TITLE, 'Saved ', imported, ' photo(s) to Photos.'
         ),
     )
 
@@ -441,11 +447,11 @@ def picker_route(b):
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         b.count(photos),
         ' photo(s)… A notification follows when they are saved.',
@@ -465,6 +471,7 @@ def picker_route(b):
             'photos.zsh',
             'NAMES',
             WORK_PHOTOS,
+            fmt,
             quality,
             cores,
             hdr,
@@ -540,7 +547,7 @@ def picker_route(b):
     b.if_has_value(
         variable('Collected'),
         lambda: b.notification(
-            'JPEG XL',
+            TITLE,
             'Saved ',
             variable('Saved'),
             ' photo(s) to Photos. ',
@@ -548,7 +555,7 @@ def picker_route(b):
             f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
         ),
         lambda: b.notification(
-            'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
+            TITLE, 'Saved ', variable('Saved'), ' photo(s) to Photos.'
         ),
     )
 
@@ -557,9 +564,9 @@ def build_files(sample):
     b = wf.Builder(sample)
     b.comment(
         f'{NAME_FILES} {VERSION}. '
-        'Converts image files (HEIF, JPEG, PNG) to JPEG XL with jxlbatch (Run Shell '
+        'Converts image files (HEIF, JPEG, PNG) to HEIC or JPEG XL with jxlbatch (Run Shell '
         'Script), keeping their metadata. Select files or folders in Finder ▸ '
-        'Quick Actions. Each .jxl is saved next to its original (never replacing a '
+        'Quick Actions. Each .heic or .jxl is saved next to its original (never replacing a '
         'file); nothing is deleted, and Photos is not involved. Needs jxlbatch in '
         '~/.local/bin and Allow Running Scripts in Shortcuts ▸ Settings ▸ Advanced. '
         f'Setup and help: {HELP_URL}'
@@ -567,17 +574,17 @@ def build_files(sample):
 
     def no_input():
         b.notification(
-            'JPEG XL',
+            TITLE,
             'Select files or folders in Finder, then run it from Quick Actions.',
         )
         b.stop()
 
     b.if_has_value(SHORTCUT_INPUT, lambda: None, no_input)
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         b.count(SHORTCUT_INPUT),
         ' item(s)… A notification follows when the files are written.',
@@ -597,6 +604,7 @@ def build_files(sample):
             'files.zsh',
             'PATHS',
             WORK_FILES,
+            fmt,
             quality,
             cores,
             hdr,
@@ -604,15 +612,13 @@ def build_files(sample):
         ),
         input_ref=SHORTCUT_INPUT,
     )
-    # The output is the log and, last, "Wrote N JPEG XL file(s)."
+    # The output is the log and, last, "Wrote N HEIC file(s)." (or JPEG XL).
     b.if_has_value(
         b.match_text(result, WARNINGS),
         lambda: b.quick_look(result),
         lambda: None,
     )
-    b.notification(
-        'JPEG XL', b.item_from_list(b.split(result, '\n'), 'Last Item')
-    )
+    b.notification(TITLE, b.item_from_list(b.split(result, '\n'), 'Last Item'))
     return b.actions
 
 

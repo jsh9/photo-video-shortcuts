@@ -67,34 +67,43 @@ def test_sky_bands_without_grain(references):
         assert ours > theirs + gap, (scale, ours, theirs)
 
 
-@pytest.mark.parametrize('quality', ['93', '88', '83', '72'])
-def test_sky_does_not_band_with_the_default_grain(
-        wasm, references, tmp_path, quality
+@pytest.mark.parametrize(
+    ('quality', 'grain'),
+    [('93', (60, 40)), ('88', (60, 40)), ('83', (60, 40)), ('72', (82, 54))],
+)
+def test_sky_does_not_band_with_the_tuned_grain(
+        wasm, references, tmp_path, quality, grain
 ):
-    # At every preset the grain the quality gets (grain_auto) closes the gap:
-    # the amounts are checked by their outcome, not only their numbers.
-    jxl, output = convert(wasm, tmp_path, '-q', quality, SKY)
-    assert re.search(r'HDR \d+\.\d×, grain \d+\+\d+', output), output
+    # The amounts that were tuned for each quality (docs/compress-photos-
+    # banding-plan.md), asked for with --grain, close the gap: checked by
+    # their outcome, not only their numbers.
+    fine, coarse = grain
+    jxl, output = convert(
+        wasm,
+        tmp_path,
+        '-q',
+        quality,
+        '--grain',
+        str(fine),
+        '--grain-coarse',
+        str(coarse),
+        SKY,
+    )
+    assert re.search(rf'HDR \d+\.\d×, grain {fine}\+{coarse}', output), output
     ok, scores = banding.passes(
         pq_green(jxl, tmp_path / 'out.ppm'), *references
     )
     assert ok, (quality, scores)
 
 
-@pytest.mark.parametrize('quality', ['93', '88', '83', '72'])
-def test_grain_grows_as_quality_drops_below_83(wasm, tmp_path, quality):
-    # Lower qualities remove more of the grain, so they get more; above 83
-    # the amount stays, as the line's lower values left the sky banding at
-    # the phone scale (grain_auto).
-    _, output = convert(wasm, tmp_path, '-q', quality, SKY)
-    fine, coarse = map(int, re.search(r'grain (\d+)\+(\d+)', output).groups())
-    expected = {
-        '93': (60, 40),
-        '88': (60, 40),
-        '83': (60, 40),
-        '72': (82, 54),
-    }[quality]
-    assert (fine, coarse) == expected
+@pytest.mark.parametrize('quality', ['93', '83', '72'])
+def test_no_grain_by_default(wasm, tmp_path, quality):
+    # Since 0.7.0 no grain is added unless asked for: the output is the
+    # photo as it is (the same bytes as with the grain turned off).
+    a, output = convert(wasm, tmp_path / 'a', '-q', quality, SKY)
+    assert 'grain' not in output
+    b, _ = convert(wasm, tmp_path / 'b', '-q', quality, *NO_GRAIN, SKY)
+    assert a.read_bytes() == b.read_bytes()
 
 
 def test_grain_options_override_the_curve(wasm, tmp_path):
@@ -154,17 +163,23 @@ def test_bright_sky_warning(wasm, tmp_path):
     )
     said = ' '.join(output.split())
     assert re.search(
-        r'! bright sky \(\d+% of the photo\): in Photos, the HDR copy may show faint pink patches there; --sdr avoids them \(see README\)',
+        r'! bright sky \(\d+% of the photo\): in Photos, the HDR copy may show faint pink patches there; the HEIC route avoids them \(see README\)',
         said,
     ), said
     assert (
-        '1 HDR photo with a bright sky: in Photos, its copy may show faint pink patches there (an Apple issue; see README). --sdr avoids them.'
+        '1 HDR photo with a bright sky: in Photos, its copy may show faint pink patches there (an Apple issue; see README). The HEIC route avoids them.'
         in said
     )
     _, output = convert(
         wasm, tmp_path / 'mac', '--mac', '-q', '83', '--sky-warn', '0.5', SKY
     )
-    assert 'Drop HDR avoids them' in ' '.join(output.split())
+    assert 'The HEIC route avoids them' in ' '.join(output.split())
+    # The HEIC route itself never warns: Photos shows a HEIC with its gain
+    # map as it shows the original.
+    _, output = convert(
+        wasm, tmp_path / 'heic', '--heic', '--sky-warn', '0.5', SKY
+    )
+    assert 'bright sky' not in output
     _, output = convert(
         wasm, tmp_path / 'off', '-q', '83', '--sky-warn', '0', SKY
     )

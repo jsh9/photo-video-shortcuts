@@ -45,9 +45,10 @@ from wf import (  # noqa: E402
     SHORTCUT_INPUT,
     VERSION,
     Ref,
+    TITLE,
     Sample,
     attachment,
-    choose_quality,
+    choose_format,
     collect_in_album,
     copy_to_albums,
     keep_still_photos,
@@ -168,9 +169,27 @@ class Builder(wf.Builder):
 # The two shortcuts
 
 
-def run_jxlbatch(b, quality, then):
+def choose_args(b):
     """
-    a-Shell command: run jxlbatch, then the command ``then``.
+    The format and quality questions (wf.choose_format), then the variable
+    Args: jxlbatch's options for them, "--heic --rf 26" or "-q 83 -e 7" (an If
+    on the Format variable, since the command is one text).
+    """
+    fmt, quality = choose_format(b)
+    b.if_has_value(
+        b.match_text(fmt, '^heic$'),
+        lambda: b.set_variable('Args', b.text('--heic --rf ', quality)),
+        lambda: b.set_variable(
+            'Args', b.text('-q ', quality, f' -e {EFFORT}')
+        ),
+    )
+    return variable('Args')
+
+
+def run_jxlbatch(b, args, then):
+    """
+    a-Shell command: run jxlbatch with ``args`` (the variable Args, see
+    choose_args), then the command ``then``.
 
     When this launches a-Shell, a-Shell restores its last session (its folder
     too) while it starts these commands, and its WebAssembly engine may still
@@ -188,11 +207,11 @@ def run_jxlbatch(b, quality, then):
     b.ashell_execute(
         'sleep 2\ncd ~shortcuts\n',
         echo,
-        '\njxlbatch -q ',
-        quality,
-        f' -e {EFFORT} jxl_job.txt\njxlbatch --retry -q ',
-        quality,
-        f' -e {EFFORT} jxl_job.txt\n',
+        '\njxlbatch ',
+        args,
+        ' jxl_job.txt\njxlbatch --retry ',
+        args,
+        ' jxl_job.txt\n',
         echo,
         '\n' + then,
         keep_going=False,
@@ -258,7 +277,7 @@ def build_compress(sample):
     b = Builder(sample)
     b.comment(
         f'{NAME_A} {VERSION}. '
-        'Converts photos to JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
+        'Converts photos to HEIC or JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
         'Only still photos are converted: Live Photos and videos are skipped. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
@@ -276,7 +295,7 @@ def build_compress(sample):
     # From here on only the still photos: they are staged, and their positions
     # in Stills are the job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
-    quality = choose_quality(b)
+    args = choose_args(b)
     # A stale album or dates file from an unfinished run would put a photo
     # into the wrong albums or give it a wrong date; jxl_in_* files are
     # overwritten anyway.
@@ -334,12 +353,10 @@ def build_compress(sample):
         # conversion fails is in the album too; a-Shell's output names it.
         album = b.text(ORIGINALS_ALBUM)
         b.repeat_each(photos, lambda: collect_in_album(b, REPEAT_ITEM, album))
-        run_jxlbatch(
-            b, quality, f'open shortcuts://run-shortcut?name={NAME_B}'
-        )
+        run_jxlbatch(b, args, f'open shortcuts://run-shortcut?name={NAME_B}')
 
     def from_picker():
-        run_jxlbatch(b, quality, 'open shortcuts://')
+        run_jxlbatch(b, args, 'open shortcuts://')
         b.wait_to_return()
         album = b.text(ORIGINALS_ALBUM)
         count = save_results(b, photos, album)
@@ -348,7 +365,7 @@ def build_compress(sample):
         b.if_has_value(
             variable('Collected'),
             lambda: b.notification(
-                'JPEG XL',
+                TITLE,
                 'Saved ',
                 count,
                 ' photo(s) to Photos. ',
@@ -356,7 +373,7 @@ def build_compress(sample):
                 f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
             ),
             lambda: b.notification(
-                'JPEG XL', 'Saved ', count, ' photo(s) to Photos.'
+                TITLE, 'Saved ', count, ' photo(s) to Photos.'
             ),
         )
 
@@ -373,7 +390,7 @@ def build_import(sample):
     )
     count = save_results(b)
     b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
-    b.notification('JPEG XL', 'Saved ', count, ' photo(s) to Photos.')
+    b.notification(TITLE, 'Saved ', count, ' photo(s) to Photos.')
     return b.actions
 
 

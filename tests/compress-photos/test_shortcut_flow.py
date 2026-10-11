@@ -165,7 +165,7 @@ def batch_command(actions, url, skipped=True):
     ``skipped``, the shortcut skipped a Live Photo and set Skipped Echo.
     """
     values = {
-        'Matches': QUALITY,
+        'Args': f'-q {QUALITY} -e 7',
         'Skipped Echo': f'echo "{SKIPPED_NOTE}"' if skipped else '',
     }
     commands = ph.ashell_commands(actions['compress'], values)

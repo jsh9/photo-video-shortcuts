@@ -1,20 +1,28 @@
-# Compress Photos: JPEG XL for iPhone Photos
+# Compress Photos: smaller HEIC or JPEG XL copies of iPhone photos
 
-Select photos in Photos → Share → **Compress Photos** → pick a quality preset
-(83 is the everyday choice). JPEG XL copies are saved back to Photos, into the
-same albums as the originals, keeping the original's metadata: capture date,
-time and time zone, GPS location, camera, lens, exposure, maker notes, and XMP.
-Started from the Shortcuts app instead, it lets you pick the photos. Either
-way, the converted originals are collected in the album *Compressed to JXL* for
-you to review and delete; the shortcut deletes nothing. Only still photos are
-converted, screenshots included: Live Photos and videos are skipped.
+Select photos in Photos → Share → **Compress Photos** → pick a format, HEIC or
+JPEG XL, and a quality preset (RF 26 for HEIC, 83 for JPEG XL are the everyday
+choices). The copies are saved back to Photos, into the same albums as the
+originals, keeping the original's metadata: capture date, time and time zone,
+GPS location, camera, lens, exposure, maker notes, and XMP. Started from the
+Shortcuts app instead, it lets you pick the photos. Either way, the converted
+originals are collected in the album *Compressed originals* for you to review
+and delete; the shortcut deletes nothing. Only still photos are converted,
+screenshots included: Live Photos and videos are skipped.
 
-iOS can display JPEG XL but has no encoder, so the conversion runs in
+**HEIC** (the camera's own format, re-encoded with x265 at a lower quality)
+keeps an iPhone photo's HDR exactly as Photos shows the original: the camera's
+gain map, thumbnail and metadata stay as they are, only the picture itself is
+re-encoded. **JPEG XL** is the format of versions before 0.7.0; in Photos, an
+HDR JPEG XL can show faint pink patches in bright skies (an Apple issue, see
+[HDR photos](#31-hdr-photos)), which the HEIC route avoids.
+
+iOS has no encoder for either, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
-`jxlbatch`. It uses libjxl, the reference JPEG XL encoder. How it works, and
-how to build it: [DEVELOPING.md](DEVELOPING.md). On a Mac, use the Mac
-shortcuts instead: [Compress Photos (macOS)](README-mac.md), the same encoder
-without a-Shell.
+`jxlbatch`. It uses libjxl, the reference JPEG XL encoder, and x265, the
+leading HEVC encoder. How it works, and how to build it:
+[DEVELOPING.md](DEVELOPING.md). On a Mac, use the Mac shortcuts instead:
+[Compress Photos (macOS)](README-mac.md), the same encoder without a-Shell.
 
 <!--TOC-->
 
@@ -118,8 +126,32 @@ it, and iCloud Photos syncs it to the iPhone.) Without it, the run stops with
 
 ### 2.1. Quality presets
 
-The shortcut lists these JPEG XL qualities, each with a short description in
-smaller text:
+The first question is the format, **HEIC** or **JPEG XL**; the second is that
+format's quality. For HEIC the number is x265's RF (CRF: lower is better and
+larger, as in HandBrake and ffmpeg), each with a short description in smaller
+text:
+
+| RF               | What to expect (measured on a 24 MP iPhone photo)                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------- |
+| 22               | Placebo: no visible difference from the original, even in the sky; saves only about 15%                   |
+| 24               | Almost placebo: very little visual degradation; about 70% of the original’s size                          |
+| **26** (default) | Go-to option for everyday scenes: smooth sky, film grain and fine texture kept; about 60% of the original |
+| 28               | Details well preserved; the finest texture starts to soften; about half the original                      |
+| 29               | Details well preserved; fine texture a little softer; about 45% of the original                           |
+| 30               | Fine texture softens; tiny steps may show in a clear blue sky; about 40% of the original                  |
+| 31               | Small losses in details; faint steps in blue sky; about 38% of the original                               |
+| 32               | Small losses in details; visible banding in blue sky; about a third of the original                       |
+| 34               | Visible losses in details; blotches in blue sky; about 30% of the original                                |
+| 36               | More losses in details; bigger blotches; edges start to ring; about a quarter of the original             |
+| 38               | Details get smudged; blocky sky; about 23% of the original                                                |
+| 40               | It’s like watching RMVB videos in 2002; about 20% of the original                                         |
+
+Every HEIC keeps about 0.26 MB of gain map, thumbnail and Exif, so the share is
+higher for small originals. By a quality metric (SSIMULACRA2 on the same
+photo), HEIC RF 20 ≈ JPEG XL 93, RF 23 ≈ 88, RF 25 ≈ 83, RF 28 ≈ 72, RF 30 ≈
+63, RF 32 ≈ 52, RF 34 ≈ 40; by eye the HEIC ranks about one RF higher.
+
+For JPEG XL the number is the encoder's quality:
 
 | Quality          | What to expect                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -139,12 +171,13 @@ smaller text:
   preset is a contact card: the number is the name, and the description is the
   company line shown under it. The default is marked "(default)" in its title.
 - Tapping a preset picks it and continues.
-- To change the presets, edit the first Text action in *Compress Photos* on the
-  phone, or `QUALITY_PRESETS` in `scripts/wf.py` (shared with the Mac
-  shortcuts) and rebuild (see [DEVELOPING.md](DEVELOPING.md)).
+- To change the presets, edit the Text actions in *Compress Photos* on the
+  phone, or `HEIC_PRESETS` and `QUALITY_PRESETS` in `scripts/wf.py` (shared
+  with the Mac shortcuts) and rebuild (see [DEVELOPING.md](DEVELOPING.md)).
 
-Effort is fixed at 7, `cjxl`'s default. To trade a little size for speed, edit
-the Execute Command action in *Compress Photos* and change `-e 7` to `-e 5`.
+JPEG XL effort is fixed at 7, `cjxl`'s default; HEIC uses x265's preset *slow*.
+To trade a little size for speed, edit the Text action that sets *Args* in
+*Compress Photos* and change `-e 7` to `-e 5`.
 
 ## 3. What is and isn't kept
 
@@ -158,7 +191,7 @@ Kept:
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
   [HDR photos](#31-hdr-photos));
-- the file name, e.g. `IMG_1234.jxl`.
+- the file name, e.g. `IMG_1234.heic` or `IMG_1234.jxl`.
 
 Not kept:
 
@@ -243,14 +276,22 @@ brighter, for a heavily edited photo (at full brightness they match). a-Shell
 then says `! Apple's HDR profile not found` (except for photos taken before iOS
 18, which never have one).
 
-Grain: an HDR JXL gets a little fine grain in its smooth areas (skies, walls,
-out-of-focus backgrounds), which makes it about 10-15% larger than it would be
-without. Apple draws the SDR version of an HDR JXL with half the levels an
-ordinary photo has, so a smooth sky would show stripes (a lossless file too);
-the grain hides them, as the camera's own grain does in the original. It's only
-visible zoomed far in. Photos converted by earlier versions keep their stripes;
-converting the original again fixes it. `jxlbatch --grain 0 --grain-coarse 0`
-turns the grain off (see [DEVELOPING.md](DEVELOPING.md)).
+**HEIC keeps the HDR as it is.** The HEIC route doesn't touch the gain map: the
+camera's gain map tiles, its `tmap` item and the Exif and XMP that go with them
+are copied into the new file byte for byte, and only the picture's own HEVC
+tiles are re-encoded (the photo's Photographic Styles data, about 0.3 MB, is
+dropped, so a style can't be changed afterwards). Photos shows the copy as it
+shows the original, with none of the JPEG XL issues below. *Drop HDR* on the
+Mac (`--sdr`) leaves the gain map out, for an ordinary SDR HEIC; a JPEG or PNG,
+or a HEIF whose picture isn't 8-bit 4:2:0 HEVC tiles, is written anew as an SDR
+HEIC (the log says so). What follows is about JPEG XL.
+
+Grain: up to 0.6.0, an HDR JXL got a little fine grain in its smooth areas
+against the stripes Apple's 8-bit rendering of an HDR JPEG XL shows in a smooth
+sky. Since 0.7.0 no grain is added: that rendering shows worse artifacts anyway
+(the pink patches below), and the HEIC route avoids it altogether.
+`jxlbatch --grain 60 --grain-coarse 40` still adds the amounts that were tuned
+for quality 83 (see [DEVELOPING.md](DEVELOPING.md)).
 
 Size: with a smooth gain map, like an iPhone's, an HDR JXL is about as large as
 the same photo converted as SDR (in tests, 4% smaller to 14% larger). A gain
@@ -271,17 +312,18 @@ in patches, then builds the HDR view from that SDR version, so the shift stays
 on an HDR screen too. The original HEIC isn't affected, because its SDR version
 was made by the camera, and neither is the same picture in another HDR format,
 so it's specific to Apple's handling of JPEG XL (checked on macOS 27 in October
-2026). Until Apple changes it, convert such photos as SDR: Drop HDR on the Mac,
-or `--sdr` in a-Shell; the SDR copy has no patches. `jxlbatch` points them out:
-a photo whose bright sky (smooth, colored, brighter than SDR white) covers 5%
-or more of it gets the line
+2026). Until Apple changes it, convert such photos with the HEIC route, which
+shows them as the original; an SDR JPEG XL (Drop HDR on the Mac, `--sdr` in
+a-Shell) has no patches either. `jxlbatch` points them out: a photo whose
+bright sky (smooth, colored, brighter than SDR white) covers 5% or more of it
+gets the line
 `! bright sky (39% of the photo): in Photos, the HDR copy may show faint pink patches there`,
 and the end of the batch says how many there were. `--sky-warn 10` raises the
 bar to 10%; `--sky-warn 0` turns the warning off.
 
-**Originals kept:** when the JXL lacks the original's HDR, the shortcut doesn't
-offer to delete that original, and a-Shell says how many were kept. That
-happens when a photo's gain map can't be used (a note in a-Shell, see
+**Originals kept:** when the copy lacks the original's HDR, the shortcut
+doesn't offer to delete that original, and a-Shell says how many were kept.
+That happens when a photo's gain map can't be used (a note in a-Shell, see
 [Troubleshooting](#4-troubleshooting)), except for a photo not taken by an
 iPhone camera (see above), for HDR photos sent as JPEG, and with `--sdr`. This
 needs both the shortcuts and `jxlbatch.wasm` from version 0.2.0: an older
