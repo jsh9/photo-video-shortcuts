@@ -18,12 +18,14 @@ GET_FILE = 'is.workflow.actions.documentpicker.open'
 MENU = 'is.workflow.actions.choosefrommenu'
 # values for every variable the shortcuts' texts can mention
 VALUES = {
-    'Matches': '83',
+    'Format': 'jxl',
+    'Quality': '83',
     'Cores': 'all',
     'HDR': 'keep',
     'Combined Text': 'IMG_0001.HEIC',
     'Skipped Echo': '',
-    'AppleScript Result': 'ID|IMG_0001.HEIC',
+    'AppleScript Result': 'ID|2024-01-01 17:00:00|IMG_0001.HEIC',
+    'Dates': '1|2024-01-01T17:00:00-05:00',
 }
 
 
@@ -123,7 +125,7 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert "CORES='all'" in text
     assert 'for f in "$@"; do' in text
     assert (
-        '"$jxlbatch" --mac -q "$QUALITY" -e 7 "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
+        '"$jxlbatch" --mac "${fmt[@]}" "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
         in text
     )
     assert 'open -a Terminal "$cmd"' in text
@@ -151,56 +153,135 @@ def menu_cases(actions, start):
     ]
 
 
+def route_spans(shortcuts, name, routes):
+    """
+    Each route's actions as (start, batch): from after the previous route's
+    batch script (or the start) to its own batch script (the Run Shell Script
+    that converts).
+    """
+    actions = shortcuts[name]
+    batches = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL
+        and 'jxl_job.txt' in str(ph.params(a)['Script'])
+    ]
+    assert len(batches) == routes
+    return [
+        (0 if k == 0 else batches[k - 1] + 1, batch)
+        for k, batch in enumerate(batches)
+    ]
+
+
+def check_menu(actions, start, prompt, choices, var):
+    """
+    The Choose from Menu at ``start`` has ``prompt`` and ``choices`` (titles),
+    and each case sets the variable ``var`` to the choice's value; returns the
+    case indices (the menu's Choose from Menu actions with mode 1).
+    """
+    p = ph.params(actions[start])
+    assert p['WFMenuPrompt'] == prompt
+    assert p['WFMenuItems'] == [t for t, _ in choices]
+    cases = menu_cases(actions, start)
+    assert [ph.params(actions[i])['WFControlFlowMode'] for i in cases] == [
+        1
+    ] * len(choices) + [2]
+    idents = [ph.ident(a) for a in actions]
+    for i, (title, value) in zip(cases[:-1], choices, strict=True):
+        assert ph.params(actions[i])['WFMenuItemTitle'] == title
+        assert idents[i + 1 : i + 3] == [
+            'is.workflow.actions.gettext',
+            'is.workflow.actions.setvariable',
+        ]
+        assert (
+            ph.render(ph.params(actions[i + 1])['WFTextActionText'], {})
+            == value
+        )
+        assert ph.params(actions[i + 2])['WFVariableName'] == var
+
+    return cases[:-1]
+
+
+def test_format_menu_first_in_each_route_with_its_quality_list(
+        gen, wf, shortcuts
+):
+    # The first question of each route: a Choose from Menu of the formats,
+    # HEIC first. Each case sets the variable Format to the value the script
+    # reads (FORMAT in common.zsh) and then shows that format's quality list
+    # (a Choose from List of contact cards), whose number goes into Quality.
+    assert wf.FORMATS == [
+        (
+            'HEIC: Apple’s own format; HDR shows exactly as the original',
+            'heic',
+        ),
+        (
+            'JPEG XL: HDR copies can show pink patches in bright skies (an Apple issue)',
+            'jxl',
+        ),
+    ]
+    for name, routes in ((PHOTOS, 2), (FILES, 1)):
+        actions = shortcuts[name]
+        for start, batch in route_spans(shortcuts, name, routes):
+            menus = [
+                i
+                for i in range(start, batch)
+                if ph.ident(actions[i]) == MENU
+                and ph.params(actions[i])['WFControlFlowMode'] == 0
+            ]
+            cases = check_menu(
+                actions, menus[0], wf.FORMAT_PROMPT, wf.FORMATS, 'Format'
+            )
+            for case, (_, value) in zip(cases, wf.FORMATS, strict=True):
+                presets, default, prompt, _ = wf.QUALITY_LISTS[value]
+                case_actions = actions[case + 3 : case + 10]
+                kinds = [ph.ident(a).rsplit('.', 1)[1] for a in case_actions]
+                assert kinds == [
+                    'gettext',
+                    'setitemname',
+                    'contacts',
+                    'choosefromlist',
+                    'getitemname',
+                    'match',
+                    'setvariable',
+                ], kinds
+                cards = ph.render(
+                    ph.params(case_actions[0])['WFTextActionText'], {}
+                )
+                assert cards.count('END:VCARD') == len(presets)
+                assert f'N;CHARSET=utf-8:{default} (default)' in cards
+                assert (
+                    ph.params(case_actions[3])['WFChooseFromListActionPrompt']
+                    == prompt
+                )
+                assert (
+                    ph.params(case_actions[6])['WFVariableName'] == 'Quality'
+                )
+
+
 def check_menu_in_each_route(shortcuts, prompt, choices, var, position):
     """
     In each route of each shortcut, a Choose from Menu with ``prompt`` and
     ``choices`` (titles) sets the variable ``var`` to each choice's value, and
-    sits at ``position`` (0: first after the quality list, 1: next) among the
-    menus between the quality list and the batch script.
+    sits at ``position`` (0: first after the format question, 1: next) among
+    the menus between the format question (the Format menu with its quality
+    lists) and the batch script.
     """
     for name, routes in ((PHOTOS, 2), (FILES, 1)):
         actions = shortcuts[name]
-        idents = [ph.ident(a) for a in actions]
-        qualities = [
-            i
-            for i, x in enumerate(idents)
-            if x == 'is.workflow.actions.choosefromlist'
-        ]
-        batches = [
-            i
-            for i, a in enumerate(actions)
-            if ph.ident(a) == RUN_SHELL
-            and 'jxl_job.txt' in str(ph.params(a)['Script'])
-        ]
-        assert len(qualities) == len(batches) == routes
-        for quality, batch in zip(qualities, batches, strict=True):
+        for start, batch in route_spans(shortcuts, name, routes):
+            # after the format question: past the last quality list
+            quality = max(
+                i
+                for i in range(start, batch)
+                if ph.ident(actions[i]) == 'is.workflow.actions.choosefromlist'
+            )
             starts = [
                 i
                 for i in range(quality, batch)
                 if ph.ident(actions[i]) == MENU
                 and ph.params(actions[i])['WFControlFlowMode'] == 0
             ]
-            start = starts[position]
-            p = ph.params(actions[start])
-            assert p['WFMenuPrompt'] == prompt
-            assert p['WFMenuItems'] == [t for t, _ in choices]
-            cases = menu_cases(actions, start)
-            assert [
-                ph.params(actions[i])['WFControlFlowMode'] for i in cases
-            ] == [1] * len(choices) + [2]
-            for i, (title, value) in zip(cases[:-1], choices, strict=True):
-                assert ph.params(actions[i])['WFMenuItemTitle'] == title
-                assert idents[i + 1 : i + 3] == [
-                    'is.workflow.actions.gettext',
-                    'is.workflow.actions.setvariable',
-                ]
-                assert (
-                    ph.render(
-                        ph.params(actions[i + 1])['WFTextActionText'], {}
-                    )
-                    == value
-                )
-                assert ph.params(actions[i + 2])['WFVariableName'] == var
+            check_menu(actions, starts[position], prompt, choices, var)
 
 
 def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
@@ -310,7 +391,7 @@ def test_every_imported_original_is_collected(gen, shortcuts):
     script = gen.applescript_text('import')
     assert 'set end of toCollect to origId' in script
     assert 'is "delete"' not in script
-    assert gen.ORIGINALS_ALBUM == 'Compressed to JXL'
+    assert gen.ORIGINALS_ALBUM == 'Compressed originals'
     assert gen.ORIGINALS_ALBUM in script
 
 
@@ -450,7 +531,8 @@ def test_files_passes_real_paths(shortcuts):
     text = ph.shell_scripts(
         actions,
         {
-            'Matches': '72',
+            'Format': 'jxl',
+            'Quality': '72',
             'Cores': 'all',
             'HDR': 'keep',
             'Combined Text': '/a/b.heic\n\n/c',
@@ -481,14 +563,32 @@ def test_surfaces(workflows):
 def test_quality_presets_shared_with_iphone(gen, wf, shortcuts):
     ios = ph.load_generator()
     assert wf.QUALITY_PRESETS == ios.QUALITY_PRESETS
-    for actions in shortcuts.values():
-        cards = next(
-            ph.render(ph.params(a)['WFTextActionText'], {})
-            for a in actions
+    assert [rf for rf, _ in wf.HEIC_PRESETS] == [
+        22,
+        24,
+        26,
+        28,
+        29,
+        30,
+        31,
+        32,
+        34,
+        36,
+        38,
+        40,
+    ]
+    assert wf.DEFAULT_RF == 26
+    for name, routes in ((PHOTOS, 2), (FILES, 1)):
+        counts = [
+            ph.render(ph.params(a)['WFTextActionText'], {}).count('END:VCARD')
+            for a in shortcuts[name]
             if ph.ident(a) == 'is.workflow.actions.gettext'
             and 'BEGIN:VCARD' in str(ph.params(a)['WFTextActionText'])
+        ]
+        # per route, one list per format: HEIC first, then JPEG XL
+        assert (
+            counts == [len(wf.HEIC_PRESETS), len(wf.QUALITY_PRESETS)] * routes
         )
-        assert cards.count('END:VCARD') == len(wf.QUALITY_PRESETS)
 
 
 def test_notes_show_version(gen, shortcuts):
@@ -660,3 +760,26 @@ def test_applescripts_compile(gen):
                 timeout=120,
             )
             assert result.returncode == 0, (name, result.stderr)
+
+
+def test_photos_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
+    # The picker route reads each photo's date in Photos (Date Taken) in the
+    # repeat that collects the names (ph.check_photo_dates), and its batch
+    # script gets Dates; the selection route has them from Photos' AppleScript
+    # (export.applescript: "id|date|filename"), and the Finder shortcut, whose
+    # files aren't in Photos, none.
+    actions = shortcuts[PHOTOS]
+    (format_at,) = ph.check_photo_dates(actions)
+    batches = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL and 'Dates' in repr(ph.params(a)['Script'])
+    ]
+    assert len(batches) == 1 and format_at < batches[0]
+    script = ph.render(ph.params(actions[batches[0]])['Script'], VALUES)
+    assert 'for f in "$@"; do' in script  # the picker route's
+    assert '1|2024-01-01T17:00:00-05:00\nJXL_DATES' in script
+    assert 'set dateText to my wallTime(date of m)' in gen.applescript_text(
+        'export'
+    )
+    assert not ph.check_photo_dates(shortcuts[FILES])

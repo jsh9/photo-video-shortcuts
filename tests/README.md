@@ -39,8 +39,9 @@ They need:
 - the builds: `shortcuts/compress-photos/scripts/build-wasm.sh` (and
   `build-native.sh` for the native build's tests, `build-macos.sh` for the Mac
   shortcuts' encoder, and `build_mac_shortcuts.py --guess --no-sign`);
-- Homebrew `wasmtime exiftool jpeg-xl` (`djxl`, `jxlinfo`), plus `sips`,
-  `swiftc` and `dash`, which come with macOS and Xcode.
+- Homebrew `wasmtime exiftool jpeg-xl` (`djxl`, `jxlinfo`) and, for
+  `build-native.sh`, `libheif x265`, plus `sips`, `swiftc` and `dash`, which
+  come with macOS and Xcode.
 - Only to regenerate the HDR test photos (`make_hdr_fixtures.py`): ffmpeg with
   libx265 and libheif's `heif-dec` (Homebrew `ffmpeg libheif`).
 - For Compress Videos: `shortcuts/compress-videos/scripts/build-macos.sh` (our

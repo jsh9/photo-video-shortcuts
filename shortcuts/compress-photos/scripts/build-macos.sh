@@ -21,10 +21,13 @@ VERSION=$(cat VERSION)  # shared by the encoder and the shortcuts
 LIBJXL_VERSION=v0.11.2
 LIBHEIF_VERSION=v1.23.5
 LIBDE265_VERSION=v1.1.3
+X265_VERSION=4.3  # the same release Compress Videos builds (shared source folder)
+X265_SHA256=83c53e4c8bbb8f1e33ed59e10a7d621d1d7801ca853910c3eb41f038b8ffb121
 DEPS="$REPO/.deps"
 LIBJXL="$DEPS/libjxl-native"
 LIBHEIF="$DEPS/libheif"
 LIBDE265="$DEPS/libde265"
+X265="$DEPS/x265-$X265_VERSION"
 MIN_MACOS=14.0  # Photos and ImageIO read JPEG XL from macOS 14 on
 ARCH=arm64
 
@@ -55,10 +58,28 @@ if [ ! -d "$LIBDE265/.git" ]; then
   echo "Cloning libde265 $LIBDE265_VERSION..."
   git clone -q --depth 1 -b "$LIBDE265_VERSION" https://github.com/strukturag/libde265 "$LIBDE265"
 fi
+# x265 (HEVC encoder, for HEIC output): a release archive, checked by hash,
+# as Compress Videos' build-macos.sh fetches it.
+if [ ! -d "$X265" ]; then
+  archive="$DEPS/x265_$X265_VERSION.tar.gz"
+  echo "Downloading x265 $X265_VERSION..."
+  /usr/bin/curl -sSfL -o "$archive" \
+    "https://github.com/Multicorewareinc/x265/releases/download/$X265_VERSION/x265_$X265_VERSION.tar.gz"
+  if [ "$(shasum -a 256 "$archive" | cut -d ' ' -f 1)" != "$X265_SHA256" ]; then
+    echo "build-macos.sh: $archive is not the expected file (SHA-256 differs)" >&2
+    rm -f "$archive"
+    exit 1
+  fi
+  rm -rf "$X265.tmp"
+  mkdir -p "$X265.tmp"
+  tar xf "$archive" -C "$X265.tmp" --strip-components 1
+  mv "$X265.tmp" "$X265"
+  rm -f "$archive"
+fi
 
 # Only the skcms edit: this build has threads and exceptions. (The libheif
-# checkout may carry build-wasm.sh's edits; they are guarded by __wasi__ and
-# __cpp_exceptions, so they don't apply here.)
+# and x265 checkouts may carry build-wasm.sh's edits; they are guarded by
+# __wasi__ and __cpp_exceptions, so they don't apply here.)
 python3 "$ROOT/scripts/patch_deps.py" --skcms --libjxl "$LIBJXL"
 
 bdir="$ROOT/build/macos"
@@ -94,6 +115,15 @@ cmake -S "$LIBHEIF" -B "$bdir/heif" -G Ninja -Wno-dev $common \
   >"$bdir/heif.log" 2>&1 || { tail -30 "$bdir/heif.log"; exit 1; }
 ninja -C "$bdir/heif" install >>"$bdir/heif.log" 2>&1 || { tail -30 "$bdir/heif.log"; exit 1; }
 
+# x265 (HEVC encoder, for HEIC output): 8-bit only, no command-line tool.
+# CMAKE_POLICY_VERSION_MINIMUM: x265's CMakeLists predates CMake 4. Linking
+# x265 makes jxlbatch-macos GPL (as the repository is).
+# shellcheck disable=SC2086
+cmake -S "$X265/source" -B "$bdir/x265" -G Ninja -Wno-dev $common \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DENABLE_SHARED=OFF -DENABLE_CLI=OFF \
+  >"$bdir/x265.log" 2>&1 || { tail -30 "$bdir/x265.log"; exit 1; }
+ninja -C "$bdir/x265" install >>"$bdir/x265.log" 2>&1 || { tail -30 "$bdir/x265.log"; exit 1; }
+
 # libjxl (encoder) with its threads library; skcms as the color engine, as in
 # the WebAssembly build.
 # shellcheck disable=SC2086
@@ -123,9 +153,9 @@ ninja -C "$bdir/jxl" jxl jxl_cms jxl_threads >"$bdir/jxl.ninja.log" 2>&1 || { ta
 objdir="$bdir/jxlbatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
-for src in jxlbatch meta pixels heif gainmap hdr grain; do
+for src in jxlbatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2086
-  cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS \
+  cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
     -I"$LIBJXL/lib/include" -I"$bdir/jxl/lib/include" -I"$prefix/include" \
     -c "src/$src.c" -o "$objdir/$src.o"
@@ -142,7 +172,7 @@ c++ $flags "$objdir"/*.o \
   "$bdir/jxl/third_party/highway/libhwy.a" \
   "$bdir/jxl/third_party/brotli/libbrotlienc.a" "$bdir/jxl/third_party/brotli/libbrotlidec.a" \
   "$bdir/jxl/third_party/brotli/libbrotlicommon.a" \
-  "$prefix/lib/libheif.a" "$prefix/lib/libde265.a" \
+  "$prefix/lib/libheif.a" "$prefix/lib/libde265.a" "$prefix/lib/libx265.a" \
   -lpthread -o "$out"
 strip -x "$out" 2>/dev/null  # it warns that it invalidates the signature; re-signed below
 # The linker signs ad hoc already; sign again after stripping so the signature

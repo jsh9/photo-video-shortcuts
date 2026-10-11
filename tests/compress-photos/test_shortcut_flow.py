@@ -165,7 +165,7 @@ def batch_command(actions, url, skipped=True):
     ``skipped``, the shortcut skipped a Live Photo and set Skipped Echo.
     """
     values = {
-        'Matches': QUALITY,
+        'Args': f'-q {QUALITY} -e 7',
         'Skipped Echo': f'echo "{SKIPPED_NOTE}"' if skipped else '',
     }
     commands = ph.ashell_commands(actions['compress'], values)
@@ -195,6 +195,26 @@ def stage_like_shortcut(actions, folder, photos):
         )
 
     (folder / 'jxl_job.txt').write_text('\n'.join(lines))
+
+
+def dates_like_shortcut(actions, folder, dates):
+    """
+    Writes jxl_dates.txt with the lines the shortcut builds for ``dates``
+    ({index: Format Date's text}): its Text "<Repeat Index>|<Formatted Date>"
+    (wf.photo_date), joined by Combine Text.
+    """
+    template = next(
+        ph.params(a)['WFTextActionText']
+        for a in actions['compress']
+        if ph.ident(a) == 'is.workflow.actions.gettext'
+        and 'Formatted Date' in str(ph.params(a)['WFTextActionText'])
+    )
+    (folder / 'jxl_dates.txt').write_text(
+        '\n'.join(
+            ph.render(template, {'Repeat Index': i, 'Formatted Date': d})
+            for i, d in dates.items()
+        )
+    )
 
 
 def import_results(folder):
@@ -280,9 +300,30 @@ def test_missing_job_says_where_it_looked(ashell):
     assert '$SHORTCUTS (not set)' in message
 
 
+@LAUNCHED
+def test_dates_reach_jxlbatch(actions, ashell, photos, launched):
+    # jxl_dates.txt, next to the job, is read wherever a-Shell started.
+    shell = ashell(launched)
+    originals = [photos['heic_p3'], photos['jpeg']]
+    stage_like_shortcut(actions, shell.shortcuts, originals)
+    dates_like_shortcut(
+        actions, shell.shortcuts, {2: '2024-01-01T17:00:00-05:00'}
+    )
+    shell.run(batch_command(actions, 'shortcuts://'))
+    (first, _, _), (second, _, _) = import_results(shell.shortcuts)
+    assert ph.exif_tags(first)['ExifIFD:DateTimeOriginal'] == (
+        '2024:05:06 07:08:09'
+    )
+    assert ph.exif_tags(second)['ExifIFD:DateTimeOriginal'] == (
+        '2024:01:01 17:00:00'
+    )
+    assert 'date from Photos' in shell.output
+
+
 def test_cleanup_leaves_nothing(actions, ashell, photos):
     shell = ashell()
     stage_like_shortcut(actions, shell.shortcuts, [photos['jpeg']])
+    dates_like_shortcut(actions, shell.shortcuts, {1: '2024-01-01T17:00:00Z'})
     shell.run(batch_command(actions, 'shortcuts://'))
     (shell.shortcuts / 'jxl_albums_1.txt').write_text('Holidays')
     cleanup = next(

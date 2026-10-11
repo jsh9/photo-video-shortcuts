@@ -4,26 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "boxes.h"
+
 // stb_image's zlib decoder (compiled in pixels.c); returns a malloc'ed buffer.
 char *stbi_zlib_decode_malloc_guesssize_headerflag(const char *buffer, int len,
                                                    int initial_size,
                                                    int *outlen,
                                                    int parse_header);
-
-#define FOURCC(a, b, c, d)                                             \
-  (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | \
-   (uint32_t)(d))
-
-static uint16_t rd16be(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
-static uint32_t rd32be(const uint8_t *p) {
-  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-         ((uint32_t)p[2] << 8) | p[3];
-}
-static uint64_t rdNbe(const uint8_t *p, int n) {
-  uint64_t v = 0;
-  for (int i = 0; i < n; i++) v = (v << 8) | p[i];
-  return v;
-}
 
 static int is_tiff(const uint8_t *p, size_t n) {
   if (n < 8) return 0;
@@ -74,37 +61,7 @@ const char *format_name(file_format_t f) {
 // ---------------------------------------------------------------------------
 // ISOBMFF / HEIF
 
-typedef struct {
-  const uint8_t *p;
-  size_t n;
-} span_t;
-
-typedef struct {
-  const uint8_t *p;
-  size_t n;
-  size_t pos;
-} box_iter_t;
-
-static int box_next(box_iter_t *it, uint32_t *type, span_t *payload) {
-  if (it->pos > it->n || it->n - it->pos < 8) return 0;
-  const uint8_t *b = it->p + it->pos;
-  uint64_t size = rd32be(b);
-  uint32_t t = rd32be(b + 4);
-  size_t hdr = 8;
-  if (size == 1) {
-    if (it->n - it->pos < 16) return 0;
-    size = rdNbe(b + 8, 8);
-    hdr = 16;
-  } else if (size == 0) {
-    size = it->n - it->pos;
-  }
-  if (size < hdr || size > it->n - it->pos) return 0;
-  *type = t;
-  payload->p = b + hdr;
-  payload->n = (size_t)(size - hdr);
-  it->pos += (size_t)size;
-  return 1;
-}
+// (span_t, box_iter_t and box_next are in boxes.h)
 
 typedef struct {
   uint32_t id;
@@ -861,7 +818,7 @@ static void w32(const tiff_t *t, size_t o, uint32_t v) {
   }
 }
 
-enum { TIFF_SHORT = 3, TIFF_LONG = 4 };
+enum { TIFF_SHORT = 3, TIFF_LONG = 4, TIFF_IFD = 13 };  // IFD: a sub-IFD pointer, as some TIFF writers type it
 
 // Offset of the 12-byte entry for `tag` in the IFD at `ifd`, or 0.
 static size_t ifd_find(const tiff_t *t, uint32_t ifd, uint16_t tag) {
@@ -882,7 +839,7 @@ static int entry_uint(const tiff_t *t, size_t e, uint32_t *v) {
     *v = t16(t, e + 8);
     return 1;
   }
-  if (type == TIFF_LONG) {
+  if (type == TIFF_LONG || type == TIFF_IFD) {
     *v = t32(t, e + 8);
     return 1;
   }
@@ -911,22 +868,28 @@ int exif_orientation(const uint8_t *p, size_t n) {
   return (v >= 1 && v <= 8) ? (int)v : 0;
 }
 
-int exif_string(const uint8_t *p, size_t n, uint16_t tag, char *buf, size_t buf_len) {
-  tiff_t t;
+// The text of ASCII entry `e` in buf, without trailing spaces. Returns 1 if
+// it has any.
+static int entry_text(const tiff_t *t, size_t e, char *buf, size_t buf_len) {
   if (buf_len == 0) return 0;
   buf[0] = 0;
-  if (!tiff_open(&t, p, n)) return 0;
-  const size_t e = ifd_find(&t, t32(&t, 4), tag);
-  if (!e || t16(&t, e + 2) != 2) return 0;  // ASCII
-  const uint32_t count = t32(&t, e + 4);
-  const size_t src = count <= 4 ? e + 8 : t32(&t, e + 8);
-  if (count == 0 || src > n || count > n - src) return 0;
+  if (!e || t16(t, e + 2) != 2) return 0;  // ASCII
+  const uint32_t count = t32(t, e + 4);
+  const size_t src = count <= 4 ? e + 8 : t32(t, e + 8);
+  if (count == 0 || src > t->n || count > t->n - src) return 0;
   const size_t len = count < buf_len ? count : buf_len - 1;
-  memcpy(buf, p + src, len);
+  memcpy(buf, t->p + src, len);
   buf[len] = 0;
   size_t k = strlen(buf);
   while (k && buf[k - 1] == ' ') buf[--k] = 0;
   return k > 0;
+}
+
+int exif_string(const uint8_t *p, size_t n, uint16_t tag, char *buf, size_t buf_len) {
+  tiff_t t;
+  if (buf_len) buf[0] = 0;
+  if (!tiff_open(&t, p, n)) return 0;
+  return entry_text(&t, ifd_find(&t, t32(&t, 4), tag), buf, buf_len);
 }
 
 int exif_pixel_dims(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
@@ -1035,4 +998,362 @@ int exif_patch(uint8_t *p, size_t n, uint32_t w, uint32_t h) {
     changed += patch_uint(&t, ifd_find(&t, exif, 0xA003), h);
   }
   return changed;
+}
+
+// ---------------------------------------------------------------------------
+// Capture date
+
+// Days from 1970-01-01 to a date of the proleptic Gregorian calendar (Howard
+// Hinnant's days_from_civil): plain arithmetic, so every build (WebAssembly
+// included) gets the same result, with no time-zone database.
+static long long days_from_civil(int y, int m, int d) {
+  y -= m <= 2;
+  const long long era = (y >= 0 ? y : y - 399) / 400;
+  const long long yoe = y - era * 400;
+  const long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 719468;
+}
+
+// The wall time in seconds since 1970, as if it were UTC.
+static long long wall_seconds(const photo_date_t *d) {
+  return days_from_civil(d->year, d->month, d->day) * 86400 + d->hour * 3600 + d->minute * 60 + d->second;
+}
+
+// n digits at *s into *v, moving *s past them. Returns 0 if they aren't all
+// digits.
+static int digits_at(const char **s, int n, int *v) {
+  int x = 0;
+  for (int i = 0; i < n; i++) {
+    const char c = (*s)[i];
+    if (c < '0' || c > '9') return 0;
+    x = x * 10 + (c - '0');
+  }
+  *s += n;
+  *v = x;
+  return 1;
+}
+
+// "+05:00", "-0500", "-05" or "Z" at *s, in minutes east of UTC.
+static int parse_offset(const char **s, int *minutes) {
+  const char *p = *s;
+  if (*p == 'Z') {
+    *minutes = 0;
+    *s = p + 1;
+    return 1;
+  }
+  if (*p != '+' && *p != '-') return 0;
+  const int sign = *p++ == '-' ? -1 : 1;
+  int h = 0, m = 0;
+  if (!digits_at(&p, 2, &h)) return 0;
+  if (*p == ':') {
+    p++;
+    if (!digits_at(&p, 2, &m)) return 0;
+  } else if (*p >= '0' && *p <= '9' && !digits_at(&p, 2, &m)) {
+    return 0;
+  }
+  if (h > 23 || m > 59) return 0;
+  *minutes = sign * (h * 60 + m);
+  *s = p;
+  return 1;
+}
+
+// The date and time at *s, "2024-01-01T17:00:00" or EXIF's "2024:01:01
+// 17:00:00", and a fraction of a second if one follows. Moves *s past them.
+static int parse_wall(const char **s, photo_date_t *d) {
+  static const int kDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  const char *p = *s;
+  d->millis = -1;
+  d->offset = 0;
+  if (!digits_at(&p, 4, &d->year) || (*p != '-' && *p != ':')) return 0;
+  p++;
+  if (!digits_at(&p, 2, &d->month) || (*p != '-' && *p != ':')) return 0;
+  p++;
+  if (!digits_at(&p, 2, &d->day) || (*p != 'T' && *p != ' ')) return 0;
+  p++;
+  if (!digits_at(&p, 2, &d->hour) || *p != ':') return 0;
+  p++;
+  if (!digits_at(&p, 2, &d->minute) || *p != ':') return 0;
+  p++;
+  if (!digits_at(&p, 2, &d->second)) return 0;
+  if ((*p == '.' || *p == ',') && p[1] >= '0' && p[1] <= '9') {
+    int ms = 0, k = 0;
+    for (p++; *p >= '0' && *p <= '9'; p++, k++) {
+      if (k < 3) ms = ms * 10 + (*p - '0');
+    }
+    for (; k < 3; k++) ms *= 10;
+    d->millis = ms;
+  }
+  if (d->year < 1 || d->month < 1 || d->month > 12 || d->hour > 23 || d->minute > 59 || d->second > 59) return 0;
+  const int leap = (d->year % 4 == 0 && d->year % 100 != 0) || d->year % 400 == 0;
+  if (d->day < 1 || d->day > kDays[d->month - 1] + (d->month == 2 && leap)) return 0;
+  *s = p;
+  return 1;
+}
+
+int photo_date_parse(const char *s, photo_date_t *d) {
+  const char *p = s;
+  while (*p == ' ' || *p == '\t') p++;
+  if (!parse_wall(&p, d) || !parse_offset(&p, &d->offset)) return 0;
+  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+  return *p == 0;
+}
+
+// "+05:00" or "-05:00".
+static void offset_text(int offset, char *buf, size_t buf_len) {
+  const int a = offset < 0 ? -offset : offset;
+  snprintf(buf, buf_len, "%c%02d:%02d", offset < 0 ? '-' : '+', a / 60 % 100, a % 60);
+}
+
+// "2024:01:01 17:00:00", EXIF's form (19 characters).
+static void wall_text(const photo_date_t *d, char *buf, size_t buf_len) {
+  snprintf(buf, buf_len, "%04d:%02d:%02d %02d:%02d:%02d", d->year % 10000, d->month % 100, d->day % 100,
+           d->hour % 100, d->minute % 100, d->second % 100);
+}
+
+void photo_date_exif_text(const photo_date_t *d, char *buf, size_t buf_len) {
+  char wall[32], offset[16];
+  wall_text(d, wall, sizeof wall);
+  offset_text(d->offset, offset, sizeof offset);
+  snprintf(buf, buf_len, "%s %s", wall, offset);
+}
+
+void photo_date_iso_text(const photo_date_t *d, char *buf, size_t buf_len) {
+  char offset[16], fraction[16] = "";
+  offset_text(d->offset, offset, sizeof offset);
+  if (d->millis >= 0) snprintf(fraction, sizeof fraction, ".%03d", d->millis % 1000);
+  snprintf(buf, buf_len, "%04d-%02d-%02dT%02d:%02d:%02d%s%s", d->year % 10000, d->month % 100, d->day % 100,
+           d->hour % 100, d->minute % 100, d->second % 100, fraction, offset);
+}
+
+enum { TIFF_ASCII = 2, TIFF_UNDEFINED = 7 };
+
+// An entry of an IFD being written, as it will be stored, except the offset
+// of a value longer than 4 bytes (`value`), which goes after the IFD.
+typedef struct {
+  uint16_t tag;
+  uint8_t raw[12];
+  const void *value;
+  size_t value_len;
+} entry_t;
+
+static int entry_order(const void *a, const void *b) {
+  const uint16_t x = ((const entry_t *)a)->tag, y = ((const entry_t *)b)->tag;
+  return (x > y) - (x < y);
+}
+
+static void entry_set(entry_t *e, int le, uint16_t tag, uint16_t type, uint32_t count, const void *value,
+                      size_t value_len) {
+  memset(e, 0, sizeof *e);
+  const tiff_t t = {e->raw, sizeof e->raw, le};
+  e->tag = tag;
+  w16(&t, 0, tag);
+  w16(&t, 2, type);
+  w32(&t, 4, count);
+  if (value_len <= 4) {
+    memcpy(e->raw + 8, value, value_len);
+  } else {
+    e->value = value;
+    e->value_len = value_len;
+  }
+}
+
+static void entry_long(entry_t *e, int le, uint16_t tag, uint32_t v) {
+  uint8_t b[4];
+  const tiff_t t = {b, sizeof b, le};
+  w32(&t, 0, v);
+  entry_set(e, le, tag, TIFF_LONG, 1, b, sizeof b);
+}
+
+// An existing entry, copied as it is: its value stays where it is.
+static void entry_copy(entry_t *e, const tiff_t *t, size_t at) {
+  memset(e, 0, sizeof *e);
+  e->tag = t16(t, at);
+  memcpy(e->raw, t->p + at, 12);
+}
+
+// Appends an IFD with the entries (sorted here) and the values they don't
+// hold to the TIFF structure in *buf, at an even offset. Returns that offset,
+// or 0 if out of memory.
+static uint32_t append_ifd(uint8_t **buf, size_t *len, int le, entry_t *entries, size_t count, uint32_t next) {
+  qsort(entries, count, sizeof *entries, entry_order);
+  const size_t at = (*len + 1) & ~(size_t)1;
+  size_t size = 2 + count * 12 + 4;
+  for (size_t i = 0; i < count; i++) size += (entries[i].value_len + 1) & ~(size_t)1;
+  if (count > 0xFFFF || at + size > 0xFFFFFFFFu) return 0;
+  uint8_t *grown = (uint8_t *)realloc(*buf, at + size);
+  if (!grown) return 0;
+  memset(grown + *len, 0, at + size - *len);
+  const tiff_t t = {grown, at + size, le};
+  w16(&t, at, (uint16_t)count);
+  size_t value_at = at + 2 + count * 12 + 4;
+  for (size_t i = 0; i < count; i++) {
+    const size_t e = at + 2 + i * 12;
+    memcpy(grown + e, entries[i].raw, 12);
+    if (entries[i].value) {
+      w32(&t, e + 8, (uint32_t)value_at);
+      memcpy(grown + value_at, entries[i].value, entries[i].value_len);
+      value_at += (entries[i].value_len + 1) & ~(size_t)1;
+    }
+  }
+  w32(&t, at + 2 + count * 12, next);
+  *buf = grown;
+  *len = at + size;
+  return (uint32_t)at;
+}
+
+// 1 if the IFD at `ifd`, with its next-IFD offset, lies within the data.
+static int ifd_ok(const tiff_t *t, uint32_t ifd) {
+  return ifd >= 8 && (size_t)ifd + 2 <= t->n && (size_t)ifd + 2 + (size_t)t16(t, ifd) * 12 + 4 <= t->n;
+}
+
+// The Exif IFD's capture date tags, rewritten together: DateTimeOriginal,
+// CreateDate, OffsetTimeOriginal, OffsetTimeDigitized, SubSecTimeOriginal
+// and SubSecTimeDigitized. (DateTime, OffsetTime and SubSecTime, the file's
+// modification time, are not the capture date and stay.)
+static int is_date_tag(uint16_t tag) {
+  return tag == 0x9003 || tag == 0x9004 || tag == 0x9011 || tag == 0x9012 || tag == 0x9291 || tag == 0x9292;
+}
+
+// A SubSecTime value's first three digits as milliseconds, or -1 if none.
+static int subsec_millis(const char *s) {
+  int ms = 0, k = 0;
+  for (; s[k] >= '0' && s[k] <= '9'; k++) {
+    if (k < 3) ms = ms * 10 + (s[k] - '0');
+  }
+  if (!k) return -1;
+  for (; k < 3; k++) ms *= 10;
+  return ms;
+}
+
+int exif_set_capture_date(const uint8_t *p, size_t n, photo_date_t *date, uint8_t **out, size_t *out_len,
+                          char *was, size_t was_len) {
+  // No EXIF: a TIFF header and an empty IFD0, which then gets an Exif IFD.
+  static const uint8_t kEmpty[14] = {'M', 'M', 0, 42, 0, 0, 0, 8};
+  if (was_len) was[0] = 0;
+  if (n == 0) {
+    p = kEmpty;
+    n = sizeof kEmpty;
+  }
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return -2;
+  const uint32_t ifd0 = t32(&t, 4);
+  if (!ifd_ok(&t, ifd0)) return -2;
+  // The Exif IFD IFD0 points to. A pointer that can't be followed leaves the
+  // EXIF as it is: a new Exif IFD in its place would lose every tag of the
+  // old one (exposure, lens, maker note).
+  const uint32_t exif = exif_ifd_offset(&t);
+  if ((!exif && ifd_find(&t, ifd0, 0x8769)) || (exif && !ifd_ok(&t, exif))) return -2;
+
+  // The file's own date: nothing to do when it is the same moment. A file
+  // without a time zone can't place its clock time: when that time is
+  // Photos' moment in some zone (whole quarter hours, up to 14 h from UTC),
+  // the clock time is kept and that zone written, so a photo taken in
+  // another zone keeps the time it was taken at.
+  int zone_only = 0;
+  if (exif) {
+    char dto[32], oto[16], sub[16];
+    const char *s = dto;
+    photo_date_t had;
+    if (entry_text(&t, ifd_find(&t, exif, 0x9003), dto, sizeof dto) && parse_wall(&s, &had)) {
+      // The original's offset, else the digitized one's or the file's.
+      static const uint16_t kOffsetTags[] = {0x9011, 0x9012, 0x9010};
+      int has_offset = 0;
+      for (size_t i = 0; i < sizeof kOffsetTags / sizeof *kOffsetTags && !has_offset; i++) {
+        const char *o = oto;
+        has_offset = entry_text(&t, ifd_find(&t, exif, kOffsetTags[i]), oto, sizeof oto) && parse_offset(&o, &had.offset);
+      }
+      if (was_len) snprintf(was, was_len, "%s%s%s", dto, has_offset ? " " : "", has_offset ? oto : "");
+      const long long file = wall_seconds(&had), moment = wall_seconds(date) - date->offset * 60LL;
+      if (has_offset) {
+        if (llabs(file - had.offset * 60LL - moment) <= 1) return 0;
+      } else {
+        const long long zone = file - moment;  // the file's offset, were it that moment
+        if (llabs(zone - date->offset * 60LL) <= 1) return 0;  // the same clock time
+        if (zone % 900 == 0 && llabs(zone) <= 14 * 3600) {
+          had.offset = (int)(zone / 60);
+          had.millis = entry_text(&t, ifd_find(&t, exif, 0x9291), sub, sizeof sub) ? subsec_millis(sub) : -1;
+          *date = had;
+          zone_only = 1;
+        }
+      }
+    }
+  }
+
+  uint8_t *buf = (uint8_t *)malloc(n);
+  if (!buf) return -1;
+  memcpy(buf, p, n);
+  size_t len = n;
+  const int le = t.le;
+  char wall[32], offset[16], millis[16];
+  wall_text(date, wall, sizeof wall);
+  offset_text(date->offset, offset, sizeof offset);
+  snprintf(millis, sizeof millis, "%03d", date->millis >= 0 ? date->millis % 1000 : 0);
+  tiff_t nt = {buf, len, le};
+
+  // The Exif IFD: its entries but the date tags, then those, new.
+  const size_t old = exif ? t16(&nt, exif) : 0;
+  entry_t *entries = (entry_t *)calloc(old + 8, sizeof *entries);
+  if (!entries) {
+    free(buf);
+    return -1;
+  }
+  size_t count = 0;
+  for (size_t i = 0; i < old; i++) {
+    const size_t e = exif + 2 + i * 12;
+    if (!is_date_tag(t16(&nt, e))) entry_copy(&entries[count++], &nt, e);
+  }
+  if (!exif) entry_set(&entries[count++], le, 0x9000, TIFF_UNDEFINED, 4, "0232", 4);  // ExifVersion
+  entry_set(&entries[count++], le, 0x9003, TIFF_ASCII, 20, wall, 20);
+  entry_set(&entries[count++], le, 0x9004, TIFF_ASCII, 20, wall, 20);
+  entry_set(&entries[count++], le, 0x9011, TIFF_ASCII, 7, offset, 7);
+  entry_set(&entries[count++], le, 0x9012, TIFF_ASCII, 7, offset, 7);
+  if (date->millis >= 0) {
+    entry_set(&entries[count++], le, 0x9291, TIFF_ASCII, 4, millis, 4);
+    entry_set(&entries[count++], le, 0x9292, TIFF_ASCII, 4, millis, 4);
+  }
+  const uint32_t next = exif ? t32(&nt, exif + 2 + old * 12) : 0;
+  const uint32_t new_exif = append_ifd(&buf, &len, le, entries, count, next);
+  free(entries);
+  if (!new_exif) {
+    free(buf);
+    return -1;
+  }
+  nt.p = buf;
+  nt.n = len;
+
+  if (exif) {
+    // IFD0's pointer, in place (a LONG now, should it have been a SHORT or
+    // an IFD).
+    const size_t e = ifd_find(&nt, ifd0, 0x8769);
+    w16(&nt, e + 2, TIFF_LONG);
+    w32(&nt, e + 8, new_exif);
+  } else {
+    // A new IFD0 too, with its entries and the pointer.
+    const size_t old0 = t16(&nt, ifd0);
+    entry_t *entries0 = (entry_t *)calloc(old0 + 1, sizeof *entries0);
+    if (!entries0) {
+      free(buf);
+      return -1;
+    }
+    size_t count0 = 0;
+    for (size_t i = 0; i < old0; i++) {
+      const size_t e = ifd0 + 2 + i * 12;
+      if (t16(&nt, e) != 0x8769) entry_copy(&entries0[count0++], &nt, e);
+    }
+    entry_long(&entries0[count0++], le, 0x8769, new_exif);
+    const uint32_t next0 = t32(&nt, ifd0 + 2 + old0 * 12);
+    const uint32_t new_ifd0 = append_ifd(&buf, &len, le, entries0, count0, next0);
+    free(entries0);
+    if (!new_ifd0) {
+      free(buf);
+      return -1;
+    }
+    nt.p = buf;
+    nt.n = len;
+    w32(&nt, 4, new_ifd0);
+  }
+  *out = buf;
+  *out_len = len;
+  return zone_only ? 2 : 1;
 }

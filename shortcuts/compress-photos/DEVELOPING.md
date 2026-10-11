@@ -14,6 +14,8 @@ ______________________________________________________________________
   - [1.1. On the Mac](#11-on-the-mac)
   - [1.2. XMP](#12-xmp)
   - [1.3. HDR](#13-hdr)
+  - [1.4. Dates](#14-dates)
+  - [1.5. HEIC output](#15-heic-output)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -30,22 +32,25 @@ ______________________________________________________________________
 Compress Photos                              (shortcut)
    photos: from the share sheet, or else picked in its own photo picker
    keeps the still photos (skips Live Photos and videos, and says how many),
-   asks for a quality preset, copies each original photo to a-Shell's shared
-   folder as jxl_in_N.orig, writes jxl_job.txt, then runs in a-Shell:
-     jxlbatch -q 83 -e 7 jxl_job.txt   (after a short wait, in a-Shell's
-                                        Shortcuts folder; retried if a-Shell
-                                        was still starting up)
-a-Shell ▸ jxlbatch → jxl_out_N.jxl + jxl_done.txt, with progress on screen
+   asks the format (HEIC or JPEG XL) and that format's quality preset, copies
+   each original photo to a-Shell's shared folder as jxl_in_N.orig, writes
+   jxl_job.txt and jxl_dates.txt (each photo's date in Photos), then runs in
+   a-Shell:
+     jxlbatch --heic --rf 26 jxl_job.txt   (or -q 83 -e 7 for JPEG XL; after
+                                            a short wait, in a-Shell's
+                                            Shortcuts folder; retried if
+                                            a-Shell was still starting up)
+a-Shell ▸ jxlbatch → jxl_out_N.heic or .jxl + jxl_done.txt, with progress on screen
 then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
    under its original name, adds it to the albums listed in
    jxl_albums_N.txt (written by Compress Photos), and cleans up
-   (the originals were added to the album "Compressed to JXL" before
+   (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
    a-Shell switches back to Compress Photos, which saves the JXLs,
    adds each to its original's albums, and adds each saved copy's
-   original to the album "Compressed to JXL"
+   original to the album "Compressed originals"
 Nothing is deleted on either path; the user reviews the album. Only a
 library photo is collected (Get Details ▸ Is Favorite answers Yes or No
 for one, nothing for an image from another app, which Save to Photo Album
@@ -99,7 +104,8 @@ the shortcut on a model of these rules.
 and PNG with stb_image) and encodes with libjxl 0.11.2.
 
 `jxlbatch` copies the original's EXIF byte for byte into an uncompressed `Exif`
-box, and XMP into an `xml ` box. Apple's image framework reads those boxes;
+box, and XMP into an `xml ` box (except the capture date, when Photos has
+another: see [Dates](#14-dates)). Apple's image framework reads those boxes;
 compressed (`brob`) boxes, which `cjxl` writes by default, it can't. Pixels are
 stored upright, and the EXIF/XMP orientation is reset to match, so no viewer
 can rotate a photo twice. a-Shell warns (`! orientation check`) when the result
@@ -135,32 +141,38 @@ Compress Photos (macOS)                      (shortcut)
    jxlbatch --sdr); Run Shell Script empties
    ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
    Run AppleScript (lib/mac/export.applescript, input: that folder) has Photos
-   export the originals into its in/ and returns "id|filename" lines; Run
-   Shell Script (common.zsh + selection.zsh, IDS = those lines) stages in/*
-   (a photo plus a .mov of the same name is a Live Photo: skipped; a video
-   alone: skipped), runs jxlbatch, renames each result to out/Name.jxl and
-   prints "path|id|delete or keep|Name.jxl"; Run AppleScript
+   export the originals into its in/ and returns "id|date|filename" lines
+   (the date: the photo's in Photos, on the Mac's clock); Run Shell Script
+   (common.zsh + selection.zsh, IDS = those lines) stages in/* (a photo plus
+   a .mov of the same name is a Live Photo: skipped; a video alone: skipped),
+   writes jxl_dates.txt (each date with the Mac's offset on that date, by
+   `date -j`; none for a clock time in the hour repeated when daylight
+   saving time ends), runs jxlbatch, renames each result to out/Name.jxl (or .heic) and
+   prints
+   "path|id|delete or keep|Name.jxl (or .heic)"; Run AppleScript
    (lib/mac/import.applescript, input: those lines) has Photos import each file,
+   give it its original's date should Photos have read another from the file,
    add it to every album its original is in (the albums' contents read one
    folder at a time, nested ones too), and add every imported file's
    original (by id reference) to the album
-   "Compressed to JXL" (a script can't delete photos); returns
+   "Compressed originals" (a script can't delete photos); returns
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
    picker route: keeps the still photos (same as the iPhone), asks the same
-   three questions, collects the photos' names, then
+   three questions, collects the photos' names and their dates in Photos
+   (Dates, as on the iPhone), then
    Run Shell Script
    (/bin/zsh, the photos passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds jxlbatch (~/.local/bin, ~/bin,
      /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
-     writes jxl_job.txt in compress-photos-macos/ inside Shortcuts' iCloud
-     Drive folder (~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/
-     Documents), runs
+     writes jxl_job.txt and jxl_dates.txt in compress-photos-macos/ inside
+     Shortcuts' iCloud Drive folder (~/Library/Mobile Documents/
+     iCloud~is~workflow~my~workflows/Documents), runs
        jxlbatch --mac -q 83 -e 7 -j 0 -C "$WORK" jxl_job.txt
      (-j 1 -t 1 for One core; --sdr for Drop HDR; the log in
      ~/Library/Caches, below) and prints
      jxl_done.txt's lines:
-       jxl_out_N.jxl|N|delete or keep|Name.jxl
+       jxl_out_N.jxl|N|delete or keep|Name.jxl (or .heic)
          then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
    to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
    and saved to Photos and added to the original's albums, and the original
@@ -194,7 +206,7 @@ Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
    and the cores choice; Run Shell Script with common.zsh + files.zsh: stages
    each file (a folder's
    HEIF/JPEG/PNG files), runs jxlbatch, moves each jxl_out_N.jxl next to its
-   original as Name.jxl (never replacing: "Name 2.jxl"; ~/Pictures/JPEG XL
+   original as Name.jxl (or .heic) (never replacing: "Name 2.jxl"; ~/Pictures/JPEG XL
    when the original's folder is unknown or not writable), prints the log and
    "Wrote N JPEG XL file(s)."; Quick Look of the log on notes, a notification
 ```
@@ -468,17 +480,41 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   less than a level of 255, none above 2.5 levels (texture hides the steps
   anyway, and grain there would only cost bytes; a night photo's own grain
   counts too), feathered between cells. The amounts are the standard deviation
-  in percent of an 8-bit PQ step, from the quality (`grain_auto`: 50+33 at q88,
-  60+40 at q83, 82+54 at q72, tuned on a sunset skyline in
-  `docs/compress-photos-banding-plan.md`), or `--grain FINE` and
-  `--grain-coarse COARSE` (0 for none). The log says `grain 60+40` after the
-  headroom. An HDR file grows by about 10-15%; the encode takes about 4%
+  in percent of an 8-bit PQ step: `--grain FINE` and `--grain-coarse COARSE`
+  (60+40 were tuned for q83 on a sunset skyline in
+  `docs/compress-photos-banding-plan.md`, 82+54 for q72). **Since 0.7.0 none is
+  added by default** (`grain_auto` returns 0+0): Apple's rendering shows worse
+  artifacts anyway (the pink patches below), and the HEIC route avoids it
+  altogether. The log says `grain 60+40` after the headroom when it is asked
+  for; an HDR file then grows by about 10-15%, and the encode takes about 4%
   longer. Not grained: SDR outputs, lossless output, `--sdr`, an HDR photo with
   alpha (computed at once, not region by region), and PQ pixels that don't come
   from a gain map (a PNG with a PQ `cICP` chunk): the grain wraps the gain
   map's renderer only. Integer math only, so the native and WebAssembly builds
-  still agree byte for byte. Photos converted before 0.6.0 keep their banding;
-  only a new conversion from the original gets grain.
+  still agree byte for byte.
+- **Bright skies, and Apple's rendering of HDR JPEG XL.** Core Image (what
+  Photos uses) renders an HDR JXL through an SDR rendition and a gain map of
+  its own making, and that rendition's tone mapping shifts colors by 1-2% in
+  smooth patches across the whole picture; it shows as pink or lavender
+  blotches in bright blue skies and lit clouds. The file is exact (libjxl's
+  decode matches Apple's HDR decode of the HEIC within 0.4%), ImageIO's direct
+  `kCGImageSourceDecodeToHDR` is exact, and the same pixels as a Display P3 PQ
+  PNG render exactly through Core Image; the Apple HDR profile, XMP, maker
+  notes and the codestream layout make no difference (October 2026, macOS 27;
+  `docs/compress-photos-pink-sky.md` has the measurements). So `jxlbatch` warns
+  instead: `grain_bright_sky` (`grain.c`) renders one row of pixels per
+  16-pixel cell row of the HDR rendition (before the grain) and counts the
+  cells that aren't textured (the grain's weight above 0), average brighter
+  than SDR white, and colored (brightest channel over 1.2 times the darkest);
+  `--sky-warn PERCENT` (default 5, 0 = never) is the share of the photo from
+  which the warning is printed and counted at the end. Calibrated on nine
+  iPhone HDR photos: the one the user noticed the patches in is 39% sky, the
+  others 0-17%. One exception found in the same tests: Core Image renders a JXL
+  exactly when it has an Exif box, is stored portrait (height above width) and
+  holds more than 2^24 pixels; a landscape 24 MP photo stored rotated with the
+  codestream's orientation flag took that path and displayed upright, but
+  Photos still showed the patches in it: the exact path is Core Image's in a
+  standalone process, not what Photos uses. Not used.
 - **Apple's HDR profile.** An iPhone HEIC with an ISO gain map also holds an
   ICC profile for the HDR rendition
   (`Display P3 Primaries; PQ (Adaptive Gain Curve …)`, about 27 KB) with an
@@ -528,10 +564,10 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   JXL lacks (a gain map that wasn't used, except an unlabeled one on a turned
   or cropped photo; an HDR JPEG, which `jxlbatch` only detects; or `--sdr`).
   Since 0.6.0 the shortcuts don't act on it: every converted original is
-  collected in the album "Compressed to JXL" and the log's `!` notes say which
-  JXLs lack HDR (shortcuts up to 0.5.0 offered only `delete` originals for
-  deletion, or collected only those). The field stays in the format for them
-  and for the log.
+  collected in the album "Compressed originals" and the log's `!` notes say
+  which JXLs lack HDR (shortcuts up to 0.5.0 offered only `delete` originals
+  for deletion, or collected only those). The field stays in the format for
+  them and for the log.
 - **Metadata** is kept as for SDR photos. Apple's `HDRGainMap` XMP fields
   belong to the gain map's own XMP packet (linked to the gain map by `cdsc`),
   not the photo's, so they aren't copied: an EXIF or XMP item linked only to
@@ -552,22 +588,145 @@ be used (independent of the file format); `src/gainmap.c` has the math.
   decode the synthetic older-format photos (`apple_older*.heic`), so for that
   format only your own photos are compared with it (`test_samples.py`).
 
+### 1.4. Dates
+
+A JPEG XL copy gets the date Photos shows for its original, in Photos and in
+its EXIF (where other apps, such as EasyLoupe, read the capture date). Copying
+the original's EXIF isn't enough for two kinds of photos:
+
+- **A date changed in Photos** (Adjust Date and Time) lives only in Photos'
+  library: the original file keeps the camera's date, the export of the
+  original (Mac) or the original file (iPhone) has that, and so would the copy.
+  Deleting the original then loses the change.
+- **No capture date in the file**, as when an app removes it (or a screenshot,
+  whose PNG has none): Photos dates such a photo when it is added, but dates
+  the copy from the file's own date, the time of the conversion.
+
+So the shortcuts give `jxlbatch` each photo's date in Photos, in
+`jxl_dates.txt` next to the job, one line per photo that has one:
+`i|2024-01-01T17:00:00-05:00` (the date on the device's clock, and its time
+zone's offset on that date; `.123` fractions, `-0500`, `-05` and `Z` are
+accepted too). Where it comes from:
+
+- **The iPhone, and the Mac's picker route:** Get Details of Images ▸ Date
+  Taken of each staged photo (`wf.photo_date`), which for a library photo is
+  the asset's `creationDate` (ContentKit's `WFPhotoMediaContentItem`, iOS
+  18.2), the date Photos shows, changes included; for an image from another
+  app, the file's own EXIF date (`WFImageContentItem`'s `dateTaken`), or
+  nothing. Match Text guards the next step, as for Is Favorite. Format Date's
+  ISO 8601 style with the time formats it in the en_US_POSIX locale and the
+  device's time zone (ContentKit's `NSDate(WFFormatting)`), whatever the
+  device's language or calendar.
+- **The Mac's selection route:** Photos' AppleScript `date of` each selected
+  item (`export.applescript`), which Photos gives on the Mac's clock (checked
+  on macOS 26 with a winter photo, -05:00, in summer: 7:01:44 PM, as its EXIF);
+  `selection.zsh` adds the offset with `date -j`. After the import,
+  `import.applescript` compares each copy's date with its original's and sets
+  it if Photos read another (two calls per copy).
+
+`jxlbatch` (`exif_set_capture_date` in `meta.c`) compares the date with the
+original's `DateTimeOriginal`: by the moment when the file has a time zone
+(`OffsetTimeOriginal`, else `OffsetTimeDigitized` or `OffsetTime`), else by the
+clock time, to the second (a second apart counts as the same). The same: the
+EXIF stays byte for byte. Missing or another moment: `DateTimeOriginal` and
+`CreateDate` get the date, `OffsetTimeOriginal` and `OffsetTimeDigitized` its
+offset, `SubSecTimeOriginal` and `SubSecTimeDigitized` its fraction (removed
+without one); the modification time (`ModifyDate`, `OffsetTime`, `SubSecTime`)
+is not the capture date and stays; a copy without EXIF gets a new one (IFD0 and
+an Exif IFD), and XMP capture dates the file already has (`xmp:CreateDate`,
+`photoshop:DateCreated`, `exif:DateTimeOriginal`, `exif:DateTimeDigitized`) get
+the date too (`xmp_set_dates`), none added. The Exif IFD is written anew at the
+end of the EXIF and IFD0's pointer moved to it; every other value stays where
+it was, so maker notes, whose values some cameras address from the start of the
+EXIF, keep working. An Exif IFD that IFD0's pointer can't lead to leaves the
+EXIF as it is (`! date not written`), rather than a new Exif IFD losing the old
+one's tags. The log says
+`date from Photos: 2024:01:01 17:00:00 -05:00 (the file had ...)`. The
+arithmetic is plain (days from the civil date), so every build writes the same
+bytes. `test_dates.py` checks this on every build.
+
+Neither Shortcuts nor Photos' AppleScript gives a photo's time zone, so a
+written date is in the device's zone. A photo without a time zone in its EXIF
+(iPhones before iOS 13, most cameras) is held by Photos in the zone it was
+taken in, and the device's clock time for it differs from the file's wherever
+the device is in another zone, though it is the same moment: when the file's
+clock time is Photos' moment in some zone (whole quarter hours, up to 14 h from
+UTC), `jxlbatch` keeps that clock time and writes that zone instead (the log:
+`time zone from Photos: ...`), so such a photo keeps the time it was taken at.
+A photo whose date is another moment gets it in the device's zone: it sorts the
+same, but its time reads as in that zone. On the Mac, a clock time in the hour
+that repeats when daylight saving time ends is two moments (AppleScript's dates
+are clock times): `selection.zsh` gives no date for it, and
+`import.applescript` dates the copy in Photos.
+
+### 1.5. HEIC output
+
+`jxlbatch --heic [--rf RF]` (0.7.0) writes HEIC instead of JPEG XL
+(`src/heicout.c`, `heifbox.c`, `hevcenc.c`). The point of the route: Photos
+shows a HEIC with a gain map through the camera's own path, so the copy looks
+exactly like the original, without the pink patches of Apple's rendering of an
+HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
+1.23 included), so the gain map is never rewritten:
+
+- **Tile transcoding.** An iPhone HEIC's picture is a `grid` of HEVC tiles
+  (640×896 at 24 MP, 512×512 at 12 MP) sharing one `hvcC`. `heic_transcode`
+  decodes the picture as stored (`ignore_transformations`, YCbCr 4:2:0, no
+  conversion), cuts it into the grid's tiles (the edge replicated into the
+  padding), encodes each with x265 (`hevc_encode`: preset slow, CRF = RF, Main
+  Still Picture, x265's defaults, no thread pool, the VUI's matrix and range
+  from the tiles' own SPS as libheif's decoder reports them, the primaries and
+  transfer from the container's nclx when it has one; one encoder per tile, as
+  x265's rate control would otherwise drift across tiles) and writes the file
+  again (`hb_rewrite`): `ftyp` as it was, `meta` with the kept items only
+  (`iinf`, `iref`, `ipma` and `grpl` filtered, `iloc` regenerated with 4-byte
+  offsets, the tiles' `hvcC` replaced by one built from x265's parameter sets,
+  every other box byte for byte), `mdat` with the kept items' data in the
+  original order. Kept: the picture and its tiles, its thumbnails, its Exif and
+  XMP items, and, unless `--sdr`, the gain map (an auxiliary image of Apple's
+  `hdrgainmap` type, or the inputs of a `tmap` item) with its tiles, `tmap` and
+  XMP, plus the `altr` group. Dropped: Apple's Photographic Styles data (the
+  linear style-delta image, three mattes, the linear thumbnail, the styles
+  metadata; about 0.3 MB of a 2.7 MB photo) and any other auxiliary image. A
+  date from Photos replaces the Exif item's data (the 4-byte offset header put
+  back). A single `hvc1` picture is one tile. Measured on a 24 MP photo:
+  per-tile x265 at CRF N gives the same size as x265 on the whole picture at
+  CRF N (within 0.3%), and for a still, CRF N means QP ≈ N − 5.3 (x265's
+  I-frame offset), so RF numbers run finer than in video: RF 26 is 61% of the
+  original at SSIMULACRA2 81 (≈ JPEG XL 83).
+- **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
+  HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
+  several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full
+  range, like the camera's files; a 2×2 box filter for the chroma), cut into
+  512-pixel tiles (one tile the size of a small picture, at least 16 pixels:
+  x265's smallest, with its coding tree unit shrunk below 64 pixels) and
+  written as a new file (`hb_write_new`: `ftyp`, `meta` with a `grid` item in
+  `idat`, `ispe`, `pixi`, `colr` with the source's ICC profile or an nclx, one
+  shared `hvcC`, an Exif item). Always SDR: a gain map isn't carried.
+- Threads: `-t` threads encode a photo's tiles at the same time (one x265
+  encoder each); the WebAssembly build runs them one after the other.
+- A real iPhone file's bytes are the test oracle:
+  `tests/compress-photos/ test_heic.py` compares every kept item with the
+  original's and renders the copy through Core Image's HDR path.
+  `testdata/heic-quality-2/heictx/` holds the Python prototype (x265's
+  command-line tool plus the same container surgery) that the C code was
+  written from.
+
 ## 2. Layout
 
-| Path                                                  | What it is                                                                                                                                                                                                                                                                                                                                                                      |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release.json`                                        | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                                                                                                          |
-| `VERSION`                                             | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                                                                                                  |
-| `src/`                                                | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
-| `third_party/`                                        | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                       |
-| `scripts/build-wasm.sh`                               | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                         |
-| `scripts/build-macos.sh`                              | builds `dist/jxlbatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                          |
-| `scripts/build-native.sh`                             | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl and libheif (fast tests)                                                                                                                                                                                                                                                                                         |
-| `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI and skcms) and `build-macos.sh` (skcms)                                                                                                                                                                                                                                                     |
-| `scripts/wf.py`                                       | what both platforms' shortcuts share: the quality list, the still-photo filter; re-exports `lib/wfkit.py`                                                                                                                                                                                                                                                                       |
-| `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                               |
-| `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `files.zsh`)                                                                                                                                                                                                                                    |
-| `../../lib/`                                          | shared with the other tools' shortcuts: `wfkit.py`, the Shortcuts plist builder (text and variables, built-in actions, writing and signing); `mac/`, the Mac shortcuts' progress window (`progress.zsh`), finish step (`finish.zsh`) and AppleScripts (`probe`, `export`, `import`)                                                                                             |
+| Path                                                  | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`                                        | complete encoder and shortcut filenames required by the release script                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `VERSION`                                             | the version, shared by the shortcuts and `jxlbatch`; read by the build scripts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `src/`                                                | `jxlbatch`: `jxlbatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG and PNG; the capture date), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `grain.c` (grain against banding, off by default; the bright-sky warning), `hevcenc.c` (one HEVC picture with x265), `heifbox.c` (HEIF containers: reading, rewriting, writing; `boxes.h` shares the box reader with `meta.c`), `heicout.c` (HEIC output: tiles re-encoded in the original's container, or a new file from pixels), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
+| `third_party/`                                        | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `scripts/build-wasm.sh`                               | builds `dist/jxlbatch.wasm` and `dist/jxlbatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `scripts/build-macos.sh`                              | builds `dist/jxlbatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `scripts/build-native.sh`                             | builds `build/jxlbatch` for the Mac, against Homebrew's libjxl, libheif and x265 (fast tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI, x265 without threads, skcms) and `build-macos.sh` (skcms)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `scripts/wf.py`                                       | what both platforms' shortcuts share: the format question with each format's quality list, the still-photo filter, the photo's date; re-exports `lib/wfkit.py`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `selection.zsh`, `files.zsh`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `../../lib/`                                          | shared with the other tools' shortcuts: `wfkit.py`, the Shortcuts plist builder (text and variables, built-in actions, writing and signing); `mac/`, the Mac shortcuts' progress window (`progress.zsh`), finish step (`finish.zsh`) and AppleScripts (`probe`, `export`, `import`)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 `build/` and `dist/` are not committed. Release files are published on
 [GitHub Releases](https://github.com/jsh9/photo-video-shortcuts/releases).
@@ -587,12 +746,24 @@ python3 scripts/build_mac_shortcuts.py --guess
 - TinyXML2 is vendored with its license and compiled into the native, SIMD
   WebAssembly and scalar WebAssembly builds. Native C sources are compiled with
   `cc`, XML sources with `c++`; WebAssembly uses wasi-sdk's Clang/Clang++.
-- **Prerequisites:** Homebrew `jpeg-xl libheif cmake ninja binaryen`.
+- **Prerequisites:** Homebrew `jpeg-xl libheif x265 cmake ninja binaryen`.
 - **What `build-wasm.sh` does:** it downloads wasi-sdk 34, libjxl v0.11.2,
-  libheif v1.23.5 and libde265 v1.1.3 into the repository's `.deps/` folder,
-  shared with the other tools. WASI has no threads, C++ exceptions or
-  `mkstemp`, so it applies small edits (`scripts/patch_deps.py --wasi`), and
-  one more for Apple's HDR profile (`--skcms`):
+  libheif v1.23.5, libde265 v1.1.3 and the x265 4.3 release archive (checked by
+  SHA-256, the same folder Compress Videos builds from) into the repository's
+  `.deps/` folder, shared with the other tools. WASI has no threads, C++
+  exceptions or `mkstemp`, so it applies small edits
+  (`scripts/patch_deps.py --wasi --x265`), and one more for Apple's HDR profile
+  (`--skcms`):
+  - x265: its frame encoder runs on its own thread, which WASI can't start, so
+    `Thread::start()` runs the thread body on the calling thread,
+    `FrameEncoder::threadMain()` only sets up its thread-local data and
+    `startCompressFrame()` encodes the frame at once (WASI's stub condition
+    variables never block, so an untriggered `Event::wait()` would spin);
+    `nice()`, `dlopen()`, shared memory (ring memory, multi-pass only) and
+    `sem_unlink()` are stubbed out. jxlbatch opens x265 with `--pools none` and
+    one frame thread on every platform, so the native and WebAssembly builds
+    write the same bytes; a 24 MP photo takes about 20 s under wasmtime on an
+    M4 Pro (1 to 2 s with threads natively).
   - libjxl: drops its threads dependency, the same edit as
     [gen2brain/jpegxl](https://github.com/gen2brain/jpegxl).
   - libheif: decodes on the calling thread, keeping HEVC deblocking and SAO;
@@ -610,14 +781,18 @@ python3 scripts/build_mac_shortcuts.py --guess
   `.deps/libjxl-native`, since `build-wasm.sh` patches the threads out of
   `.deps/libjxl` (the libheif edits are guarded by `__wasi__` and
   `__cpp_exceptions`, so that checkout is shared). `jxlbatch` is compiled with
-  `-DJXLBATCH_THREADS` (libjxl's thread pool), linked statically (the result
-  depends only on `libc++` and `libSystem`, which the script checks with
-  `otool -L`), stripped and ad-hoc signed. It refuses to run on an Intel Mac.
-  The output is byte for byte `jxlbatch.wasm`'s (`test_mac_script.py`).
+  `-DJXLBATCH_THREADS` (libjxl's thread pool; the HEIC route's tiles on several
+  threads) and `-DJXLBATCH_HEIC`, linked statically with an 8-bit x265 built
+  from the same archive (the result depends only on `libc++` and `libSystem`,
+  which the script checks with `otool -L`), stripped and ad-hoc signed. It
+  refuses to run on an Intel Mac. The output is byte for byte `jxlbatch.wasm`'s
+  (`test_mac_script.py`, `test_heic.py`). Linking x265 makes the encoders GPL,
+  as the repository is.
 - **`jxlbatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC), HDR decoding and keeping Apple's HDR profile (a tiny
-  built-in HDR HEIC) and a 12 MP encode. Running it in a-Shell checks the
-  phone.
+  built-in HDR HEIC), a HEIC round trip (the HDR HEIC re-encoded keeps its gain
+  map and HDR pixels; an SDR HEIC written from pixels decodes), a 12 MP JPEG XL
+  encode and a 1024x768 HEIC encode. Running it in a-Shell checks the phone.
 - **Tests** are in `tests/compress-photos/`: the generated shortcuts (both
   platforms), the encoder (all four builds), end-to-end conversions checked
   with Apple's ImageIO, the iPhone shortcut's a-Shell commands run against the
@@ -637,7 +812,8 @@ python3 scripts/build_mac_shortcuts.py --guess
   iPhone. `build_shortcuts.py --fetch <iCloud link>` saves it as
   `scripts/sample/JXL Sample.plist`, and later runs copy the exact format from
   it.
-- The quality presets are `QUALITY_PRESETS` near the top of the script.
+- The quality presets are `QUALITY_PRESETS` in `scripts/wf.py`, shared with the
+  Mac shortcuts.
 - `scripts/build_mac_shortcuts.py` writes and signs the two Mac `.shortcut`
   files the same way. Its `--guess` templates are the built-in actions only (no
   a-Shell). To check the Mac actions' format against a real shortcut, build one
@@ -678,7 +854,7 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
       3. **End If** (Otherwise stays empty).
 5. **Count**: Items in the Split Text from step 3.
 6. a-Shell **Execute Command**:
-   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_done.txt jxl_started`,
+   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started`,
    Keep Going on.
 7. **Show Notification**: `Saved <Count> photo(s) to Photos.`
 
@@ -744,7 +920,8 @@ no input: Continue):
    6. **Match Text**: `\d+` in Name. Its Matches is the quality.
 
 4. a-Shell **Execute Command**:
-   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_started`, Keep Going on.
+   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started`, Keep
+   Going on.
 
 5. **Repeat with Each** item in `Stills`:
 
@@ -754,13 +931,22 @@ no input: Continue):
    3. a-Shell **Put File**: Renamed Item, Overwrite on.
    4. **Text**: `<Repeat Index>|<Name>`.
    5. **Add to Variable**: Text to `Jobs`.
+   6. **Get Details of Images**: Date Taken of Repeat Item.
+   7. **Match Text**: `.` in Date Taken, Case Sensitive on.
+   8. **If** Matches has any value: **Format Date**: Date Taken, Date Format
+      ISO 8601, Include ISO 8601 Time on; **Text**:
+      `<Repeat Index>|<Formatted Date>`; **Add to Variable**: Text to `Dates`.
+      **End If**.
 
 6. **Combine Text**: `Jobs` with New Lines.
 
 7. **Set Name**: Combined Text to `jxl_job.txt`, Don't Include File Extension
    on.
 
-8. a-Shell **Put File**: Renamed Item, Overwrite on.
+8. a-Shell **Put File**: Renamed Item, Overwrite on. Then **If** `Dates` has
+   any value: **Combine Text** `Dates` with New Lines, **Set Name** to
+   `jxl_dates.txt` (Don't Include File Extension on), a-Shell **Put File**
+   (Overwrite on). **End If**.
 
 9. **If** Shortcut Input has any value:
 
@@ -788,10 +974,11 @@ no input: Continue):
         2. **Get Details of Images**: Album of that original.
         3. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
            Photo Media, to Repeat Item 2.
-        4. **Match Text** `(^|\n)Compressed to JXL($|\n)` in that Album list.
-           **If** Matches has any value: nothing. **Otherwise**: **Save to
-           Photo Album**: the original, to a **Text** `Compressed to JXL`;
-           **Add to Variable** `Collected` (the original). **End If**.
+        4. **Match Text** `(^|\n)Compressed originals($|\n)` in that Album
+           list. **If** Matches has any value: nothing. **Otherwise**: **Save
+           to Photo Album**: the original, to a **Text**
+           `Compressed originals`; **Add to Variable** `Collected` (the
+           original). **End If**.
      4. Steps 6–7 of JXL-Import, the notification also counting `Collected`.
    - **End If**. (In the share-sheet branch, step 4 above runs for each item of
      `Stills` before the Execute Command.)

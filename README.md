@@ -7,10 +7,10 @@ free terminal app, because iOS has no JPEG XL encoder or quality-controlled
 video encoder of its own. On the Mac, Shortcuts runs the same encoder itself
 (Run Shell Script).
 
-| Shortcut                                               | What it does                                                                                                           | iPhone             | Mac                                                                       |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → JPEG XL, saved back to Photos; Live Photos and videos are skipped                  | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
-| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
+| Shortcut                                               | What it does                                                                                                                              | iPhone             | Mac                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → smaller HEIC (HDR kept as it is) or JPEG XL, saved back to Photos; Live Photos and videos are skipped | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped                    | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
 
 <!--TOC-->
 

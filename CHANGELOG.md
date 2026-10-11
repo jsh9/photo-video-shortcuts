@@ -3,6 +3,56 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.7.0] - 2026-10-11
+
+- Added
+  - A second output format, **HEIC**, on both platforms: the shortcuts first
+    ask the format (HEIC or JPEG XL), then that format's quality. A HEIC copy
+    is the camera's own file with its HEVC tiles re-encoded by x265 (preset
+    slow, at the chosen RF: 22 "placebo" to 40, default 26); the gain map,
+    `tmap` item, thumbnail, Exif and XMP stay byte for byte, so Photos shows
+    the copy exactly as the original, without the pink patches an HDR JPEG XL
+    shows in bright skies. Apple's Photographic Styles data (about 0.3 MB) is
+    dropped. *Drop HDR* leaves the gain map out; a JPEG, a PNG, or a HEIF whose
+    picture isn't 8-bit 4:2:0 HEVC tiles is written anew as an SDR HEIC.
+    `jxlbatch --heic [--rf RF]`; x265 is linked into every build (the
+    WebAssembly build runs it on the calling thread, about 20 s per 24 MP photo
+    under wasmtime on an M4 Pro), which makes the encoders GPL as the
+    repository is. The self-test checks a HEIC round trip.
+  - Each JPEG XL copy gets the date Photos shows for its original, in Photos
+    and in its EXIF capture date (`DateTimeOriginal`, `CreateDate` and their
+    time zone), on both platforms. A date changed in Photos (Adjust Date and
+    Time), which Photos keeps in its library and not in the original file, is
+    no longer lost with the original; a photo without a capture date of its own
+    (an image saved from an app that removed it, a screenshot) is no longer
+    dated at the time of the conversion. A photo whose capture date already is
+    that moment keeps its EXIF byte for byte; one without a time zone in its
+    EXIF whose time is that moment in some zone keeps its time and gets the
+    zone. The shortcuts pass the dates to `jxlbatch` in `jxl_dates.txt`
+    (`i|2024-01-01T17:00:00-05:00`); the log says when a date or zone was
+    written. The Mac's selection route also checks each imported copy's date in
+    Photos.
+  - Update both the shortcuts and the encoders (`jxlbatch.wasm`,
+    `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
+    shortcut gives none.
+  - A new quality preset above 88: *93*, "Placebo", on both platforms.
+  - A warning for an HDR photo with much bright sky (smooth, colored, brighter
+    than SDR white; 5% of the photo or more, `--sky-warn` changes it): Photos'
+    own rendering of an HDR JPEG XL shows faint pink patches in such skies, an
+    Apple issue the file doesn't have (see the README's known issue). The
+    batch's end says how many; the HEIC route avoids the patches.
+- Changed
+  - No grain is added to HDR JPEG XL copies any more. It only hid the steps of
+    Apple's 8-bit rendering of an HDR JPEG XL, which shows the pink patches
+    above anyway; the HEIC route avoids that rendering.
+    `--grain FINE --grain-coarse COARSE` still add it (60+40 were the amounts
+    tuned for quality 83).
+  - The album the converted originals are collected in is *Compressed
+    originals* (it was *Compressed to JXL*); a copy is never added to either.
+    Notifications are titled *Compress Photos*.
+  - Update both the shortcuts and the encoders: an older shortcut has no format
+    question, and an older `jxlbatch` has no `--heic`.
+
 ## [Compress Photos 0.6.0] - 2026-10-06
 
 - Added

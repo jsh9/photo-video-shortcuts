@@ -9,18 +9,21 @@ LOGDIR="$HOME/Library/Caches/compress-photos-macos"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/@ROUTE@.log"
 : > "$LOG"
-# unique PATH: PATH if nothing is there, else "PATH 2", "PATH 3"... (for .jxl)
+# unique PATH: PATH if nothing is there, else "PATH 2", "PATH 3"... (before
+# the extension: "Name 2.heic")
 unique() {
-  local dest=$1 base=${1%.jxl} k=2
-  while [ -e "$dest" ]; do dest="$base $k.jxl"; k=$((k + 1)); done
+  local dest=$1 base=${1%.*} ext=${1##*.} k=2
+  while [ -e "$dest" ]; do dest="$base $k.$ext"; k=$((k + 1)); done
   print -r -- "$dest"
 }
 @WORK_CHECK@
 VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
+FORMAT='@FORMAT@'  # heic: HEIC (x265, QUALITY is the RF); anything else: JPEG XL (QUALITY is the quality)
+case $FORMAT in heic) FORMAT_NAME=HEIC;; *) FORMAT_NAME='JPEG XL';; esac
 QUALITY='@QUALITY@'
 CORES='@CORES@'  # all: several photos at a time, every core; one: one photo, one thread
-HDR='@HDR@'  # keep: HDR photos become HDR (PQ) JPEG XL; drop: every photo becomes SDR
+HDR='@HDR@'  # keep: HDR photos keep their HDR; drop: every photo becomes SDR
 # @LABEL@: one per input file, in the same order (see the shortcut)
 @LABEL@=$(cat <<'JXL_LINES'
 @LINES@

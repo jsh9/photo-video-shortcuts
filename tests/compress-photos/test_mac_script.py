@@ -85,6 +85,7 @@ class Mac:
             TMPDIR=f'{self.tmp}/',
             HOME=str(self.home),
             WATCH='1' if watch else '0',  # the Terminal progress window
+            TZ='America/New_York',  # the Mac's time zone, for the dates
         )
         if watch:
             # a fake `open` first on PATH records what the script opens
@@ -111,19 +112,23 @@ class Mac:
             quality='83',
             lines='',
             skipped='',
+            fmt='jxl',
             cores='all',
             hdr='keep',
+            dates='',
     ):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
             self.shortcuts['photos' if shortcut == 'selection' else shortcut],
             {
-                'Matches': quality,
+                'Format': fmt,  # the format menu's value
+                'Quality': quality,
                 'Cores': cores,  # the cores menu's value
                 'HDR': hdr,  # the HDR menu's value
                 'Combined Text': lines,
                 'Skipped Echo': skipped,
                 'AppleScript Result': lines,  # the selection route's IDS
+                'Dates': dates,  # the picker route's dates in Photos
             },
         )
 
@@ -224,6 +229,28 @@ def test_photos_prints_one_line_per_result_with_the_path(mac):
     assert mac.log.startswith('Skipped 1 video(s): only still photos')
     assert 'Done: 2 of 2 converted' in mac.log
     assert '[1/2] IMG_0001' in mac.log
+
+
+def test_photos_dates_go_to_jxlbatch(mac):
+    # The picker route's Dates ("index|date", from Shortcuts' Format Date)
+    # become jxl_dates.txt as they are; jxlbatch writes them into the copies.
+    a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
+    b = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    out = mac.batch('photos', a, b, dates='2|2024-07-01T09:30:00-04:00')
+    assert (mac.work / 'jxl_dates.txt').read_text() == (
+        '2|2024-07-01T09:30:00-04:00\n'
+    )
+    first, second = (
+        mac.work / line.split('|')[0] for line in out.splitlines()
+    )
+    assert 'ExifIFD:DateTimeOriginal' not in ph.exif_tags(first)
+    assert ph.exif_tags(second)['ExifIFD:DateTimeOriginal'] == (
+        '2024:07:01 09:30:00'
+    )
+    # none at all: no file
+    shutil.rmtree(mac.work)
+    mac.batch('photos', a)
+    assert not (mac.work / 'jxl_dates.txt').exists()
 
 
 def test_photos_follow_up_scripts_read_the_log_and_clean_up(mac):
@@ -396,7 +423,12 @@ def test_selection_converts_exported_originals(mac):
     (mac.selection_work / 'in' / 'notes.txt').write_text('not a photo')
     out = mac.batch(
         'selection',
-        lines='A1|IMG_0001.HEIC\nA2|IMG_0002.HEIC\nA3|IMG_0003.HEIC\nA4|clip.MOV\n',
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
+            'A3|2024-01-03 10:00:00|IMG_0003.HEIC\n'
+            'A4||clip.MOV\n'
+        ),
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
@@ -417,6 +449,45 @@ def test_selection_converts_exported_originals(mac):
     assert (mac.selection_work / 'in' / 'IMG_0001.HEIC').exists()
 
 
+def test_selection_gives_the_copies_their_dates_in_photos(mac):
+    # Photos gives each photo's date on the Mac's clock (here New York's);
+    # the script adds that zone's offset on that date (winter, summer), and
+    # jxlbatch writes it into the copy's EXIF. A photo without one in IDS
+    # (notes.txt) or with an empty one gets none, nor does a clock time in
+    # the hour that repeats when daylight saving time ends (1:30 on
+    # 2024-11-03 is 1:30 EDT and 1:30 EST): it is two moments.
+    exported(mac, 'hdr/o1.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0003.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0004.HEIC')
+    mac.batch(
+        'selection',
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
+            'A3||IMG_0003.HEIC\n'
+            'A4|2024-11-03 01:30:00|IMG_0004.HEIC\n'
+        ),
+    )
+    assert (mac.selection_work / 'jxl_dates.txt').read_text() == (
+        '1|2024-01-01T17:00:00-0500\n2|2024-07-01T09:30:00-0400\n'
+    )
+    folder = mac.selection_work / 'out'
+    for name, taken, offset in [
+        ('IMG_0001.jxl', '2024:01:01 17:00:00', '-05:00'),
+        ('IMG_0002.jxl', '2024:07:01 09:30:00', '-04:00'),
+    ]:
+        tags = ph.exif_tags(folder / name)
+        assert tags['ExifIFD:DateTimeOriginal'] == taken
+        assert tags['ExifIFD:OffsetTimeOriginal'] == offset
+
+    assert 'ExifIFD:DateTimeOriginal' not in ph.exif_tags(
+        folder / 'IMG_0003.jxl'
+    )
+    log = mac.log_file('selection').read_text()
+    assert 'date from Photos: 2024:01:01 17:00:00 -05:00' in log
+
+
 def test_selection_duplicate_names_get_no_id(mac, gen):
     # Two selected photos with one file name can't be told apart in the
     # export: neither gets an id (no albums, nothing collected), and the log
@@ -426,7 +497,11 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
     exported(mac, 'hdr/o1.heic', 'IMG_0002.HEIC')
     out = mac.batch(
         'selection',
-        lines='A|IMG_0001.HEIC\nB|IMG_0001.HEIC\nC|IMG_0002.HEIC\n',
+        lines=(
+            'A|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'B|2024-01-02 17:00:00|IMG_0001.HEIC\n'
+            'C|2024-01-03 17:00:00|IMG_0002.HEIC\n'
+        ),
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
@@ -439,6 +514,10 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
         log.count('! two or more selected photos are named IMG_0001.HEIC') == 1
     )
     assert re.search(gen.WARNINGS, log)
+    # nor a date: only IMG_0002 (the third job) has one
+    assert (mac.selection_work / 'jxl_dates.txt').read_text() == (
+        '3|2024-01-03T17:00:00-0500\n'
+    )
 
 
 def test_selection_unknown_id_and_export_error(mac, gen):
@@ -461,7 +540,8 @@ def test_selection_nothing_exported(mac, gen):
 
 def test_selection_follow_up_scripts(mac):
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
-    mac.batch('selection', lines='A1|IMG_0001.HEIC\n')
+    mac.batch('selection', lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n')
+    assert (mac.selection_work / 'jxl_dates.txt').exists()
     show_log, finish = mac.follow_ups('selection')
     assert mac.run(show_log).stdout == mac.log_file('selection').read_text()
     assert mac.run(finish, stdin='outcome line').returncode == 0
@@ -596,6 +676,71 @@ def test_files_name_and_place_from_the_real_path(mac):
     assert not list(mac.tmp.glob('*.jxl'))
 
 
+@pytest.mark.parametrize(
+    ('fmt', 'options'),
+    [
+        ('heic', ['--heic', '--rf', '26']),  # HEIC: x265 at the RF
+        ('jxl', ['-q', '26', '-e', '7']),  # JPEG XL at the quality
+        ('', ['-q', '26', '-e', '7']),  # anything else: JPEG XL
+    ],
+)
+def test_format_choice_becomes_jxlbatch_options(mac, fmt, options):
+    # The shortcut's first question (HEIC / JPEG XL) reaches the script as
+    # FORMAT with the chosen number in QUALITY; run.zsh turns them into
+    # jxlbatch --heic --rf or -q -e.
+    a = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script('photos', fmt=fmt, quality='26'),
+        a,
+        jxlbatch=fake_jxlbatch(mac),
+    )
+    assert result.returncode == 0, result.stderr
+    args = (mac.root / 'args.txt').read_text().splitlines()
+    assert args == [
+        '--mac',
+        *options,
+        '-j',
+        '0',
+        '-C',
+        str(mac.work),
+        'jxl_job.txt',
+    ]
+
+
+def test_files_heic_route_writes_heic_next_to_originals(mac):
+    # The HEIC route: .heic copies next to the originals, "Name 2.heic" when
+    # a file is there, the fallback folder ~/Pictures/HEIC, and the count
+    # names the format.
+    album = mac.root / 'My Photos'
+    a = photo(album, 'hdr/o1.heic', 'a b.heic')
+    copy = photo(mac.tmp, 'hdr/srgb.heic', 'copy.heic')
+    out = mac.batch('files', a, copy, fmt='heic', quality='30', lines=f'{a}\n')
+    assert out.splitlines()[-1] == 'Wrote 2 HEIC file(s).'
+    assert 'jxlbatch: 2 photos, HEIC, RF 30' in out
+    assert (album / 'a b 2.heic').exists()  # "a b.heic" is the original
+    assert (mac.home / 'Pictures' / 'HEIC' / 'copy.heic').exists()
+    assert not list(mac.root.rglob('*.jxl'))
+    mac.batch('files', a, fmt='heic', quality='30', lines=f'{a}\n')
+    assert (album / 'a b 3.heic').exists()
+
+
+def test_photos_heic_route_names_the_copies_heic(mac):
+    # The picker route's lines for the shortcut end in the copy's name with
+    # the HEIC extension.
+    a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
+    result = mac.run(
+        mac.main_script(
+            'photos', fmt='heic', quality='26', lines='IMG_0001.HEIC\n'
+        ),
+        a,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == (
+        'jxl_out_1.heic|1|delete|IMG_0001.heic'
+    )
+    assert (mac.work / 'jxl_out_1.heic').exists()
+
+
 def test_files_unwritable_folder_falls_back(mac):
     album = mac.root / 'Pictures'
     a = photo(album, 'hdr/srgb.heic', 'a.heic')
@@ -613,7 +758,8 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
     Same libraries, same settings: the Mac shortcuts' encoder writes the same
     bytes as the iPhone's, HDR included (libjxl's output doesn't depend on the
     thread count), also converting two photos at a time (-j 2, as the
-    shortcuts' "All cores" may).
+    shortcuts' "All cores" may), and with dates from Photos written into the
+    EXIF.
     """
     fixtures = [
         FIXTURES / 'hdr' / 'o1.heic',
@@ -631,6 +777,9 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
         folder = tmp_path / label
         folder.mkdir()
         ph.stage(folder, fixtures)
+        (folder / 'jxl_dates.txt').write_text(
+            '1|2024-01-01T17:00:00-05:00\n3|2022-02-02T10:00:00.250+09:00\n'
+        )
         result = encoder.run(
             ['-q', '83', '-e', '7', *args, 'jxl_job.txt'], folder
         )
