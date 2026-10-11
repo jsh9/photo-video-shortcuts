@@ -1,5 +1,5 @@
 # Each input is one photo; its job name is the photo's name from Shortcuts
-# (NAMES), or else the file's. jxlbatch strips the extension and adds .jxl.
+# (NAMES), or else the file's. photobatch strips the extension and adds .jxl.
 names=("${(@f)NAMES}")
 i=0
 for f in "$@"; do
@@ -8,7 +8,7 @@ for f in "$@"; do
   printf '%d|%s\n' "$i" "${names[$i]:-${f:t}}" >> "$WORK/jxl_job.txt"
 done
 # The photos' dates in Photos, "index|2024-01-01T17:00:00-05:00" each (the
-# shortcut's Dates, one per line; none for a photo without one): jxlbatch
+# shortcut's Dates, one per line; none for a photo without one): photobatch
 # writes a date into the copy's EXIF when the original's capture date is
 # another moment or missing.
 DATES=$(cat <<'JXL_DATES'

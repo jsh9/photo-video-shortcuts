@@ -2,7 +2,7 @@
 The generated Mac shortcuts (scripts/build_mac_shortcuts.py), checked without
 importing them: their structure, surfaces, the Run Shell Script and Run
 AppleScript actions, the quality presets, and the file names and lines they
-share with jxlbatch. The script itself runs for real in test_mac_script.py.
+share with photobatch. The script itself runs for real in test_mac_script.py.
 """
 
 import pathlib
@@ -94,7 +94,7 @@ def test_repeat_variables_in_scope(shortcuts, name):
 
 @pytest.mark.parametrize('name', [PHOTOS, FILES])
 def test_no_ashell_and_no_handoff(shortcuts, name):
-    # The Mac shortcuts run jxlbatch themselves and wait for it.
+    # The Mac shortcuts run photobatch themselves and wait for it.
     for action in shortcuts[name]:
         assert not ph.ident(action).startswith('AsheKube.app.a-Shell.')
         assert ph.ident(action) != 'is.workflow.actions.waittoreturn'
@@ -125,7 +125,7 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
     assert "CORES='all'" in text
     assert 'for f in "$@"; do' in text
     assert (
-        '"$jxlbatch" --mac "${fmt[@]}" "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
+        '"$photobatch" --mac "${fmt[@]}" "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
         in text
     )
     assert 'open -a Terminal "$cmd"' in text
@@ -288,7 +288,7 @@ def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
     # After the quality list, a Choose from Menu asks how to use the cores:
     # "All cores (fast)" first (the usual choice), then "One core". Each case
     # sets the variable Cores to the value the script reads, and the batch
-    # script turns "one" into one photo at a time on one thread (jxlbatch
+    # script turns "one" into one photo at a time on one thread (photobatch
     # -j 1 -t 1) and anything else into several photos at a time with all the
     # cores (-j 0).
     assert gen.CORES_CHOICES == [
@@ -302,7 +302,7 @@ def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
         for text in ph.shell_scripts(
             shortcuts[name], {**VALUES, 'Cores': 'one'}
         ):
-            if '"$jxlbatch"' in text:
+            if '"$photobatch"' in text:
                 assert "CORES='one'" in text
                 assert 'one) cores=(-j 1 -t 1);;' in text
                 assert '*) cores=(-j 0);;' in text
@@ -313,7 +313,7 @@ def test_cores_menu_after_the_quality_in_each_route(gen, shortcuts):
 
 def test_hdr_menu_after_the_cores_in_each_route(gen, shortcuts):
     # The third question: keep an HDR photo's HDR (the usual choice, first),
-    # or drop it, which the script turns into jxlbatch --sdr: every photo is
+    # or drop it, which the script turns into photobatch --sdr: every photo is
     # then an ordinary SDR JPEG XL.
     assert gen.HDR_CHOICES == [
         ('Keep HDR', 'keep'),
@@ -326,7 +326,7 @@ def test_hdr_menu_after_the_cores_in_each_route(gen, shortcuts):
         for text in ph.shell_scripts(
             shortcuts[name], {**VALUES, 'HDR': 'drop'}
         ):
-            if '"$jxlbatch"' in text:
+            if '"$photobatch"' in text:
                 assert "HDR='drop'" in text
                 assert 'drop) hdr=(--sdr);;' in text
                 assert '*) hdr=();;' in text
@@ -376,7 +376,7 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
 
 
 def test_every_imported_original_is_collected(gen, shortcuts):
-    # Each result line carries jxlbatch's "delete" or "keep" ("keep": the
+    # Each result line carries photobatch's "delete" or "keep" ("keep": the
     # JPEG XL lacks the original's HDR, which the log says too). Nothing acts
     # on it any more: the selection route's import.applescript collects every
     # imported file's original in ORIGINALS_ALBUM, and the shortcut's own
@@ -762,7 +762,7 @@ def test_applescripts_compile(gen):
             assert result.returncode == 0, (name, result.stderr)
 
 
-def test_photos_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
+def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
     # The picker route reads each photo's date in Photos (Date Taken) in the
     # repeat that collects the names (ph.check_photo_dates), and its batch
     # script gets Dates; the selection route has them from Photos' AppleScript

@@ -11,13 +11,13 @@ a-Shell-Intents/ExecuteCommandIntentHandler.swift):
 - Shortcuts run in the Shortcuts folder (``$SHORTCUTS``, ``~shortcuts``),
   where Put File saves. But when a shortcut has to launch a-Shell, the folder
   a-Shell restores from its last session can take over. On the iPhone,
-  jxlbatch then found the job neither in that folder nor through
+  photobatch then found the job neither in that folder nor through
   ``$SHORTCUTS``, so a launched a-Shell here starts in ~/Documents, without
   ``$SHORTCUTS``.
-- ``jxlbatch`` is ``~/Documents/bin/jxlbatch.wasm``, run here by wasmtime. It
+- ``photobatch`` is ``~/Documents/bin/photobatch.wasm``, run here by wasmtime. It
   can fail once, like a-Shell whose WebAssembly engine hasn't started.
 - dash only runs files named exactly like the command, so it can't run
-  ``jxlbatch.wasm``.
+  ``photobatch.wasm``.
 - ``sleep`` returns at once, and ``open`` records the URL that would switch
   back to Shortcuts.
 """
@@ -58,7 +58,7 @@ class AShell:
             folder.mkdir(parents=True)
 
         # As on the iPhone: a .wasm file, not an executable.
-        shutil.copy(wasm, self.bin / 'jxlbatch.wasm')
+        shutil.copy(wasm, self.bin / 'photobatch.wasm')
         (shims / 'sleep').write_text('#!/bin/sh\nexit 0\n')
         (shims / 'sleep').chmod(0o755)
         self.path = f'{shims}:{self.bin}:{os.environ["PATH"]}'
@@ -161,7 +161,7 @@ SKIPPED_NOTE = 'Skipped 1 Live Photo(s): only still photos are converted.'
 
 def batch_command(actions, url, skipped=True):
     """
-    The Execute Command that runs jxlbatch and then opens ``url``. With
+    The Execute Command that runs photobatch and then opens ``url``. With
     ``skipped``, the shortcut skipped a Live Photo and set Skipped Echo.
     """
     values = {
@@ -172,7 +172,7 @@ def batch_command(actions, url, skipped=True):
     return next(
         c
         for c in commands
-        if 'jxlbatch' in c and c.split('\n')[-1] == f'open {url}'
+        if 'photobatch' in c and c.split('\n')[-1] == f'open {url}'
     )
 
 
@@ -232,8 +232,8 @@ def import_results(folder):
 
 
 def batches_started(shell):
-    """How many times jxlbatch started converting the batch."""
-    return len(re.findall(r'jxlbatch: \d+ photos?,', shell.output))
+    """How many times photobatch started converting the batch."""
+    return len(re.findall(r'photobatch: \d+ photos?,', shell.output))
 
 
 @LAUNCHED
@@ -280,7 +280,7 @@ def test_retries_when_engine_not_ready(actions, ashell, photos, launched):
 
 
 def test_no_retry_once_started(actions, ashell, tmp_path):
-    # jxlbatch ran but converted nothing: running it again wouldn't help.
+    # photobatch ran but converted nothing: running it again wouldn't help.
     shell = ashell()
     gif = tmp_path / 'not-a-photo.gif'
     Image.new('RGB', (8, 8)).save(gif)
@@ -293,7 +293,7 @@ def test_no_retry_once_started(actions, ashell, tmp_path):
 def test_missing_job_says_where_it_looked(ashell):
     # So a failure on the iPhone shows why the job wasn't found.
     shell = ashell(launched=True)
-    shell.run(f'jxlbatch -q {QUALITY} -e 7 jxl_job.txt')
+    shell.run(f'photobatch -q {QUALITY} -e 7 jxl_job.txt')
     message = ' '.join(shell.output.split())
     assert 'cannot find jxl_job.txt' in message
     assert f'$PWD ({shell.documents})' in message
@@ -301,7 +301,7 @@ def test_missing_job_says_where_it_looked(ashell):
 
 
 @LAUNCHED
-def test_dates_reach_jxlbatch(actions, ashell, photos, launched):
+def test_dates_reach_photobatch(actions, ashell, photos, launched):
     # jxl_dates.txt, next to the job, is read wherever a-Shell started.
     shell = ashell(launched)
     originals = [photos['heic_p3'], photos['jpeg']]

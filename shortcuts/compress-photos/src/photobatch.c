@@ -1,4 +1,4 @@
-// jxlbatch: converts the photos staged by the "Compress Photos" shortcut
+// photobatch: converts the photos staged by the "Compress Photos" shortcut
 // into JPEG XL, keeping the original EXIF/XMP metadata.
 //
 // For each job line "i|Name" in JOBFILE it reads jxl_in_i.orig (the original
@@ -59,7 +59,7 @@
 #define SKY_WARN_DEFAULT 5.0
 // Created as soon as a batch starts. When a shortcut launches a-Shell, its
 // WebAssembly engine may not be loaded yet and the first command fails
-// without running; the shortcut then runs jxlbatch --retry, which does
+// without running; the shortcut then runs photobatch --retry, which does
 // nothing when this file exists.
 #define STARTED_FILE "jxl_started"
 
@@ -979,7 +979,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
   // The original photo provides both pixels and metadata. A PNG converted by
   // Shortcuts (jxl_in_N.png, from older versions of the shortcut) is only
-  // used for formats jxlbatch can't decode, such as DNG.
+  // used for formats photobatch can't decode, such as DNG.
   const int have_orig = read_file(p_orig, &orig, &orig_len) == 0;
   const file_format_t orig_format = have_orig ? detect_format(orig, orig_len) : FMT_UNKNOWN;
   const int decode_orig = orig_format == FMT_HEIF || orig_format == FMT_JPEG || orig_format == FMT_PNG;
@@ -1419,7 +1419,7 @@ static void print_header(const options_t *opt) {
   char heif[64];
   heif_decoder_version(heif, sizeof heif);
   const char *x265 = hevc_encoder_version();
-  say_wrap("", "jxlbatch %s (libjxl %u.%u.%u, %s%s%s, %s)", JXLBATCH_VERSION, v / 1000000, (v / 1000) % 1000,
+  say_wrap("", "photobatch %s (libjxl %u.%u.%u, %s%s%s, %s)", JXLBATCH_VERSION, v / 1000000, (v / 1000) % 1000,
            v % 1000, heif, x265[0] ? ", " : "", x265, BUILD_KIND);
   if (opt->heic) {
     say_wrap("", "HEIC, RF %g (x265, preset slow)", opt->rf);
@@ -1480,11 +1480,11 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   }
 #endif
   if (opt->heic) {
-    say_wrap("", "jxlbatch: %zu photo%s, HEIC, RF %g%s", count, count == 1 ? "" : "s", opt->rf, how);
+    say_wrap("", "photobatch: %zu photo%s, HEIC, RF %g%s", count, count == 1 ? "" : "s", opt->rf, how);
   } else if (opt->quality >= 100.0f) {
-    say_wrap("", "jxlbatch: %zu photo%s, lossless, effort %d%s", count, count == 1 ? "" : "s", opt->effort, how);
+    say_wrap("", "photobatch: %zu photo%s, lossless, effort %d%s", count, count == 1 ? "" : "s", opt->effort, how);
   } else {
-    say_wrap("", "jxlbatch: %zu photo%s, quality %g, effort %d%s", count, count == 1 ? "" : "s", opt->quality,
+    say_wrap("", "photobatch: %zu photo%s, quality %g, effort %d%s", count, count == 1 ? "" : "s", opt->quality,
              opt->effort, how);
   }
 
@@ -1564,17 +1564,17 @@ static void selftest_io(const char *label, const char *dir) {
     say("  %-12s (not set)\n", label);
     return;
   }
-  char *path = path_join(strcmp(dir, ".") == 0 ? NULL : dir, "jxlbatch_selftest.tmp");
+  char *path = path_join(strcmp(dir, ".") == 0 ? NULL : dir, "photobatch_selftest.tmp");
   const char *msg = "ok";
   FILE *f = path ? fopen(path, "wb") : NULL;
   if (!f) {
     msg = "cannot create a file";
   } else {
-    fputs("jxlbatch", f);
+    fputs("photobatch", f);
     fclose(f);
     uint8_t *back = NULL;
     size_t n = 0;
-    if (read_file(path, &back, &n) != 0 || n != 8 || memcmp(back, "jxlbatch", 8) != 0) {
+    if (read_file(path, &back, &n) != 0 || n != 8 || memcmp(back, "photobatch", 8) != 0) {
       msg = "wrote a file but could not read it back";
     } else if (remove(path) != 0) {
       msg = "read/write ok, delete failed";
@@ -1588,7 +1588,7 @@ static void selftest_io(const char *label, const char *dir) {
 // Writes and reads back a photo-sized file, the way a batch does.
 static int selftest_large_io(const char *dir) {
   const size_t n = 8 << 20;
-  char *path = path_join(strcmp(dir, ".") == 0 ? NULL : dir, "jxlbatch_selftest.big");
+  char *path = path_join(strcmp(dir, ".") == 0 ? NULL : dir, "photobatch_selftest.big");
   uint8_t *data = (uint8_t *)malloc(n), *back = NULL;
   size_t back_len = 0;
   if (!path || !data) {
@@ -1900,11 +1900,11 @@ static int memtest(void) {
 }
 
 static void usage(void) {
-  say("usage: jxlbatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [--grain FINE]\n"
+  say("usage: photobatch [--retry] [--sdr] [--mac] [-q QUALITY] [-e EFFORT] [-j PHOTOS] [-t THREADS] [--grain FINE]\n"
       "                [--grain-coarse COARSE] [-C DIR] JOBFILE\n"
-      "       jxlbatch --heic [--rf RF] [--retry] [--sdr] [--mac] [-j PHOTOS] [-t THREADS] [-C DIR] JOBFILE\n"
-      "       jxlbatch --selftest [-q QUALITY] [-e EFFORT] [-t THREADS] [-C DIR]\n"
-      "       jxlbatch --memtest | --version\n\n"
+      "       photobatch --heic [--rf RF] [--retry] [--sdr] [--mac] [-j PHOTOS] [-t THREADS] [-C DIR] JOBFILE\n"
+      "       photobatch --selftest [-q QUALITY] [-e EFFORT] [-t THREADS] [-C DIR]\n"
+      "       photobatch --memtest | --version\n\n"
       "  -q  JPEG XL quality, 1-100 (default 83; 100 = lossless)\n"
       "  -e  encoder effort, 1-10 (default 7; lower is faster)\n"
       "  --heic  write HEIC instead of JPEG XL: the photo's HEVC tiles re-encoded with x265 in\n"
@@ -2034,7 +2034,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (opt.heic && !hevc_available()) {
-    say("ERROR: HEIC output is not in this build of jxlbatch\n");
+    say("ERROR: HEIC output is not in this build of photobatch\n");
     return 2;
   }
   int rc;

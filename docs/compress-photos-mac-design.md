@@ -14,7 +14,7 @@ ______________________________________________________________________
   - [3.3. Compress Photo Files (macOS)](#33-compress-photo-files-macos)
   - [3.4. Installation (what the README will say)](#34-installation-what-the-readme-will-say)
 - [4. Technical design](#4-technical-design)
-  - [4.1. Encoder: `jxlbatch-macos`](#41-encoder-jxlbatch-macos)
+  - [4.1. Encoder: `photobatch-macos`](#41-encoder-photobatch-macos)
   - [4.2. The script core (`Run Shell Script`)](#42-the-script-core--run-shell-script)
   - [4.3. Getting File items back into Shortcuts](#43-getting-file-items-back-into-shortcuts)
   - [4.4. Showing progress and the log](#44-showing-progress-and-the-log)
@@ -74,7 +74,7 @@ Feasible, and simpler than the iPhone version. macOS Shortcuts has a built-in
 **Run Shell Script** action that runs `/bin/zsh` as the user and *waits for it
 to finish*, so the Mac shortcuts need no a-Shell, no `JXL-Import` helper, no
 marker files, no `--retry`, no `Wait to Return`, and no app switching. The
-encoder is the same `jxlbatch` source and the same job-file protocol
+encoder is the same `photobatch` source and the same job-file protocol
 (`jxl_job.txt` → `jxl_out_N.jxl` + `jxl_done.txt`), built as a native,
 statically linked, multi-threaded macOS binary instead of WebAssembly.
 
@@ -99,7 +99,7 @@ What is confirmed, on this Mac and in Apple's Shortcuts for Mac guide:
   that **Save to Photo Album** accepts.
 - `shortcuts run <name> --input-path FILE --output-path DIR` exists, so the Mac
   shortcuts can be driven end to end from pytest once imported.
-- `build-native.sh` already builds `jxlbatch` for arm64 macOS (ad-hoc,
+- `build-native.sh` already builds `photobatch` for arm64 macOS (ad-hoc,
   linker-signed); only the dynamic Homebrew libraries stand between it and a
   distributable binary.
 
@@ -112,7 +112,7 @@ format).
 | iPhone (a-Shell)                                                    | Mac (Run Shell Script)                                                                       |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Put File copies each photo into a-Shell's folder                    | Shortcuts passes the photos to the script as file arguments (`"$@"`); the script stages them |
-| a-Shell runs `jxlbatch.wasm`, single core, iOS memory ceiling       | native `jxlbatch`, all cores (`JXLBATCH_THREADS`), no ceiling                                |
+| a-Shell runs `photobatch.wasm`, single core, iOS memory ceiling     | native `photobatch`, all cores (`JXLBATCH_THREADS`), no ceiling                              |
 | handoff back by URL (`shortcuts://run-shortcut?name=JXL-Import`)    | none: Run Shell Script is synchronous, the shortcut continues when it exits                  |
 | progress visible in a-Shell, which must stay in the foreground      | runs in the background; the log is shown afterwards (Quick Look) when it has warnings        |
 | two shortcuts (`Compress Photos`, `JXL-Import`), the second by name | one shortcut per use case, no helper                                                         |
@@ -191,11 +191,11 @@ Services menu). Also usable from the Shortcuts app with a file picker. Nothing
 touches Photos and nothing is ever deleted (decision 3).
 
 Flow: expand folders (Get Contents of Folder), filter to HEIF/JPEG/PNG by
-extension in the script (jxlbatch rejects other formats itself, with the batch
-continuing), choose a quality, run the same script core with `OUTPUT=beside`,
-which renames `jxl_out_N.jxl` to `<Name>.jxl` next to each original (never
-overwriting: `<Name> 2.jxl`), Quick Look the log on warnings, notification
-"Wrote N file(s)". Nothing touches Photos and nothing is deleted.
+extension in the script (photobatch rejects other formats itself, with the
+batch continuing), choose a quality, run the same script core with
+`OUTPUT=beside`, which renames `jxl_out_N.jxl` to `<Name>.jxl` next to each
+original (never overwriting: `<Name> 2.jxl`), Quick Look the log on warnings,
+notification "Wrote N file(s)". Nothing touches Photos and nothing is deleted.
 
 Open point (spike S1c): whether Finder passes the real paths to the script or
 temporary copies. If copies, the shortcut also passes the originals' paths (Get
@@ -206,7 +206,7 @@ output goes to a fixed folder (`~/Pictures/JPEG XL/`) instead.
 
 1. Terminal, once:
    ```
-   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/jxlbatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch-macos && chmod +x ~/.local/bin/jxlbatch && ~/.local/bin/jxlbatch --selftest
+   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/photobatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch-macos && chmod +x ~/.local/bin/photobatch && ~/.local/bin/photobatch --selftest
    ```
    `curl` doesn't set the quarantine attribute, so Gatekeeper never sees the
    download; a browser download would need `xattr -d com.apple.quarantine`. The
@@ -231,7 +231,7 @@ encoder itself when it's missing or older than the shortcut.
 
 ## 4. Technical design
 
-### 4.1. Encoder: `jxlbatch-macos`
+### 4.1. Encoder: `photobatch-macos`
 
 - Same sources (`src/*.c`, `src/xmp.cpp`, `third_party/`), compiled with
   `-DJXLBATCH_THREADS -DJXLBATCH_VERSION=<VERSION>` like `build-native.sh`, but
@@ -252,7 +252,7 @@ encoder itself when it's missing or older than the shortcut.
   XL from macOS 14 (Sonoma) on. The build script refuses to run on an x86_64
   host rather than silently producing the wrong slice. A universal build can be
   added later without changing anything else.
-- Output file: `shortcuts/compress-photos/dist/jxlbatch-macos` (no extension;
+- Output file: `shortcuts/compress-photos/dist/photobatch-macos` (no extension;
   `release.json` and `release.py` currently require `.wasm`, see 4.7). The name
   carries no architecture suffix on purpose: if a universal build comes later,
   the README's "latest" download link keeps working.
@@ -268,9 +268,9 @@ encoder itself when it's missing or older than the shortcut.
     all; if so, add `--hint mac` (or `JXLBATCH_PLATFORM=mac`) that changes that
     one sentence. Everything else in the output is platform-neutral.
 - Determinism: libjxl's encoder output doesn't depend on the thread count, so
-  the Mac binary should produce byte-identical JXL files to `jxlbatch.wasm` for
-  the same input and settings. A test asserts this (4.8); if it ever fails, the
-  test documents the difference instead.
+  the Mac binary should produce byte-identical JXL files to `photobatch.wasm`
+  for the same input and settings. A test asserts this (4.8); if it ever fails,
+  the test documents the difference instead.
 
 ### 4.2. The script core (`Run Shell Script`)
 
@@ -282,15 +282,15 @@ set -u
 QUALITY='￼'          # the chosen quality, interpolated like the a-Shell command
 OUTPUT=photos        # or beside
 SHORTCUT_VERSION='0.4.0'
-JXLBATCH=${JXLBATCH:-$HOME/bin/jxlbatch}
-[ -x "$JXLBATCH" ] || { echo "ERROR: jxlbatch not found at $JXLBATCH. Install: <README link>"; exit 3; }
+JXLBATCH=${JXLBATCH:-$HOME/bin/photobatch}
+[ -x "$JXLBATCH" ] || { echo "ERROR: photobatch not found at $JXLBATCH. Install: <README link>"; exit 3; }
 "$JXLBATCH" --version | grep -q " $SHORTCUT_VERSION " || echo "! encoder version differs from the shortcut's; see <README link>" >&2
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/compress-photos.XXXXXX")
 [ "$OUTPUT" = photos ] || trap 'rm -rf "$WORK"' EXIT
 i=0
 for f in "$@"; do                       # the photos, as files
   i=$((i + 1))
-  ln -s "$f" "$WORK/jxl_in_$i.orig"     # jxlbatch open()s it; no copy
+  ln -s "$f" "$WORK/jxl_in_$i.orig"     # photobatch open()s it; no copy
   printf '%d|%s\n' "$i" "${f:t:r}" >> "$WORK/jxl_job.txt"   # index|name without extension
 done
 export COLUMNS=100
@@ -315,7 +315,7 @@ Notes:
   read the files; the shortcut's last action is a one-line Run Shell Script
   `rm -rf "<work>"`. For `OUTPUT=beside` the trap cleans up.
 - Exit status: Run Shell Script fails the shortcut on a nonzero status, which
-  is what we want for "encoder not found"; `jxlbatch` returns 1 when nothing
+  is what we want for "encoder not found"; `photobatch` returns 1 when nothing
   converted, so the shortcut ends with the log on screen in that case.
 - stdout is the protocol, stderr goes into the log; the `!` warning for a
   version mismatch is appended to the log too so Quick Look shows it.
@@ -350,7 +350,7 @@ shell; what it lacks is a window. The design:
 
 - Notification before the batch ("Converting 12 photos… this may take a
   minute"), notification after.
-- The full `jxlbatch` log is shown in Quick Look (Preview Document) when it
+- The full `photobatch` log is shown in Quick Look (Preview Document) when it
   contains a `!` warning, an `ERROR`, or a failed photo; otherwise only the
   notification. This keeps the HDR notes and the "originals kept" summary
   visible before the delete prompt, which the iPhone user reads in a-Shell.
@@ -361,26 +361,26 @@ shell; what it lacks is a window. The design:
 
 ### 4.5. Where the encoder lives, and versions
 
-- `~/.local/bin/jxlbatch` (decided). macOS has no single standard per-user bin
-  folder; `~/.local/bin` is the convention tools such as pipx and uv use today,
-  it already exists on the author's Mac, and it's on the PATH that Run Shell
-  Script's non-login zsh sees. The alternatives are weaker: `~/bin` is the
-  older convention and usually doesn't exist, `/usr/local/bin` is owned by root
-  (the install command would need `sudo`), `/opt/homebrew/bin` belongs to
+- `~/.local/bin/photobatch` (decided). macOS has no single standard per-user
+  bin folder; `~/.local/bin` is the convention tools such as pipx and uv use
+  today, it already exists on the author's Mac, and it's on the PATH that Run
+  Shell Script's non-login zsh sees. The alternatives are weaker: `~/bin` is
+  the older convention and usually doesn't exist, `/usr/local/bin` is owned by
+  root (the install command would need `sudo`), `/opt/homebrew/bin` belongs to
   Homebrew, and `~/Library/Application Support/…` has a space in it, awkward in
   a one-line install command. The folder being hidden in Finder doesn't matter:
   the user never browses it, and the script uses the full path.
 - The script looks in `~/.local/bin`, then `~/bin`, `/usr/local/bin` and
   `/opt/homebrew/bin`, and a `JXLBATCH=` line at the top of the script
   overrides all of them.
-- The script compares `jxlbatch --version` with the shortcut's version and adds
-  a `!` line to the log when they differ (the iPhone can't do this easily; the
-  Mac can). It still runs: the protocol is compatible across the versions
+- The script compares `photobatch --version` with the shortcut's version and
+  adds a `!` line to the log when they differ (the iPhone can't do this easily;
+  the Mac can). It still runs: the protocol is compatible across the versions
   published so far.
 - Phase 5 (optional): when the encoder is missing or older, a Choose from Menu
-  offers "Download jxlbatch <version> (about 5 MB, from GitHub)" and the script
-  fetches it with `curl` to `~/.local/bin`. Everything else keeps working
-  without it.
+  offers "Download photobatch <version> (about 5 MB, from GitHub)" and the
+  script fetches it with `curl` to `~/.local/bin`. Everything else keeps
+  working without it.
 
 ### 4.6. Permissions and macOS behaviors to document
 
@@ -403,8 +403,8 @@ and the encoder.
 
 Why (the trade-off, for the record):
 
-- Same folder, one version. For: a `jxlbatch` fix is one bump, one changelog
-  entry and one tag for both platforms, and `jxlbatch --version` matches the
+- Same folder, one version. For: a `photobatch` fix is one bump, one changelog
+  entry and one tag for both platforms, and `photobatch --version` matches the
   shortcut's version everywhere, which the Mac script checks (4.5). The encoder
   source, the job protocol, the quality presets and the still-photo filter are
   already here, so nothing is imported across tool folders. The README already
@@ -418,11 +418,11 @@ Why (the trade-off, for the record):
 - Separate `shortcuts/compress-photos-mac/` tool. For: no `release.py` schema
   change, its own tag, ZIP, README and changelog entries, an independent
   cadence. Against: one encoder source built with two version strings, so a
-  `jxlbatch` fix needs two bumps and two changelog entries and the two binaries
-  report different versions for identical code; the shared plist builder,
-  presets and filter still have to be imported from another tool's folder or
-  moved to a third place; the README's single Compress Photos row splits in
-  two, and Compress Videos inherits the precedent.
+  `photobatch` fix needs two bumps and two changelog entries and the two
+  binaries report different versions for identical code; the shared plist
+  builder, presets and filter still have to be imported from another tool's
+  folder or moved to a third place; the README's single Compress Photos row
+  splits in two, and Compress Videos inherits the precedent.
 
 The release-tooling change is a one-time cost; the two-version encoder would be
 a permanent source of confusion.
@@ -432,7 +432,7 @@ Changes:
 - `release.json`:
   ```json
   {
-    "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm", "jxlbatch-macos"],
+    "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
     "shortcuts": {
       "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
       "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]
@@ -491,15 +491,15 @@ Changes:
 - `test_mac_script.py` (new): the strongest new test. Extract the zsh script
   from the generated plist, substitute the quality, run it for real with
   `/bin/zsh` on the fixture photos, with `JXLBATCH` pointing at
-  `build/jxlbatch` (fast) and, when it exists, `dist/jxlbatch-macos`. Check the
-  printed `jxl_done.txt` lines, the output names, the `beside` renaming with a
-  collision, cleanup, exit codes, "encoder not found". This replaces the
+  `build/photobatch` (fast) and, when it exists, `dist/photobatch-macos`. Check
+  the printed `jxl_done.txt` lines, the output names, the `beside` renaming
+  with a collision, cleanup, exit codes, "encoder not found". This replaces the
   a-Shell model for the Mac.
 - `test_conversion.py` and friends: parametrize the encoder over
-  `dist/jxlbatch-macos` too, so the release binary passes the ImageIO checks
+  `dist/photobatch-macos` too, so the release binary passes the ImageIO checks
   (today only the Homebrew build and the WebAssembly builds do).
-- Determinism: same input and settings → identical bytes from `jxlbatch.wasm`
-  and `jxlbatch-macos` (skipped when either is missing).
+- Determinism: same input and settings → identical bytes from `photobatch.wasm`
+  and `photobatch-macos` (skipped when either is missing).
 - `test_shortcuts_e2e_mac.py` (local only, skipped unless the shortcut is
   imported):
   `shortcuts run "Compress Photo Files (macOS)" --input-path testdata/dark.heic`
@@ -521,11 +521,11 @@ click in Shortcuts; then `shortcuts run` and the unified log do the rest).
 | S3  | Get Details of Images ▸ Album on the Mac, for picker and share-menu items                                                             | album names as on iOS                                                        | albums only from the picker path; README says so                            |
 | S4  | Delete Photos on the Mac                                                                                                              | system confirmation, originals in Recently Deleted                           | drop deletion on the Mac; README says so                                    |
 | S5  | What Photos' Share menu hands over: HEIC or JPEG? Live Photos and videos detectable with Media Type / Photo Type?                     | HEIC, and the filter sorts as on iOS                                         | README: use the picker for originals; adjust the encoder hint (4.1)         |
-| S6  | Static arm64 `jxlbatch-macos` builds from `.deps` and `--selftest` passes; `otool -L` shows only `libc++` and `libSystem`             | passes, no Homebrew paths in `otool -L`                                      | fix the static link flags; as a stopgap, lcms2 instead of patched skcms     |
+| S6  | Static arm64 `photobatch-macos` builds from `.deps` and `--selftest` passes; `otool -L` shows only `libc++` and `libSystem`           | passes, no Homebrew paths in `otool -L`                                      | fix the static link flags; as a stopgap, lcms2 instead of patched skcms     |
 | S7  | A `curl`-downloaded binary runs from Run Shell Script without a Gatekeeper prompt; a browser download shows the quarantine dialog     | as expected                                                                  | document `xattr -d`; consider notarization later                            |
 | S8  | Exact plist keys of Run Shell Script and Run AppleScript on this macOS (`--fetch` of a hand-built sample)                             | sample saved under `scripts/sample/`, keys match the hand-written templates  | templates corrected from the sample                                         |
 | S9  | `shortcuts run … --input-path` drives the file shortcut end to end                                                                    | `.jxl` written, log shows the actions                                        | e2e test stays manual                                                       |
-| S10 | Byte-identical output: `jxlbatch.wasm` vs `jxlbatch-macos` on the HDR and SDR fixtures                                                | identical                                                                    | document the difference; test compares decoded pixels instead               |
+| S10 | Byte-identical output: `photobatch.wasm` vs `photobatch-macos` on the HDR and SDR fixtures                                            | identical                                                                    | document the difference; test compares decoded pixels instead               |
 
 ## 6. Implementation phases
 
@@ -566,10 +566,11 @@ themselves reuse most of `build_shortcuts.py`.
 
 4. **Same tool folder and version** as the iPhone shortcuts (4.7).
 
-5. **arm64 only**, macOS 14 or later. The release file stays `jxlbatch-macos`,
-   without an architecture suffix, so a later universal build keeps the link.
+5. **arm64 only**, macOS 14 or later. The release file stays
+   `photobatch-macos`, without an architecture suffix, so a later universal
+   build keeps the link.
 
-6. **Encoder location**: `~/.local/bin/jxlbatch`, with `~/bin`,
+6. **Encoder location**: `~/.local/bin/photobatch`, with `~/bin`,
    `/usr/local/bin` and `/opt/homebrew/bin` as fallbacks (4.5).
 
 7. **Parallel conversion** (0.5.0, 2026-10-05): the Mac shortcuts ask *All
@@ -580,7 +581,7 @@ themselves reuse most of `build_shortcuts.py`.
    Measured first: one photo alone keeps about half of 14 cores busy; 18 photos
    took 10.5 s one at a time and 7 s with 2, 3 or 4 at a time (within half a
    second of each other), so `-j 0` picks one per 5 cores, at most 3, and one
-   per 4 GB of memory. Splitting the job file across two `jxlbatch` processes
+   per 4 GB of memory. Splitting the job file across two `photobatch` processes
    in the shell was rejected: interleaved logs and competing thread pools.
 
 Still open:

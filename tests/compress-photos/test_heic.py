@@ -1,5 +1,5 @@
 """
-HEIC output (jxlbatch --heic, src/heicout.c): an iPhone-style HEIC gets its
+HEIC output (photobatch --heic, src/heicout.c): an iPhone-style HEIC gets its
 HEVC tiles re-encoded inside its own container, with the gain map, thumbnail
 and metadata byte for byte; other photos are written anew as SDR HEIC. For
 every build (SIMD and scalar WebAssembly, native, macOS).
@@ -22,7 +22,7 @@ SDR_HEIC = FIXTURES / 'heif' / 'rotate_then_crop.heic'
 def items(path):
     """
     A HEIF's items as {id: (type, data)} (the data from 'mdat' or 'idat'), with
-    a small parser of its own, so the checks don't share code with jxlbatch.
+    a small parser of its own, so the checks don't share code with photobatch.
     """
     buf = path.read_bytes()
 

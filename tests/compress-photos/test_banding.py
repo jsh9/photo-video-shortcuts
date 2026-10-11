@@ -1,5 +1,5 @@
 """
-The grain jxlbatch adds to HDR outputs against banding (src/grain.c), checked
+The grain photobatch adds to HDR outputs against banding (src/grain.c), checked
 with the simulation of Apple's SDR rendering in banding.py on the sky fixture
 (fixtures/hdr/sky.heic: a smooth gradient with faint grain, 1024 x 768).
 """
@@ -19,7 +19,7 @@ NO_GRAIN = ['--grain', '0', '--grain-coarse', '0']
 
 
 def convert(encoder, folder, *args):
-    """(the JPEG XL, what jxlbatch printed) for one photo."""
+    """(the JPEG XL, what photobatch printed) for one photo."""
     ph.stage(folder, [args[-1]])
     result = encoder.run([*args[:-1], 'jxl_job.txt'], folder)
     assert result.returncode == 0, result.stdout + result.stderr

@@ -21,7 +21,7 @@ from wfkit import *  # noqa: E402, F401, F403
 
 HERE = Path(__file__).resolve().parent
 TOOL = HERE.parent
-# Shared by the shortcuts and jxlbatch; shown in each shortcut's first note.
+# Shared by the shortcuts and photobatch; shown in each shortcut's first note.
 VERSION = (TOOL / 'VERSION').read_text(encoding='utf-8').strip()
 EFFORT = 7
 HELP_URL = 'https://github.com/jsh9/photo-video-shortcuts/tree/main/shortcuts/compress-photos'
@@ -303,9 +303,9 @@ def photo_date(b, photo, index):
     """
     Appends "index|date" to the variable Dates: ``photo``'s date in Photos (Get
     Details of Images ▸ Date Taken), formatted as ISO 8601 with the time
-    (``b.format_date``), for jxlbatch's jxl_dates.txt. jxlbatch writes it into
-    the JPEG XL's EXIF when the original's capture date is another moment or
-    missing (a date changed in Photos, or an image whose app removed it), so
+    (``b.format_date``), for photobatch's jxl_dates.txt. photobatch writes it
+    into the JPEG XL's EXIF when the original's capture date is another moment
+    or missing (a date changed in Photos, or an image whose app removed it), so
     the copy shows the date Photos shows for the original.
 
     For a library photo, Date Taken is the asset's creationDate (ContentKit's

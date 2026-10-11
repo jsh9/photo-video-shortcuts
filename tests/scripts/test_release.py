@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 import release
 
-ENCODERS = ['jxlbatch.wasm', 'jxlbatch-scalar.wasm', 'jxlbatch-macos']
+ENCODERS = ['photobatch.wasm', 'photobatch-scalar.wasm', 'photobatch-macos']
 SHORTCUTS = ['Compress Photos.shortcut', 'JXL-Import.shortcut']
 MAC_SHORTCUTS = [
     'Compress Photos (macOS).shortcut',
@@ -88,13 +88,13 @@ def test_mac_only_tool():
 @pytest.mark.parametrize(
     'name,kind',
     [
-        ('jxlbatch.wasm', 'wasm'),
-        ('jxlbatch-scalar.wasm', 'wasm'),
-        ('jxlbatch-macos', 'native'),
+        ('photobatch.wasm', 'wasm'),
+        ('photobatch-scalar.wasm', 'wasm'),
+        ('photobatch-macos', 'native'),
         ('.wasm', None),
         ('', None),
-        ('jxlbatch.exe', None),
-        ('jxlbatch.macos.bin', None),
+        ('photobatch.exe', None),
+        ('photobatch.macos.bin', None),
     ],
 )
 def test_encoder_kind(name, kind):
@@ -123,7 +123,7 @@ def test_tool_rejects_bad_version(tmp_path, version):
             'shortcuts': SHORTCUTS * 2,
         },
         {'encoders': 'oops', 'shortcuts': SHORTCUTS},
-        {'encoders': ['jxlbatch.exe'], 'shortcuts': SHORTCUTS},
+        {'encoders': ['photobatch.exe'], 'shortcuts': SHORTCUTS},
         {'encoders': ENCODERS, 'shortcuts': {}},
         {'encoders': ENCODERS, 'shortcuts': {'windows': SHORTCUTS}},
         {'encoders': ENCODERS, 'shortcuts': {'iphone': []}},
@@ -270,8 +270,8 @@ def test_make_zip_refuses_incomplete_list(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     'name, option',
     [
-        ('jxlbatch.wasm', '--version'),
-        ('jxlbatch-macos', '--version'),
+        ('photobatch.wasm', '--version'),
+        ('photobatch-macos', '--version'),
         # FFmpeg's programs take only -version
         ('ffmpeg-macos', '-version'),
         ('ffprobe-macos', '-version'),
@@ -284,7 +284,7 @@ def test_encoder_version_checked(tmp_path, monkeypatch, name, option):
 
     def run(cmd, **kw):
         commands.append([str(c) for c in cmd])
-        return 'jxlbatch 0.2.0'
+        return 'photobatch 0.2.0'
 
     monkeypatch.setattr(release, 'run', run)
     with pytest.raises(release.ReleaseError, match='not 0.1.0'):
@@ -302,10 +302,10 @@ def test_encoder_version_checked(tmp_path, monkeypatch, name, option):
 def test_native_encoder_needs_no_wasmtime(tmp_path, monkeypatch):
     t = tool(tmp_path)
     monkeypatch.setattr(release.shutil, 'which', lambda _: None)
-    monkeypatch.setattr(release, 'run', lambda *a, **k: 'jxlbatch 0.1.0 (x)')
-    release.check_encoder_version(t, t.path / 'dist/jxlbatch-macos')
+    monkeypatch.setattr(release, 'run', lambda *a, **k: 'photobatch 0.1.0 (x)')
+    release.check_encoder_version(t, t.path / 'dist/photobatch-macos')
     with pytest.raises(release.ReleaseError, match='wasmtime'):
-        release.check_encoder_version(t, t.path / 'dist/jxlbatch.wasm')
+        release.check_encoder_version(t, t.path / 'dist/photobatch.wasm')
 
 
 def test_build_runs_every_build_script(tmp_path, monkeypatch):
@@ -512,8 +512,8 @@ def test_github_only_explicit_404_means_missing(
 @pytest.mark.parametrize(
     'missing',
     [
-        'jxlbatch-scalar.wasm',
-        'jxlbatch-macos',
+        'photobatch-scalar.wasm',
+        'photobatch-macos',
         'JXL-Import.shortcut',
         'Compress Photo Files (macOS).shortcut',
     ],
@@ -652,7 +652,7 @@ WRAPPED = """\
     from Files) in the selection are skipped.
   - The photo picker (when started from the Shortcuts app) no longer shows
     videos.
-  - Update the shortcuts; `jxlbatch.wasm` is unchanged.
+  - Update the shortcuts; `photobatch.wasm` is unchanged.
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/8"""
 
@@ -665,7 +665,7 @@ def test_unwrap_joins_wrapped_list_items():
         '(e.g. images shared from Files) in the selection are skipped.\n'
         '  - The photo picker (when started from the Shortcuts app) no longer '
         'shows videos.\n'
-        '  - Update the shortcuts; `jxlbatch.wasm` is unchanged.\n'
+        '  - Update the shortcuts; `photobatch.wasm` is unchanged.\n'
         '- Full diff\n'
         '  - https://github.com/jsh9/photo-video-shortcuts/pull/8'
     )

@@ -2,7 +2,7 @@
 // HEIC with an ISO 21496-1 gain map and an HDR profile on its tmap
 // item: Display P3 + PQ with a placeholder 'hdgm' tone curve, and tags
 // like Apple's (an 'mAB ' A2B0 without B curves, which skcms rejects),
-// for jxlbatch --selftest. Do not edit.
+// for photobatch --selftest. Do not edit.
 #ifndef JXLBATCH_SELFTEST_HDR_HEIC_H
 #define JXLBATCH_SELFTEST_HDR_HEIC_H
 

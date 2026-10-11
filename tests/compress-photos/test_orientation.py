@@ -3,7 +3,7 @@ Every EXIF orientation (1-8) becomes upright pixels, and the orientation tags
 are reset to match, so no viewer rotates a photo twice. Lossless (-q 100), so
 the result is compared exactly with Pillow's ImageOps.exif_transpose().
 
-jxlbatch also warns when the result's shape contradicts the original's EXIF
+photobatch also warns when the result's shape contradicts the original's EXIF
 orientation and size, if that size is the photo's size as stored; not for a
 photo edited in Photos, whose EXIF keeps the size of the photo before the edit.
 """
@@ -62,7 +62,7 @@ def test_orientation_tags_reset(oriented, orientation):
 
 
 # EXIF orientation 1 with these EXIF pixel sizes, on a test photo: (photo,
-# size, result size, warned). jxlbatch checks the EXIF size against the size
+# size, result size, warned). photobatch checks the EXIF size against the size
 # as stored (the result's, transposed back if the HEIF transforms turned it),
 # since an edited photo's EXIF keeps the size from before the edit.
 EXIF_SIZES = {

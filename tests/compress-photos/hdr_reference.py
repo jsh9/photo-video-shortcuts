@@ -1,5 +1,5 @@
 """
-Reference HDR math in NumPy (float64), independent of jxlbatch's C code: the
+Reference HDR math in NumPy (float64), independent of photobatch's C code: the
 expected results for the test photos in fixtures/hdr/ (see
 make_hdr_fixtures.py).
 

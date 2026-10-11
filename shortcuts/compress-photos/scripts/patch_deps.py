@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Applies jxlbatch's small source edits to the dependency checkouts in .deps/.
+Applies photobatch's small source edits to the dependency checkouts in .deps/.
 
 Used by build-wasm.sh (``--wasi --skcms``) and build-macos.sh (``--skcms``).
 Each edit is idempotent: a file that already has it is left alone, and a file
@@ -129,7 +129,7 @@ def patch_skcms(libjxl):
         '        }\n'
         '        profile->has_CICP = true;\n'
         '    }\n'
-        "    // jxlbatch: Apple's HDR profile is PQ by its 'cicp' tag, with A2B0/B2A0\n"
+        "    // photobatch: Apple's HDR profile is PQ by its 'cicp' tag, with A2B0/B2A0\n"
         "    // tags skcms rejects ('mAB ' without B curves). libjxl takes a PQ\n"
         "    // profile's color from the 'cicp' tag alone and never transforms with it.\n"
         '    const bool hdr_by_cicp = profile->has_CICP &&\n'
@@ -148,7 +148,7 @@ def patch_skcms(libjxl):
         '            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n'
         '                // Malformed A2B tag\n',
         '            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n'
-        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                if (hdr_by_cicp) break;  // photobatch: Apple's HDR profile\n"
         '                // Malformed A2B tag\n',
     )
     replace(
@@ -157,7 +157,7 @@ def patch_skcms(libjxl):
         '            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n'
         '                // Malformed B2A tag\n',
         '            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n'
-        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                if (hdr_by_cicp) break;  // photobatch: Apple's HDR profile\n"
         '                // Malformed B2A tag\n',
     )
     # the 'cicp' tag's original place (read above now)
@@ -189,8 +189,9 @@ def patch_x265(x265):
     returns, and ``startCompressFrame()`` encodes the frame right away and
     signals ``m_done`` again, so ``getEncodedPicture()`` finds its event
     already triggered (WASI's stub condition variables never block, so an
-    untriggered ``Event::wait()`` would spin). jxlbatch opens the encoder with
-    ``--pools none`` and one frame thread, so nothing else starts a thread.
+    untriggered ``Event::wait()`` would spin). photobatch opens the encoder
+    with ``--pools none`` and one frame thread, so nothing else starts a
+    thread.
     """
     src = x265 / 'source'
     replace(

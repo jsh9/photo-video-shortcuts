@@ -19,7 +19,7 @@ HDR JPEG XL can show faint pink patches in bright skies (an Apple issue, see
 
 iOS has no encoder for either, so the conversion runs in
 [a-Shell](https://holzschu.github.io/a-Shell_iOS/) as a small WebAssembly tool,
-`jxlbatch`. It uses libjxl, the reference JPEG XL encoder, and x265, the
+`photobatch`. It uses libjxl, the reference JPEG XL encoder, and x265, the
 leading HEVC encoder. How it works, and how to build it:
 [DEVELOPING.md](DEVELOPING.md). On a Mac, use the Mac shortcuts instead:
 [Compress Photos (macOS)](README-mac.md), the same encoder without a-Shell.
@@ -90,8 +90,8 @@ it, and iCloud Photos syncs it to the iPhone.) Without it, the run stops with
     HEIF to JPEG, so the shortcut gets a JPEG copy, and the sizes shown compare
     against it. To send originals, tap **Options** at the top of the share
     sheet and set Send As to **Current**. iOS offers no way to make that the
-    default, and a shortcut can't set it. `jxlbatch` prints a reminder when it
-    receives iPhone photos as JPEG.
+    default, and a shortcut can't set it. `photobatch` prints a reminder when
+    it receives iPhone photos as JPEG.
 - **Only still photos are converted**, screenshots included. The shortcut skips
   the rest of the selection, then a notification counts what it skipped, for
   example "Skipped 2 Live Photo(s), 1 video(s)":
@@ -219,10 +219,10 @@ Not kept:
 
 An HDR photo from an iPhone is an SDR photo plus a *gain map*, which tells an
 HDR screen how much brighter each part of the photo should be. Photos ignores
-gain maps in JPEG XL, so `jxlbatch` applies the gain map itself and stores the
-HDR result in the pixels: 16-bit, Display P3, with the PQ curve used for HDR
-video (SDR white at 203 nits). In Photos it lights up on an HDR screen like the
-original, and a-Shell shows the photo's line as, for example,
+gain maps in JPEG XL, so `photobatch` applies the gain map itself and stores
+the HDR result in the pixels: 16-bit, Display P3, with the PQ curve used for
+HDR video (SDR white at 203 nits). In Photos it lights up on an HDR screen like
+the original, and a-Shell shows the photo's line as, for example,
 `HEIF 4284x5712, HDR 3.5×`: its highlights reach 3.5 times SDR white.
 
 Both of Apple's gain map formats are converted:
@@ -290,14 +290,14 @@ Grain: up to 0.6.0, an HDR JXL got a little fine grain in its smooth areas
 against the stripes Apple's 8-bit rendering of an HDR JPEG XL shows in a smooth
 sky. Since 0.7.0 no grain is added: that rendering shows worse artifacts anyway
 (the pink patches below), and the HEIC route avoids it altogether.
-`jxlbatch --grain 60 --grain-coarse 40` still adds the amounts that were tuned
-for quality 83 (see [DEVELOPING.md](DEVELOPING.md)).
+`photobatch --grain 60 --grain-coarse 40` still adds the amounts that were
+tuned for quality 83 (see [DEVELOPING.md](DEVELOPING.md)).
 
 Size: with a smooth gain map, like an iPhone's, an HDR JXL is about as large as
 the same photo converted as SDR (in tests, 4% smaller to 14% larger). A gain
 map with fine, noisy detail costs more (up to about 1.5× in tests). To convert
-HDR photos as SDR anyway, run `jxlbatch` in a-Shell with `--sdr`; the shortcut
-doesn't offer it.
+HDR photos as SDR anyway, run `photobatch` in a-Shell with `--sdr`; the
+shortcut doesn't offer it.
 
 Apps other than Apple's may show the HDR JXL without its highlights: few of
 them read HDR JPEG XL yet.
@@ -314,7 +314,7 @@ was made by the camera, and neither is the same picture in another HDR format,
 so it's specific to Apple's handling of JPEG XL (checked on macOS 27 in October
 2026). Until Apple changes it, convert such photos with the HEIC route, which
 shows them as the original; an SDR JPEG XL (Drop HDR on the Mac, `--sdr` in
-a-Shell) has no patches either. `jxlbatch` points them out: a photo whose
+a-Shell) has no patches either. `photobatch` points them out: a photo whose
 bright sky (smooth, colored, brighter than SDR white) covers 5% or more of it
 gets the line
 `! bright sky (39% of the photo): in Photos, the HDR copy may show faint pink patches there`,
@@ -326,9 +326,9 @@ doesn't offer to delete that original, and a-Shell says how many were kept.
 That happens when a photo's gain map can't be used (a note in a-Shell, see
 [Troubleshooting](#4-troubleshooting)), except for a photo not taken by an
 iPhone camera (see above), for HDR photos sent as JPEG, and with `--sdr`. This
-needs both the shortcuts and `jxlbatch.wasm` from version 0.2.0: an older
+needs both the shortcuts and `photobatch.wasm` from version 0.2.0: an older
 shortcut offers every converted original for deletion, and a newer shortcut
-with an older `jxlbatch.wasm` offers none.
+with an older `photobatch.wasm` offers none.
 
 Photos may list the JXL copies under **Duplicates**. Merging a duplicate pair
 keeps only one file, so check which one before you merge.
@@ -354,17 +354,17 @@ photo from another time zone whose date is written gets the right moment, and
 sorts the same, but its time reads as in your zone. A photo whose file has no
 time zone (iPhones before iOS 13, most cameras) but whose time is that moment
 somewhere keeps its time and gets that zone instead
-(`time zone from Photos: ...`). This needs the shortcuts and `jxlbatch.wasm`
+(`time zone from Photos: ...`). This needs the shortcuts and `photobatch.wasm`
 from version 0.7.0.
 
 ## 4. Troubleshooting
 
 | Symptom                                                                                                                                                                     | Fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a-Shell: `jxlbatch: command not found`                                                                                                                                      | `jxlbatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| a-Shell: `photobatch: command not found`                                                                                                                                    | `photobatch.wasm` isn't in `~/Documents/bin` (On My iPhone ▸ a-Shell ▸ bin).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | a-Shell stops after the photos, nothing is saved                                                                                                                            | Run **JXL-Import** from the Shortcuts app; it saves whatever finished.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | "File jxl_done.txt not found"                                                                                                                                               | No photo converted. Look in a-Shell for the error on each photo. In *Compress Photos*, it also happens when started outside the Shortcuts app (see [Use](#2-use)).                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| a-Shell: "cannot find jxl_job.txt"                                                                                                                                          | a-Shell ran the shortcut outside its Shortcuts folder, which version 0.1.0 does when it has to launch a-Shell. Update the shortcuts and `jxlbatch.wasm`.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| a-Shell: "cannot find jxl_job.txt"                                                                                                                                          | a-Shell ran the shortcut outside its Shortcuts folder, which version 0.1.0 does when it has to launch a-Shell. Update the shortcuts and `photobatch.wasm`.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | a-Shell: "The WebAssembly interpreter is not running" before any photo                                                                                                      | a-Shell's engine hadn't finished starting. The shortcut waits and retries for this, so just run it again.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | a-Shell: "The WebAssembly interpreter is not running" in the middle of a photo                                                                                              | iOS stopped a-Shell's engine, usually for using too much memory. Close other apps and try again.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | A photo fails with an out-of-memory error                                                                                                                                   | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |

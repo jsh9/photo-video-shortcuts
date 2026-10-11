@@ -13,10 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import photo_helpers as ph  # noqa: E402
 
-WASM = ph.TOOL / 'dist' / 'jxlbatch.wasm'
-WASM_SCALAR = ph.TOOL / 'dist' / 'jxlbatch-scalar.wasm'
-NATIVE = ph.TOOL / 'build' / 'jxlbatch'
-MACOS = ph.TOOL / 'dist' / 'jxlbatch-macos'  # the Mac shortcuts' encoder
+WASM = ph.TOOL / 'dist' / 'photobatch.wasm'
+WASM_SCALAR = ph.TOOL / 'dist' / 'photobatch-scalar.wasm'
+NATIVE = ph.TOOL / 'build' / 'photobatch'
+MACOS = ph.TOOL / 'dist' / 'photobatch-macos'  # the Mac shortcuts' encoder
 
 
 @pytest.fixture(scope='session')
@@ -147,8 +147,8 @@ def batch(tmp_path_factory, wasm, photos):
     """
     All test photos converted in one batch at quality 83, as the shortcut runs
     it. ``results``: {name: (original, jxl, saved name)}; ``output``: what
-    jxlbatch printed; ``kept``: the names whose original jxl_done.txt marks to
-    keep (not to offer for deletion).
+    photobatch printed; ``kept``: the names whose original jxl_done.txt marks
+    to keep (not to offer for deletion).
     """
     folder = tmp_path_factory.mktemp('batch')
     staged = ph.stage(folder, list(photos.values()))

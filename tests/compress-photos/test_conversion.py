@@ -1,6 +1,6 @@
 """
 End to end: photos written the way an iPhone or camera writes them (Apple's
-ImageIO), converted in one batch as the shortcut runs jxlbatch, then checked
+ImageIO), converted in one batch as the shortcut runs photobatch, then checked
 with exiftool, djxl and Apple's ImageIO (what Photos uses).
 """
 
@@ -40,7 +40,7 @@ def test_exif_kept(batch, name):
 def test_xmp_kept_with_orientation_reset(batch, name):
     _, jxl, _ = batch.results[name]
     xmp = ph.xmp_tags(jxl)
-    assert xmp.get('Description') == 'jxlbatch test'
+    assert xmp.get('Description') == 'photobatch test'
     assert xmp.get('Orientation', 1) == 1
 
 
@@ -106,5 +106,5 @@ def test_transparency_kept(batch, tmp_path):
 
 def test_reminds_about_iphone_jpegs(batch):
     # An iPhone photo arriving as JPEG means the share sheet's "Send As" was
-    # Automatic; jxlbatch suggests sending originals instead.
+    # Automatic; photobatch suggests sending originals instead.
     assert batch.output.count('Note: Photos sent') == 1

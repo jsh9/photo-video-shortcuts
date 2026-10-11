@@ -15,7 +15,7 @@ encoder. Every release includes the current files of all shortcuts.
     shows in bright skies. Apple's Photographic Styles data (about 0.3 MB) is
     dropped. *Drop HDR* leaves the gain map out; a JPEG, a PNG, or a HEIF whose
     picture isn't 8-bit 4:2:0 HEVC tiles is written anew as an SDR HEIC.
-    `jxlbatch --heic [--rf RF]`; x265 is linked into every build (the
+    `photobatch --heic [--rf RF]`; x265 is linked into every build (the
     WebAssembly build runs it on the calling thread, about 20 s per 24 MP photo
     under wasmtime on an M4 Pro), which makes the encoders GPL as the
     repository is. The self-test checks a HEIC round trip.
@@ -28,12 +28,12 @@ encoder. Every release includes the current files of all shortcuts.
     dated at the time of the conversion. A photo whose capture date already is
     that moment keeps its EXIF byte for byte; one without a time zone in its
     EXIF whose time is that moment in some zone keeps its time and gets the
-    zone. The shortcuts pass the dates to `jxlbatch` in `jxl_dates.txt`
+    zone. The shortcuts pass the dates to `photobatch` in `jxl_dates.txt`
     (`i|2024-01-01T17:00:00-05:00`); the log says when a date or zone was
     written. The Mac's selection route also checks each imported copy's date in
     Photos.
-  - Update both the shortcuts and the encoders (`jxlbatch.wasm`,
-    `jxlbatch-macos`): an older `jxlbatch` ignores the dates, and an older
+  - Update both the shortcuts and the encoders (`photobatch.wasm`,
+    `photobatch-macos`): an older `photobatch` ignores the dates, and an older
     shortcut gives none.
   - A new quality preset above 88: *93*, "Placebo", on both platforms.
   - A warning for an HDR photo with much bright sky (smooth, colored, brighter
@@ -51,24 +51,24 @@ encoder. Every release includes the current files of all shortcuts.
     originals* (it was *Compressed to JXL*); a copy is never added to either.
     Notifications are titled *Compress Photos*.
   - Update both the shortcuts and the encoders: an older shortcut has no format
-    question, and an older `jxlbatch` has no `--heic`.
+    question, and an older `photobatch` has no `--heic`.
 
 ## [Compress Photos 0.6.0] - 2026-10-06
 
 - Added
   - The Mac shortcuts ask a third question, *HDR*: *Keep HDR* (as before), or
     *Drop HDR*, which saves every photo as an ordinary SDR JPEG XL
-    (`jxlbatch --sdr`): smaller, without the color banding an HDR JPEG XL can
+    (`photobatch --sdr`): smaller, without the color banding an HDR JPEG XL can
     show in smooth skies, and shown correctly by viewers that can't tone-map
     HDR.
   - HDR JPEG XL files get a little grain in their smooth areas, against the
     color banding Apple's SDR rendering of them showed in skies (it draws a PQ
     file through an 8-bit step with half the levels, and a lossy encode had
     removed the grain that would hide the steps). Two layers, fine and coarse,
-    weighted by the picture's texture; `jxlbatch --grain` and `--grain-coarse`
-    set the amounts (0: none). HDR files grow by about 10-15%; SDR files are
-    unchanged. Photos converted earlier keep their banding until converted
-    again from their originals.
+    weighted by the picture's texture; `photobatch --grain` and
+    `--grain-coarse` set the amounts (0: none). HDR files grow by about 10-15%;
+    SDR files are unchanged. Photos converted earlier keep their banding until
+    converted again from their originals.
   - The batch summary also says how much space was saved and its share of the
     originals' size (`Saved 1.1 MB (34%)`), below the sizes line.
 - Changed
@@ -124,11 +124,11 @@ encoder. Every release includes the current files of all shortcuts.
     photo at a time on one thread. The files are the same bytes either way, and
     the log and `jxl_done.txt` read as before, photo by photo in order (a
     photo's lines appear once the photos before it are done).
-  - `jxlbatch -j N` converts N photos at a time (`-j 0`: from the cores and the
-    memory) and `-t T` sets the threads per photo, in the builds with threads
-    (`jxlbatch-macos`, `build-native.sh`); the WebAssembly build accepts both
-    and converts one photo at a time, as before. The default is unchanged: one
-    photo at a time with all the cores.
+  - `photobatch -j N` converts N photos at a time (`-j 0`: from the cores and
+    the memory) and `-t T` sets the threads per photo, in the builds with
+    threads (`photobatch-macos`, `build-native.sh`); the WebAssembly build
+    accepts both and converts one photo at a time, as before. The default is
+    unchanged: one photo at a time with all the cores.
 - Fixed
   - *Compress Photos (macOS)* from Photos spent longer after the conversion
     than on it with a large library: collecting the originals looked each one
@@ -143,14 +143,15 @@ encoder. Every release includes the current files of all shortcuts.
     progress window says when Photos' part begins.
   - With several HEIF photos decoding at a time, libheif's memory accounting
     could fail one of them with "Security limit exceeded" (it counts a
-    context's images in a table keyed by the context's address, and `jxlbatch`
-    released a decoded image after its context). The context now stays until
-    its images are released.
+    context's images in a table keyed by the context's address, and
+    `photobatch` released a decoded image after its context). The context now
+    stays until its images are released.
 - Changed
-  - Update the Mac shortcuts and `jxlbatch-macos` together: the shortcuts pass
-    the new options, which an older encoder rejects (the log then shows its
-    usage text and the version note). The iPhone shortcuts and `jxlbatch.wasm`
-    only carry the new version number; iPhone users don't need to update.
+  - Update the Mac shortcuts and `photobatch-macos` together: the shortcuts
+    pass the new options, which an older encoder rejects (the log then shows
+    its usage text and the version note). The iPhone shortcuts and
+    `photobatch.wasm` only carry the new version number; iPhone users don't
+    need to update.
 
 ## [Compress Photos 0.4.0] - 2026-10-04
 
@@ -165,21 +166,22 @@ encoder. Every release includes the current files of all shortcuts.
     deleted by the shortcut on the Mac). A Terminal window follows the
     conversion as it runs. *Compress Photo Files (macOS)* converts image files
     and folders from Finder's Quick Actions, writing each `.jxl` next to its
-    original. Both run `jxlbatch` through Shortcuts' Run Shell Script action,
+    original. Both run `photobatch` through Shortcuts' Run Shell Script action,
     with no a-Shell, no helper shortcut and no handoff, and show the encoder's
     log in Quick Look when it notes anything. See
     `shortcuts/compress-photos/README-mac.md`.
-    - `jxlbatch-macos`: a native, statically linked build of the encoder for
+    - `photobatch-macos`: a native, statically linked build of the encoder for
       Apple silicon Macs running macOS 14 or later, with the same libraries and
-      settings as `jxlbatch.wasm`, so its files are byte for byte the same, and
-      with threads. Installed as `~/.local/bin/jxlbatch`. `jxlbatch --mac` (all
-      builds) drops the hints about the iPhone's share sheet.
+      settings as `photobatch.wasm`, so its files are byte for byte the same,
+      and with threads. Installed as `~/.local/bin/photobatch`.
+      `photobatch --mac` (all builds) drops the hints about the iPhone's share
+      sheet.
 - Changed
   - Releases now have two shortcut ZIPs: `compress-photos-shortcuts-v<v>.zip`
     (iPhone, as before) and `compress-photos-mac-shortcuts-v<v>.zip` (Mac). New
-    files for Mac users: the Mac ZIP and `jxlbatch-macos`. The iPhone shortcuts
-    and `jxlbatch.wasm` only carry the new version number; iPhone users don't
-    need to update.
+    files for Mac users: the Mac ZIP and `photobatch-macos`. The iPhone
+    shortcuts and `photobatch.wasm` only carry the new version number; iPhone
+    users don't need to update.
 
 ## [Compress Photos 0.3.1] - 2026-10-04
 
@@ -192,7 +194,7 @@ encoder. Every release includes the current files of all shortcuts.
     Photos-framework predicate on a key (`mediaSubtype`) that photo objects
     don't answer, then evaluates it in memory on the input. The shortcut now
     sorts each item by Get Details of Images (Media Type, then Photo Type),
-    which Shortcuts reads in memory. Update the shortcuts; `jxlbatch.wasm` is
+    which Shortcuts reads in memory. Update the shortcuts; `photobatch.wasm` is
     unchanged.
 - Changed
   - Images that aren't in the photo library (e.g. shared from Files) are
@@ -214,10 +216,10 @@ encoder. Every release includes the current files of all shortcuts.
     shortcut says "Nothing to convert" and stops before asking for a quality.
     Before, a Live Photo was converted as its still image and, from the
     Shortcuts app, offered for deletion, which deleted its video too; a video
-    was copied into a-Shell, where `jxlbatch` read it whole before failing.
+    was copied into a-Shell, where `photobatch` read it whole before failing.
   - The photo picker (when started from the Shortcuts app) no longer shows
     videos.
-  - Update the shortcuts; `jxlbatch.wasm` is unchanged.
+  - Update the shortcuts; `photobatch.wasm` is unchanged.
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/8
 
@@ -231,7 +233,7 @@ encoder. Every release includes the current files of all shortcuts.
     says the Rec. 709 curve), and the JPEG XL now matches Apple's rendering
     within about 1%. Only the pixels of those photos change; ISO 21496-1 gain
     maps (iOS 18 and later) and the headroom shown in a-Shell are unaffected.
-    Update `jxlbatch.wasm` (fixes #6).
+    Update `photobatch.wasm` (fixes #6).
   - A photo with Apple's older gain map and no XMP of its own (an iPhone 13
     photo from iOS 15, for example) got its gain map's XMP packet
     (`HDRGainMapVersion`) in the JPEG XL. Metadata linked only to other images
@@ -245,7 +247,7 @@ encoder. Every release includes the current files of all shortcuts.
   - HDR photos: an HDR HEIC from an iPhone becomes an HDR JPEG XL that lights
     up in Photos like the original. Both of Apple's gain maps are converted:
     ISO 21496-1 (iOS 18 and later) and Apple's older format (iOS 14 to 17).
-    `jxlbatch` applies the gain map and stores the HDR result as 16-bit PQ in
+    `photobatch` applies the gain map and stores the HDR result as 16-bit PQ in
     Display P3, with SDR white at 203 nits and the photo's peak brightness,
     because Photos ignores JPEG XL gain maps. a-Shell shows such a photo as,
     for example, "HDR 3.5×". The JPEG XL also keeps the HEIC's HDR color
@@ -272,11 +274,11 @@ encoder. Every release includes the current files of all shortcuts.
     map not used" in a-Shell; except the photos above), an HDR photo sent as
     JPEG (with a note), and `--sdr`. `jxl_done.txt` lines are now
     `file|index|delete or keep|name`. **Update both the shortcuts and
-    `jxlbatch.wasm`**: an older shortcut offers every converted original for
-    deletion, and the new shortcut with an older `jxlbatch.wasm` offers none.
-  - `jxlbatch --sdr` converts HDR photos as SDR (the shortcuts don't use it).
-  - `jxlbatch --selftest` also checks HDR decoding and that Apple's HDR profile
-    is kept.
+    `photobatch.wasm`**: an older shortcut offers every converted original for
+    deletion, and the new shortcut with an older `photobatch.wasm` offers none.
+  - `photobatch --sdr` converts HDR photos as SDR (the shortcuts don't use it).
+  - `photobatch --selftest` also checks HDR decoding and that Apple's HDR
+    profile is kept.
 - Changed
   - HDR photos are computed a region at a time as the encoder reads them, so a
     48 MP HDR photo takes about as much memory as an SDR one.
@@ -297,11 +299,11 @@ encoder. Every release includes the current files of all shortcuts.
   - "File jxl_done.txt not found" when _Compress Photos_ had to launch a-Shell:
     a-Shell could run the shortcut's commands outside its Shortcuts folder, and
     the retry for its WebAssembly engine still starting never ran (dash can't
-    run `jxlbatch.wasm`). The shortcut now changes to the Shortcuts folder and
-    retries with `jxlbatch --retry`. Update both the shortcuts and
-    `jxlbatch.wasm`.
+    run `photobatch.wasm`). The shortcut now changes to the Shortcuts folder
+    and retries with `photobatch --retry`. Update both the shortcuts and
+    `photobatch.wasm`.
 - Changed
-  - When `jxlbatch` can't find the job file, it lists where it looked,
+  - When `photobatch` can't find the job file, it lists where it looked,
     including the values of `$PWD` and `$SHORTCUTS`
 - Full diff
   - https://github.com/jsh9/photo-video-shortcuts/pull/4
@@ -318,8 +320,8 @@ encoder. Every release includes the current files of all shortcuts.
     profile, 10-bit precision and the file name; pixels are stored upright
   - Adds each JPEG XL copy to the albums its original is in
   - Offers to delete the originals whose copy was saved (photo picker only)
-  - `jxlbatch`, the WebAssembly encoder (libjxl 0.11.2, libheif 1.23.5), with a
-    `--selftest`
+  - `photobatch`, the WebAssembly encoder (libjxl 0.11.2, libheif 1.23.5), with
+    a `--selftest`
 - Maintenance
   - Repository layout, documentation, tests, pre-commit hooks and GitHub
     Actions

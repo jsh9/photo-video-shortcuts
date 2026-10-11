@@ -1,7 +1,7 @@
 """
 The generated shortcuts (scripts/build_shortcuts.py), checked without an
 iPhone: their structure, the a-Shell actions, the quality presets, and the file
-names they share with jxlbatch.
+names they share with photobatch.
 """
 
 import photo_helpers as ph
@@ -93,9 +93,9 @@ def test_quality_presets(gen, wf, shortcuts):
             assert org == description
 
 
-def test_format_menu_sets_jxlbatch_args(gen, wf, shortcuts):
+def test_format_menu_sets_photobatch_args(gen, wf, shortcuts):
     # The Format menu's cases set Format; an If on it then sets Args, what
-    # the a-Shell command passes to jxlbatch: "--heic --rf <Quality>" or
+    # the a-Shell command passes to photobatch: "--heic --rf <Quality>" or
     # "-q <Quality> -e 7".
     actions = shortcuts[gen.NAME_A]
     menus = [
@@ -115,10 +115,10 @@ def test_format_menu_sets_jxlbatch_args(gen, wf, shortcuts):
     ]
     assert args == ['--heic --rf Q', f'-q Q -e {gen.EFFORT}']
     commands = ph.ashell_commands(actions, {'Args': 'A', 'Skipped Echo': ''})
-    runs = [c for c in commands if 'jxlbatch A jxl_job.txt' in c]
+    runs = [c for c in commands if 'photobatch A jxl_job.txt' in c]
     assert len(runs) == 2  # the share-sheet route and the picker route
     for c in runs:
-        assert 'jxlbatch --retry A jxl_job.txt' in c
+        assert 'photobatch --retry A jxl_job.txt' in c
 
 
 def test_notes_show_version(gen, shortcuts):
@@ -142,7 +142,7 @@ def test_import_shortcut_started_by_name(gen, shortcuts):
 
 
 def test_cleanup_removes_every_file(gen):
-    # Everything the shortcut and jxlbatch leave in a-Shell's folder.
+    # Everything the shortcut and photobatch leave in a-Shell's folder.
     for pattern in (
         'jxl_in_*',
         'jxl_out_*',
@@ -155,11 +155,11 @@ def test_cleanup_removes_every_file(gen):
         assert pattern in gen.CLEANUP.split()
 
 
-def test_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
+def test_dates_in_photos_go_to_photobatch(gen, shortcuts):
     # Each staged photo's date in Photos (Date Taken) becomes a line
     # "index|date" (ph.check_photo_dates), in the repeat that stages the
     # photos, and the lines go to a-Shell as jxl_dates.txt when there are
-    # any, before jxlbatch runs. A stale file from an unfinished run is
+    # any, before photobatch runs. A stale file from an unfinished run is
     # removed first: it would give photos wrong dates.
     actions = shortcuts[gen.NAME_A]
     formats = ph.check_photo_dates(actions)
@@ -186,7 +186,7 @@ def test_dates_in_photos_go_to_jxlbatch(gen, shortcuts):
         for i, c in commands
         if isinstance(c, str) and c.startswith('rm -f jxl_done.txt')
     ]
-    runs = [i for i, c in commands if 'jxlbatch' in repr(c)]
+    runs = [i for i, c in commands if 'photobatch' in repr(c)]
     assert (
         len(stale) == 1 and 'jxl_dates.txt' in dict(commands)[stale[0]].split()
     )
@@ -220,7 +220,7 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     # Photo Album adds a library photo there without a copy) unless the
     # photo's albums already list it; nothing is deleted. From the share
     # sheet, before a-Shell takes over (the shortcut is then over); from the
-    # picker, after each copy is saved. jxlbatch's "delete"/"keep" flag in
+    # picker, after each copy is saved. photobatch's "delete"/"keep" flag in
     # jxl_done.txt is not acted on.
     actions = shortcuts['Compress Photos']
     idents = [ph.ident(a) for a in actions]
@@ -272,7 +272,7 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
         i
         for i, a in enumerate(actions)
         if ph.ident(a).startswith(gen.ASHELL_BUNDLE_ID)
-        and 'jxlbatch' in repr(ph.params(a))
+        and 'photobatch' in repr(ph.params(a))
     ]
     assert saves[0] < runs[0], 'the share-sheet route collects before a-Shell'
     assert saves[1] > runs[-1], 'the picker route collects after the save'

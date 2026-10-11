@@ -23,13 +23,13 @@ bright skies.
 
 ## 1. The file is right
 
-| Comparison, in the sky (linear light, chroma = (R+B)/2Y − G/Y)                      | Chroma std | Luminance  |
-| ----------------------------------------------------------------------------------- | ---------- | ---------- |
-| libjxl's decode of a lossless jxlbatch conversion vs Apple's HDR decode of the HEIC | 0.0038     | 1.000      |
-| the user's q93 file vs the lossless one (encode + grain), libjxl                    | 0.0026     | grain only |
-| Apple's Core Image HDR decode of the lossless JXL vs the file's pixels              | 0.0182     | 1.002      |
-| ImageIO's direct HDR decode (`kCGImageSourceDecodeToHDR`) of the same JXL           | 0.0000     | 1.000      |
-| the same pixels as a 16-bit Display P3 PQ PNG written by ImageIO, Core Image        | 0.0000     | 1.000      |
+| Comparison, in the sky (linear light, chroma = (R+B)/2Y − G/Y)                        | Chroma std | Luminance  |
+| ------------------------------------------------------------------------------------- | ---------- | ---------- |
+| libjxl's decode of a lossless photobatch conversion vs Apple's HDR decode of the HEIC | 0.0038     | 1.000      |
+| the user's q93 file vs the lossless one (encode + grain), libjxl                      | 0.0026     | grain only |
+| Apple's Core Image HDR decode of the lossless JXL vs the file's pixels                | 0.0182     | 1.002      |
+| ImageIO's direct HDR decode (`kCGImageSourceDecodeToHDR`) of the same JXL             | 0.0000     | 1.000      |
+| the same pixels as a 16-bit Display P3 PQ PNG written by ImageIO, Core Image          | 0.0000     | 1.000      |
 
 The error Core Image adds is smooth (nearly constant within 32-pixel patches,
 patch std 0.0165 against pixel std 0.018), is not a function of the pixel's

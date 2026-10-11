@@ -1,5 +1,5 @@
 """
-jxlbatch's command line and batch behavior, for every build (SIMD and scalar
+photobatch's command line and batch behavior, for every build (SIMD and scalar
 WebAssembly, native).
 """
 
@@ -20,7 +20,7 @@ def test_version_matches_version_file(encoder, tmp_path):
     result = encoder.run(['--version'], tmp_path)
     version = (ph.TOOL / 'VERSION').read_text().strip()
     assert result.returncode == 0
-    assert f'jxlbatch {version} ' in result.stdout
+    assert f'photobatch {version} ' in result.stdout
 
 
 def test_selftest_passes(encoder, tmp_path):
@@ -61,17 +61,17 @@ def test_missing_job_file(encoder, tmp_path):
 
 
 def test_retry_skips_a_started_batch(encoder, tmp_path):
-    # The shortcut's retry line, after jxlbatch already ran.
+    # The shortcut's retry line, after photobatch already ran.
     ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
     (tmp_path / 'jxl_started').touch()
     result = encoder.run(['--retry', 'jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout
-    assert 'jxlbatch: 1 photo' not in result.stdout
+    assert 'photobatch: 1 photo' not in result.stdout
     assert not (tmp_path / 'jxl_done.txt').exists()
 
 
 def test_retry_runs_a_batch_not_started(encoder, tmp_path):
-    # The shortcut's retry line, after a-Shell couldn't start jxlbatch.
+    # The shortcut's retry line, after a-Shell couldn't start photobatch.
     ph.stage(tmp_path, [small_photo(tmp_path / 'a.png')])
     result = encoder.run(['--retry', 'jxl_job.txt'], tmp_path)
     assert result.returncode == 0, result.stdout
@@ -161,7 +161,7 @@ def with_cicp(png, primaries, transfer):
     ('mode', 'primaries', 'pq'),
     [
         ('RGB', 9, True),  # Rec. 2100 PQ: stored as PQ
-        ('RGB', 5, False),  # primaries jxlbatch doesn't map: stored as sRGB
+        ('RGB', 5, False),  # primaries photobatch doesn't map: stored as sRGB
         ('L', 9, False),  # gray: stored as sRGB
     ],
 )
@@ -226,8 +226,8 @@ def stage_with_failures(folder, photos):
 
 def header_and_body(output):
     """
-    jxlbatch's first paragraph (one line, however it was wrapped) and the rest
-    without its timings, which differ from run to run.
+    photobatch's first paragraph (one line, however it was wrapped) and the
+    rest without its timings, which differ from run to run.
     """
     header, body = output.split('\n\n', 1)
     body = re.sub(r'(, [0-9.]+ s|in [0-9]+ s)(?=\n|$)', '', body)

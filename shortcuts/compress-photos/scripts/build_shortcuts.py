@@ -3,7 +3,7 @@
 Generates the two iPhone shortcuts as signed .shortcut files.
 
 - "Compress Photos": share-sheet shortcut that stages the still photos in
-  a-Shell (Live Photos and videos are skipped) and runs jxlbatch (see
+  a-Shell (Live Photos and videos are skipped) and runs photobatch (see
   ../README.md).
 - "JXL-Import": started by a-Shell when encoding is done; saves the JXL files
   to Photos and cleans up.
@@ -172,8 +172,8 @@ class Builder(wf.Builder):
 def choose_args(b):
     """
     The format and quality questions (wf.choose_format), then the variable
-    Args: jxlbatch's options for them, "--heic --rf 26" or "-q 83 -e 7" (an If
-    on the Format variable, since the command is one text).
+    Args: photobatch's options for them, "--heic --rf 26" or "-q 83 -e 7" (an
+    If on the Format variable, since the command is one text).
     """
     fmt, quality = choose_format(b)
     b.if_has_value(
@@ -186,18 +186,18 @@ def choose_args(b):
     return variable('Args')
 
 
-def run_jxlbatch(b, args, then):
+def run_photobatch(b, args, then):
     """
-    a-Shell command: run jxlbatch with ``args`` (the variable Args, see
+    a-Shell command: run photobatch with ``args`` (the variable Args, see
     choose_args), then the command ``then``.
 
     When this launches a-Shell, a-Shell restores its last session (its folder
     too) while it starts these commands, and its WebAssembly engine may still
-    be loading, which ends jxlbatch before it runs. So wait 2 s, change to the
-    Shortcuts folder (~shortcuts, where Put File saves), and run jxlbatch; then
-    run it with --retry, which does nothing if the first run started (it
-    created jxl_started). Not through dash: a-Shell adds ".wasm" to a command's
-    name, dash doesn't, so it can't find jxlbatch.
+    be loading, which ends photobatch before it runs. So wait 2 s, change to
+    the Shortcuts folder (~shortcuts, where Put File saves), and run
+    photobatch; then run it with --retry, which does nothing if the first run
+    started (it created jxl_started). Not through dash: a-Shell adds ".wasm" to
+    a command's name, dash doesn't, so it can't find photobatch.
 
     The variable Skipped Echo (an echo of what the shortcut skipped, set by
     keep_still_photos only when something was) is printed before and after the
@@ -207,9 +207,9 @@ def run_jxlbatch(b, args, then):
     b.ashell_execute(
         'sleep 2\ncd ~shortcuts\n',
         echo,
-        '\njxlbatch ',
+        '\nphotobatch ',
         args,
-        ' jxl_job.txt\njxlbatch --retry ',
+        ' jxl_job.txt\nphotobatch --retry ',
         args,
         ' jxl_job.txt\n',
         echo,
@@ -227,7 +227,7 @@ def save_results(b, originals=None, album=None):
     Each line is "file|index|delete or keep|name". With ``originals`` (the
     staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the
     albums are read from the original at the line's index, and that original is
-    collected in the album (collect_in_album). The flag is jxlbatch's: "keep"
+    collected in the album (collect_in_album). The flag is photobatch's: "keep"
     means the JPEG XL lacks the original's HDR, which a-Shell's output says
     too; it doesn't change what happens here. Without ``originals``, the albums
     are read from jxl_albums_<index>.txt, one album name per line, if that file
@@ -277,7 +277,7 @@ def build_compress(sample):
     b = Builder(sample)
     b.comment(
         f'{NAME_A} {VERSION}. '
-        'Converts photos to HEIC or JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
+        'Converts photos to HEIC or JPEG XL with a-Shell (photobatch), keeping their metadata. '
         'Only still photos are converted: Live Photos and videos are skipped. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
@@ -305,7 +305,7 @@ def build_compress(sample):
         open_app='close',
     )
 
-    # Only the original file goes to a-Shell: jxlbatch decodes HEIF, JPEG and
+    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
     # PNG itself, so there is no Convert Image step. Each photo's date in
     # Photos goes too (jxl_dates.txt; see wf.photo_date).
     def per_photo():
@@ -353,10 +353,10 @@ def build_compress(sample):
         # conversion fails is in the album too; a-Shell's output names it.
         album = b.text(ORIGINALS_ALBUM)
         b.repeat_each(photos, lambda: collect_in_album(b, REPEAT_ITEM, album))
-        run_jxlbatch(b, args, f'open shortcuts://run-shortcut?name={NAME_B}')
+        run_photobatch(b, args, f'open shortcuts://run-shortcut?name={NAME_B}')
 
     def from_picker():
-        run_jxlbatch(b, args, 'open shortcuts://')
+        run_photobatch(b, args, 'open shortcuts://')
         b.wait_to_return()
         album = b.text(ORIGINALS_ALBUM)
         count = save_results(b, photos, album)
@@ -385,7 +385,7 @@ def build_import(sample):
     b = Builder(sample)
     b.comment(
         f'{NAME_B} ({NAME_A} {VERSION}). '
-        'Started by a-Shell when jxlbatch finishes. Saves the converted JPEG XL '
+        'Started by a-Shell when photobatch finishes. Saves the converted JPEG XL '
         'files to Photos. Keep this name: a-Shell starts it by name.'
     )
     count = save_results(b)

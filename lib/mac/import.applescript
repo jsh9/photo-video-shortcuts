@@ -6,7 +6,7 @@
 --
 -- Input: one line per result, "path|original id|delete or keep|name" (the id
 -- may be empty when the exported file could not be matched to an item; the
--- flag is jxlbatch's and is not acted on here).
+-- flag is photobatch's and is not acted on here).
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -104,7 +104,7 @@ on run {input, parameters}
 		end repeat
 		set tImport to (current date) - t0
 	end if
-	-- Dates: each copy has its original's date in Photos, which jxlbatch
+	-- Dates: each copy has its original's date in Photos, which photobatch
 	-- wrote into the file (EXIF) for Photos to read on import. Should Photos
 	-- have read another, the copy gets the original's (two calls per copy).
 	if (count of pairs) > 0 then

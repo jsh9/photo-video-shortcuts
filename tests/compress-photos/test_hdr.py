@@ -23,7 +23,7 @@ def jxlinfo(jxl):
 
 @pytest.fixture(scope='module')
 def renderings(batch, apple_hdr, tmp_path_factory):
-    """{name: (Apple's HDR rendering of the original, jxlbatch's result)}"""
+    """{name: (Apple's HDR rendering of the original, photobatch's result)}"""
     folder = tmp_path_factory.mktemp('hdr')
     result = {}
     for name in HDR:

@@ -22,7 +22,7 @@ ______________________________________________________________________
 
 Each shortcut has its own version in `shortcuts/<name>/VERSION`, shared by its
 `.shortcut` files (shown in the note at the top of each shortcut) and its
-encoder (for example `jxlbatch --version`). The build scripts read it from
+encoder (for example `photobatch --version`). The build scripts read it from
 there.
 
 Bump only the tools that change.
@@ -34,7 +34,7 @@ declares:
 
 ```json
 {
-  "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm", "jxlbatch-macos"],
+  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
   "shortcuts": {
     "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
     "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]

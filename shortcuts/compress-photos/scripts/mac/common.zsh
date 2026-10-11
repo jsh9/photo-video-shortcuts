@@ -1,4 +1,4 @@
-# @NAME@ @VERSION@, @ROUTE@: converts photos with jxlbatch.
+# @NAME@ @VERSION@, @ROUTE@: converts photos with photobatch.
 # Help: @HELP_URL@
 setopt extendedglob
 @WORK_SETUP@
@@ -30,15 +30,15 @@ HDR='@HDR@'  # keep: HDR photos keep their HDR; drop: every photo becomes SDR
 JXL_LINES
 )
 @SKIPPED@ >> "$LOG"
-jxlbatch=''
+photobatch=''
 for c in "${JXLBATCH:-}" @CANDIDATES@; do  # JXLBATCH: an override (used by the tests)
-  if [ -n "$c" ] && [ -x "$c" ]; then jxlbatch=$c; break; fi
+  if [ -n "$c" ] && [ -x "$c" ]; then photobatch=$c; break; fi
 done
-if [ -z "$jxlbatch" ]; then
-  echo "ERROR: jxlbatch is not installed (looked in @LOOKED@)." >> "$LOG"
+if [ -z "$photobatch" ]; then
+  echo "ERROR: photobatch is not installed (looked in @LOOKED@)." >> "$LOG"
   echo "Install it: see @HELP_URL@" >> "$LOG"
   exit 0
 fi
-if ! "$jxlbatch" --version 2>/dev/null | grep -q "^jxlbatch $VERSION "; then
-  echo "! $jxlbatch is not jxlbatch $VERSION, the version this shortcut was made for; see Updating in @HELP_URL@" >> "$LOG"
+if ! "$photobatch" --version 2>/dev/null | grep -q "^photobatch $VERSION "; then
+  echo "! $photobatch is not photobatch $VERSION, the version this shortcut was made for; see Updating in @HELP_URL@" >> "$LOG"
 fi

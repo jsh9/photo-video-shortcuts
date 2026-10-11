@@ -1,9 +1,9 @@
 #!/bin/sh
-# Builds jxlbatch as a WASI WebAssembly command for a-Shell.
+# Builds photobatch as a WASI WebAssembly command for a-Shell.
 #
 # Outputs:
-#   dist/jxlbatch.wasm         WebAssembly SIMD build (iOS 16.4+)
-#   dist/jxlbatch-scalar.wasm  fallback without SIMD
+#   dist/photobatch.wasm         WebAssembly SIMD build (iOS 16.4+)
+#   dist/photobatch-scalar.wasm  fallback without SIMD
 #
 # Needs: Homebrew cmake, ninja, binaryen (wasm-opt). Downloads wasi-sdk,
 # libjxl, libheif and libde265 into the repository's .deps/ on first run
@@ -164,9 +164,9 @@ build_variant() {
   ninja -C "$bdir" jxl jxl_cms >"$bdir.ninja.log" 2>&1 || { tail -40 "$bdir.ninja.log"; exit 1; }
 
   cc="$WASI_SDK/bin/clang --target=wasm32-wasip1 --sysroot=$WASI_SDK/share/wasi-sysroot"
-  objdir="$bdir/jxlbatch-obj"
+  objdir="$bdir/photobatch-obj"
   mkdir -p "$objdir"
-  for src in jxlbatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+  for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_HEIC -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
   done
@@ -185,10 +185,10 @@ build_variant() {
     "$bdir/third_party/brotli/libbrotlicommon.a" \
     -Wl,-z,stack-size=8388608 -Wl,--stack-first -Wl,--max-memory=4294967296 \
     -Wl,--strip-debug \
-    -o "$bdir/jxlbatch.wasm"
-  wasm-opt -O3 "$bdir/jxlbatch.wasm" -o "$out"
+    -o "$bdir/photobatch.wasm"
+  wasm-opt -O3 "$bdir/photobatch.wasm" -o "$out"
   echo "wrote $out ($(wc -c <"$out" | tr -d ' ') bytes)"
 }
 
-build_variant simd "-msimd128" "$ROOT/dist/jxlbatch.wasm"
-build_variant scalar "" "$ROOT/dist/jxlbatch-scalar.wasm"
+build_variant simd "-msimd128" "$ROOT/dist/photobatch.wasm"
+build_variant scalar "" "$ROOT/dist/photobatch-scalar.wasm"

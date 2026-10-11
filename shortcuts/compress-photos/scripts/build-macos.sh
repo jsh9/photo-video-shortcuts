@@ -1,13 +1,13 @@
 #!/bin/sh
-# Builds jxlbatch as a native macOS command for the Mac shortcuts (Compress
+# Builds photobatch as a native macOS command for the Mac shortcuts (Compress
 # Photos (macOS) and Compress Photo Files (macOS)).
 #
-# Output: dist/jxlbatch-macos   arm64 (Apple silicon), macOS 14 or later,
+# Output: dist/photobatch-macos   arm64 (Apple silicon), macOS 14 or later,
 #                               statically linked (depends only on the system
 #                               libc++ and libSystem), ad-hoc signed
 #
 # Same sources and the same libraries as the WebAssembly build (libjxl with
-# skcms, libheif, libde265), so the results match jxlbatch.wasm's, but with
+# skcms, libheif, libde265), so the results match photobatch.wasm's, but with
 # threads (JXLBATCH_THREADS). Needs: Homebrew cmake and ninja. Downloads the
 # library sources into the repository's .deps/ on first run; libjxl gets its
 # own clone there (.deps/libjxl-native), because build-wasm.sh patches the
@@ -117,7 +117,7 @@ ninja -C "$bdir/heif" install >>"$bdir/heif.log" 2>&1 || { tail -30 "$bdir/heif.
 
 # x265 (HEVC encoder, for HEIC output): 8-bit only, no command-line tool.
 # CMAKE_POLICY_VERSION_MINIMUM: x265's CMakeLists predates CMake 4. Linking
-# x265 makes jxlbatch-macos GPL (as the repository is).
+# x265 makes photobatch-macos GPL (as the repository is).
 # shellcheck disable=SC2086
 cmake -S "$X265/source" -B "$bdir/x265" -G Ninja -Wno-dev $common \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DENABLE_SHARED=OFF -DENABLE_CLI=OFF \
@@ -150,10 +150,10 @@ cmake -S "$LIBJXL" -B "$bdir/jxl" -G Ninja -Wno-dev $common \
   >"$bdir/jxl.cmake.log" 2>&1 || { tail -30 "$bdir/jxl.cmake.log"; exit 1; }
 ninja -C "$bdir/jxl" jxl jxl_cms jxl_threads >"$bdir/jxl.ninja.log" 2>&1 || { tail -40 "$bdir/jxl.ninja.log"; exit 1; }
 
-objdir="$bdir/jxlbatch-obj"
+objdir="$bdir/photobatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
-for src in jxlbatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2086
   cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
@@ -165,7 +165,7 @@ for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
   c++ $flags -std=c++11 -Wall -Wextra -fno-exceptions \
     -c "$src" -o "$objdir/$(basename "$src" .cpp).o"
 done
-out="$ROOT/dist/jxlbatch-macos"
+out="$ROOT/dist/photobatch-macos"
 # shellcheck disable=SC2086
 c++ $flags "$objdir"/*.o \
   "$bdir/jxl/lib/libjxl.a" "$bdir/jxl/lib/libjxl_cms.a" "$bdir/jxl/lib/libjxl_threads.a" \

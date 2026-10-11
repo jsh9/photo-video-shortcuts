@@ -43,7 +43,7 @@ move() {  # move RESULT DESTINATION-FOLDER NAME.jxl|heic
 }
 if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
-    [ -z "$name" ] && name=$flag  # a line from an older jxlbatch: file|index|name
+    [ -z "$name" ] && name=$flag  # a line from an older photobatch: file|index|name
     [ -n "$file" ] && move "$WORK/$file" "${dests[$idx]}" "$name"
   done < "$WORK/jxl_done.txt"
 fi

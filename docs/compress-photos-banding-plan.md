@@ -11,7 +11,7 @@ ______________________________________________________________________
 - [2. Decisions (2026-10-06)](#2-decisions-2026-10-06)
 - [3. Packages](#3-packages)
   - [3.1. A. Banding detector (PR 2)](#31-a-banding-detector-pr-2)
-  - [3.2. B. Pixel grain in `jxlbatch` (PR 2)](#32-b-pixel-grain-in-jxlbatch-pr-2)
+  - [3.2. B. Pixel grain in `photobatch` (PR 2)](#32-b-pixel-grain-in-photobatch-pr-2)
   - [3.3. C. Tuning (PR 2, with the user)](#33-c-tuning-pr-2-with-the-user)
   - [3.4. D. Mac shortcuts: HDR on/off (PR 1)](#34-d-mac-shortcuts-hdr-onoff-pr-1)
   - [3.5. E. iPhone shortcut: album instead of deletion (PR 1)](#35-e-iphone-shortcut-album-instead-of-deletion-pr-1)
@@ -32,7 +32,7 @@ Plan and findings, written 2026-10-06. Two pull requests:
 ## 1. Findings (measured, 2026-10-05/06)
 
 Test photo: a sunset skyline, `IMG_1976.HEIC` (iPhone 17 Pro, 24 MP, HDR 6.8×),
-converted with `jxlbatch` at q88 on the Mac and on the iPhone.
+converted with `photobatch` at q88 on the Mac and on the iPhone.
 
 - **The files are not the problem.** The Mac and iPhone outputs decode to the
   same sky (98% of pixels identical, the rest within 17 of 65,535). Photos
@@ -109,7 +109,7 @@ Python under `tests/compress-photos/` (`banding.py`): `simulate(pq16, width)`,
 synthetic low-noise PQ gradient (always runs) and the user's own photos via
 `test_samples.py` (skipped when absent). Must fail on the 0.5.0 encoder.
 
-### 3.2. B. Pixel grain in `jxlbatch` (PR 2)
+### 3.2. B. Pixel grain in `photobatch` (PR 2)
 
 In the HDR path, PQ outputs only, lossy only: a pre-pass on the decoded 8-bit
 SDR base gives a smoothness weight per 16×16 cell (feathered) and the cell's

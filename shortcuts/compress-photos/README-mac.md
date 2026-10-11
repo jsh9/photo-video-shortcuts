@@ -20,9 +20,9 @@ iPhone's [Compress Photos](README.md):
   deleted, and Photos is not involved.
 
 On the Mac, Shortcuts runs the encoder itself: its Run Shell Script action runs
-`jxlbatch`, a native build of the same encoder a-Shell runs on the iPhone, and
-waits for it. There is no a-Shell, no *JXL-Import*, and nothing to keep in the
-foreground. The results are byte for byte the iPhone's (same libjxl, same
+`photobatch`, a native build of the same encoder a-Shell runs on the iPhone,
+and waits for it. There is no a-Shell, no *JXL-Import*, and nothing to keep in
+the foreground. The results are byte for byte the iPhone's (same libjxl, same
 settings), and the Mac can use all of its cores, converting several photos at a
 time.
 
@@ -65,16 +65,16 @@ ______________________________________________________________________
    this line, then press Return:
 
    ```
-   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/jxlbatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch-macos && chmod +x ~/.local/bin/jxlbatch && ~/.local/bin/jxlbatch --selftest
+   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/photobatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch-macos && chmod +x ~/.local/bin/photobatch && ~/.local/bin/photobatch --selftest
    ```
 
-   It downloads `jxlbatch` into `~/.local/bin` (a hidden folder; the shortcuts
-   know where it is) and runs its self-test, which should end with "Self-test
-   passed". `curl` doesn't mark the download as quarantined, so macOS runs it
-   without a Gatekeeper prompt. If you downloaded it with a browser instead,
-   the file is neither executable nor trusted: run
-   `chmod +x ~/.local/bin/jxlbatch` and
-   `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch` once (until then the
+   It downloads `photobatch` into `~/.local/bin` (a hidden folder; the
+   shortcuts know where it is) and runs its self-test, which should end with
+   "Self-test passed". `curl` doesn't mark the download as quarantined, so
+   macOS runs it without a Gatekeeper prompt. If you downloaded it with a
+   browser instead, the file is neither executable nor trusted: run
+   `chmod +x ~/.local/bin/photobatch` and
+   `xattr -d com.apple.quarantine ~/.local/bin/photobatch` once (until then the
    shortcuts report the encoder as not installed).
 
 2. **Allow scripts.** In Shortcuts ▸ Settings ▸ Advanced, turn on **Allow
@@ -231,9 +231,9 @@ check the encoder's version and note a mismatch in the log.
 | Symptom                                                                                                                                        | Fix                                                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | The shortcut stops at Run Shell Script with an error about scripts                                                                             | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                                                                                                                                                                                       |
-| Quick Look shows `ERROR: jxlbatch is not installed`                                                                                            | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin` for an executable file named `jxlbatch`: a file downloaded with a browser isn't executable until you run `chmod +x ~/.local/bin/jxlbatch` (and `xattr -d com.apple.quarantine` on it).           |
-| `"jxlbatch" cannot be opened because the developer cannot be verified`                                                                         | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/jxlbatch`, or install it with the `curl` command instead.                                                                                                                                                                                      |
-| `! … is not jxlbatch <version>` in the log, or `usage: jxlbatch …`                                                                             | The encoder and the shortcuts are from different releases (an older encoder doesn't know the shortcuts' options and prints its usage instead of converting). Update the older one (see [Updating](#5-updating)).                                                                                                                                       |
+| Quick Look shows `ERROR: photobatch is not installed`                                                                                          | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin` for an executable file named `photobatch`: a file downloaded with a browser isn't executable until you run `chmod +x ~/.local/bin/photobatch` (and `xattr -d com.apple.quarantine` on it).       |
+| `"photobatch" cannot be opened because the developer cannot be verified`                                                                       | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/photobatch`, or install it with the `curl` command instead.                                                                                                                                                                                    |
+| `! … is not photobatch <version>` in the log, or `usage: photobatch …`                                                                         | The encoder and the shortcuts are from different releases (an older encoder doesn't know the shortcuts' options and prints its usage instead of converting). Update the older one (see [Updating](#5-updating)).                                                                                                                                       |
 | The shortcut isn't in Photos' Share menu                                                                                                       | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                                                                                                                                                                                 |
 | *Compress Photo Files (macOS)* isn't in Finder's Quick Actions                                                                                 | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                                                                                                                                                                                        |
 | Notification "Saved 0 photo(s)" and Quick Look shows the log                                                                                   | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                                                                                                                                                                                   |

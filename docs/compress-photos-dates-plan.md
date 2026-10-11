@@ -21,8 +21,8 @@ Plan and findings, written 2026-10-08/09. How it works now is in
 
 ## 1. The problem
 
-Up to 0.6.0, `jxlbatch` copied the original's EXIF unchanged, and Photos dated
-the copy from that EXIF:
+Up to 0.6.0, `photobatch` copied the original's EXIF unchanged, and Photos
+dated the copy from that EXIF:
 
 - **A date changed in Photos** (a photo captured 10/1/2026 12:00 PM, changed to
   1/1/2024 5:00 PM): the change lives only in Photos' library. The export of
@@ -39,13 +39,13 @@ file's EXIF and in Photos, on the Mac and the iPhone.
 
 ## 2. Decisions
 
-- The shortcut reads each photo's date in Photos and gives it to `jxlbatch`,
+- The shortcut reads each photo's date in Photos and gives it to `photobatch`,
   which writes it into the EXIF only when the file's `DateTimeOriginal` is
   another moment or missing (to the second); otherwise the EXIF stays byte for
   byte. The date travels with the file, so EasyLoupe and a later re-import see
   it.
 - The dates go in a separate file, `jxl_dates.txt` (`i|<ISO 8601>`), not in the
-  job line: an older `jxlbatch` ignores it, a newer one without it behaves as
+  job line: an older `photobatch` ignores it, a newer one without it behaves as
   before, and a photo name with `|` stays unambiguous.
 - A written date is in the device's time zone (with its offset on that date):
   neither Shortcuts nor Photos' AppleScript gives a photo's time zone. Using
@@ -69,8 +69,8 @@ file's EXIF and in Photos, on the Mac and the iPhone.
 
 ## 3. Design
 
-- **`jxlbatch`** (`meta.c`: `photo_date_parse`, `exif_set_capture_date`;
-  `xmp.cpp`: `xmp_set_dates`; `jxlbatch.c`: `read_dates`, `process_job`): the
+- **`photobatch`** (`meta.c`: `photo_date_parse`, `exif_set_capture_date`;
+  `xmp.cpp`: `xmp_set_dates`; `photobatch.c`: `read_dates`, `process_job`): the
   Exif IFD is rewritten at the end of the EXIF and IFD0's pointer moved to it,
   so no other value moves (maker notes keep working); IFD0 is rewritten too
   only when it has no Exif IFD; a file without EXIF gets a minimal one. XMP
@@ -100,7 +100,7 @@ file's EXIF and in Photos, on the Mac and the iPhone.
 3. **Photos reads the written date (on the device):** ImageIO reads it
    (`test_dates.py`); to confirm in Photos with the first runs below.
 4. **Which tags Photos' own JPEG export rewrites for a changed date
-   (optional):** `jxlbatch` changes `DateTimeOriginal`, `CreateDate`, their
+   (optional):** `photobatch` changes `DateTimeOriginal`, `CreateDate`, their
    offsets and sub-seconds, and not the modification time.
 
 ## 5. Verification

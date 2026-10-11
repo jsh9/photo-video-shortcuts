@@ -3,7 +3,7 @@ Writes the HDR test photos in fixtures/hdr/ and their expected results.
 
 The photos are tiny HEICs laid out like an iPhone's (primary image, gain map,
 ISO 21496-1 'tmap' item or Apple's older gain map, Exif), in the layouts
-jxlbatch has to handle: every orientation, crops, grids, 10-bit, RGB and
+photobatch has to handle: every orientation, crops, grids, 10-bit, RGB and
 multichannel gain maps, limited range, other color spaces, photos edited in
 Photos (an unlabeled gain map with a crop of its own), and photos whose gain
 map can't be used. HEVC is lossless, so decoding gives exactly the values
@@ -16,7 +16,7 @@ libheif's own decoding).
 - fixtures/hdr/cases.json: what each photo should give (HDR or a note, the
   headroom, the peak brightness, the color primaries).
 - shortcuts/compress-photos/src/selftest_hdr_heic.h: the HDR photo for
-  ``jxlbatch --selftest``.
+  ``photobatch --selftest``.
 - fixtures/heif/<name>.heic and expected.npz: SDR photos in HEIF layouts
   beyond an iPhone's (transforms in an unusual order, crops reaching past the
   photo, derived 'iden' images of a turned source, transparency with transforms
@@ -653,7 +653,7 @@ class Case:
     ``iden_source_turns``: the primary is a derived 'iden' image of the coded
     photo, which is turned by that many quarter turns itself. ``apple``: the
     gain map is labeled as Apple's (an auxiliary image of type APPLE_GAIN_MAP),
-    as in iPhone camera photos; jxlbatch uses unlabeled ones only on upright,
+    as in iPhone camera photos; photobatch uses unlabeled ones only on upright,
     uncropped photos. ``tmap_color``: the 'tmap' item's color, the HDR image's
     (where the gain applies if not ``use_base``): CICP (primaries, transfer) in
     an nclx 'colr' property, as Photos writes, or a libjxl color space name for
@@ -703,7 +703,7 @@ CASES += [
     Case('high_headroom', meta={
         **ISO_META, 'alt_headroom': 9.0,
         'channels': [{**ISO_META['channels'][0], 'max': 9.0}]}),
-    # the most jxlbatch accepts: 16 stops
+    # the most photobatch accepts: 16 stops
     Case('headroom_16_stops', meta={
         **ISO_META, 'alt_headroom': 16.0,
         'channels': [{**ISO_META['channels'][0], 'max': 16.0}]}),
@@ -918,12 +918,14 @@ def write_photo(case, path, profiles, transforms=True):
 
 
 def decoded_gain_map(case, gain, gplanes):
-    """The gain map's values as jxlbatch decodes them: 0..1, stored layout."""
+    """
+    The gain map's values as photobatch decodes them: 0..1, stored layout.
+    """
     if gain.ndim == 2:
         g = gplanes[0].astype(np.float64)
         return g / 255 if case.full_range else np.clip((g - 16) / 219, 0, 1)
 
-    # RGB: through libheif, as jxlbatch decodes it
+    # RGB: through libheif, as photobatch decodes it
     with tempfile.TemporaryDirectory() as d:
         h = Heif()
         h.primary = h.image(gplanes, gain.shape[1], gain.shape[0], 'yuv420p', True,
@@ -995,9 +997,9 @@ def decoded_base_16(heic):
 def upright_base(case, profiles):
     """
     The upright SDR photo, 0..1: decoded as stored (libheif, from a copy
-    without the crop and rotation), then cropped and turned in RGB, as jxlbatch
-    does. (libheif crops and turns before converting to RGB, which shifts the
-    colors when a 4:2:0 photo is cropped at an odd offset.)
+    without the crop and rotation), then cropped and turned in RGB, as
+    photobatch does. (libheif crops and turns before converting to RGB, which
+    shifts the colors when a 4:2:0 photo is cropped at an odd offset.)
     """
     with tempfile.TemporaryDirectory() as d:
         stored = Path(d) / 'stored.heic'
@@ -1132,7 +1134,7 @@ def write_layouts():
     """
     The photos in fixtures/heif/ and their expected pixels: for a coded photo,
     decoded as stored, then turned and cropped in RGB in property order (as
-    Apple shows it); for a derived photo, libheif's own decoding (jxlbatch
+    Apple shows it); for a derived photo, libheif's own decoding (photobatch
     leaves those transforms to libheif, as before 0.2.0).
     """
     LAYOUTS_OUT.mkdir(parents=True, exist_ok=True)
@@ -1221,7 +1223,7 @@ def write_selftest(profiles):
         '// HEIC with an ISO 21496-1 gain map and an HDR profile on its tmap',
         "// item: Display P3 + PQ with a placeholder 'hdgm' tone curve, and tags",
         "// like Apple's (an 'mAB ' A2B0 without B curves, which skcms rejects),",
-        '// for jxlbatch --selftest. Do not edit.',
+        '// for photobatch --selftest. Do not edit.',
         '#ifndef JXLBATCH_SELFTEST_HDR_HEIC_H',
         '#define JXLBATCH_SELFTEST_HDR_HEIC_H',
         '',

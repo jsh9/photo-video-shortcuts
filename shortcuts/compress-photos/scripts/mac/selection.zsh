@@ -4,7 +4,7 @@
 # "2024-01-01 17:00:00" on the Mac's clock. A Live Photo's original is a
 # photo plus a .mov with the same name: skipped, as on the iPhone, so its
 # video is never lost; a video alone is skipped too. Other files are left to
-# jxlbatch, which fails them with "unsupported format".
+# photobatch, which fails them with "unsupported format".
 setopt nullglob
 case $IDS in
   ERROR*) echo "$IDS" >> "$LOG";;
@@ -47,8 +47,8 @@ for f in "$WORK"/in/*(.N); do
   ln -s "$f" "$WORK/jxl_in_$n.orig"
   printf '%d|%s\n' "$n" "$name" >> "$WORK/jxl_job.txt"
   origs[$n]=$name
-  # The date for jxlbatch (jxl_dates.txt), with the offset the Mac's time
-  # zone had on that date: "2024-01-01T17:00:00-0500". jxlbatch writes it
+  # The date for photobatch (jxl_dates.txt), with the offset the Mac's time
+  # zone had on that date: "2024-01-01T17:00:00-0500". photobatch writes it
   # into the copy's EXIF when the original's capture date is another moment
   # or missing. A clock time in the hour that repeats when daylight saving
   # time ends is two moments (AppleScript's dates are clock times): no date
@@ -76,7 +76,7 @@ mkdir -p "$WORK/out"
 if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
     [ -n "$file" ] || continue
-    [ -z "$name" ] && name=$flag  # a line from an older jxlbatch: file|index|name
+    [ -z "$name" ] && name=$flag  # a line from an older photobatch: file|index|name
     dest=$(unique "$WORK/out/$name")
     mv "$WORK/$file" "$dest" || continue
     printf '%s|%s|%s|%s\n' "$dest" "${ids[${origs[$idx]}]}" "$flag" "${dest:t}"

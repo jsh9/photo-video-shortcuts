@@ -1,6 +1,6 @@
 """
 The date the photo has in Photos (jxl_dates.txt, written by the shortcuts):
-jxlbatch puts it in the JPEG XL's EXIF when the original's capture date is
+photobatch puts it in the JPEG XL's EXIF when the original's capture date is
 another moment or missing, and otherwise leaves the EXIF as it is. For every
 build (SIMD and scalar WebAssembly, native).
 """
@@ -31,7 +31,7 @@ DATE_TAGS = {
 def convert(encoder, folder, photos, dates=None):
     """
     Stages photos (a list), writes jxl_dates.txt from dates ({index: date}),
-    and converts; returns (jxlbatch's output, {index: JPEG XL}).
+    and converts; returns (photobatch's output, {index: JPEG XL}).
     """
     ph.stage(folder, photos)
     if dates is not None:
