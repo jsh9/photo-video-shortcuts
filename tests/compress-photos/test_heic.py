@@ -253,6 +253,102 @@ def test_date_from_photos_lands_in_the_exif(encoder, tmp_path):
     assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
 
 
+def without_exif_item(path, folder):
+    """
+    A copy of the HEIC whose Exif item has an unknown type, so that no reader
+    finds an Exif item (as in a HEIC saved by an app that removed the EXIF).
+    """
+    buf = bytearray(path.read_bytes())
+    renamed = 0
+    p = buf.find(b'infe')
+    while p != -1:
+        # size, 'infe', version and flags, id, protection, then the type
+        if buf[p + 12 : p + 16] == b'Exif':
+            buf[p + 12 : p + 16] = b'skip'
+            renamed += 1
+
+        p = buf.find(b'infe', p + 4)
+
+    assert renamed == 1
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / path.name
+    copy.write_bytes(buf)
+    return copy
+
+
+XMP_WITH_DATE = (
+    b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+    b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    b'<rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/"'
+    b' xmp:CreateDate="2026-10-01T12:00:00-04:00"/>'
+    b'</rdf:RDF></x:xmpmeta>'
+)
+
+
+def with_xmp_date(path, folder):
+    """
+    A copy of OLDER whose XMP item describes the picture (in the fixture it is
+    the gain map's) and carries a capture date, as a camera's XMP does: the
+    packet is replaced by one of the same length and its 'cdsc' pointed at the
+    picture, so the rest of the file is untouched.
+    """
+    buf = bytearray(path.read_bytes())
+    ((xmp_id, (_, packet)),) = [
+        (i, v) for i, v in items(path).items() if v[0] == 'mime'
+    ]
+    assert len(XMP_WITH_DATE) <= len(packet)
+    at = buf.find(packet)
+    assert at > 0 and buf.find(packet, at + 1) < 0
+    buf[at : at + len(packet)] = XMP_WITH_DATE.ljust(len(packet))
+    ref = b'cdsc' + xmp_id.to_bytes(2, 'big') + (1).to_bytes(2, 'big')
+    at = buf.find(ref)
+    assert at > 0
+    buf[at + 8 : at + 10] = (1).to_bytes(2, 'big')  # the picture, item 1
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / path.name
+    copy.write_bytes(buf)
+    return copy
+
+
+def test_date_from_photos_becomes_an_exif_item_when_the_file_has_none(
+        encoder, tmp_path
+):
+    # An Exif item is added, describing the picture; the gain map stays.
+    photo = without_exif_item(SINGLE, tmp_path / 'src')
+    assert not any(typ == 'Exif' for typ, _ in items(photo).values())
+    ph.stage(tmp_path, [photo])
+    (tmp_path / 'jxl_dates.txt').write_text('1|2024-05-06T07:08:09-05:00')
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    log = ' '.join(result.stdout.split())
+    assert (
+        'date from Photos: 2024:05:06 07:08:09 -05:00 (the file had none)'
+        in log
+    )
+    assert 'no metadata' not in log
+    out = ph.read_done(tmp_path)[1][0]
+    types = [typ for typ, _ in items(out).values()]
+    assert types.count('Exif') == 1 and 'skip' not in types
+    tags = ph.exif_tags(out)
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    assert tags['ExifIFD:OffsetTimeOriginal'] == '-05:00'
+    assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
+
+
+def test_date_from_photos_lands_in_the_xmp_too(encoder, tmp_path):
+    # The picture's XMP capture dates get the date, as in the JPEG XL route.
+    photo = with_xmp_date(OLDER, tmp_path / 'src')
+    ph.stage(tmp_path, [photo])
+    (tmp_path / 'jxl_dates.txt').write_text('1|2024-05-06T07:08:09-05:00')
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'HDR kept' in result.stdout
+    out = ph.read_done(tmp_path)[1][0]
+    tags = ph.exif_tags(out)
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    assert ph.xmp_tags(out)['CreateDate'] == '2024:05:06 07:08:09-05:00'
+
+
 def test_rf_needs_heic(encoder, tmp_path):
     result = encoder.run(['--rf', '26', 'jxl_job.txt'], tmp_path)
     assert result.returncode == 2

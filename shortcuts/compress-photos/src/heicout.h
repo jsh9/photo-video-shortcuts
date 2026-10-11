@@ -30,12 +30,14 @@ typedef struct {
 // (ISO 21496-1 'tmap' or Apple's older auxiliary image) with its tiles,
 // the thumbnail, the Exif and XMP items stay byte for byte unless `sdr`
 // drops the gain map; other auxiliary images (Apple's Photographic Styles
-// data, mattes) are dropped. `exif`, if given, replaces the Exif item (TIFF
-// data). Returns 0 with the malloc'ed file, 1 if this file can't be
-// transcoded (info->note says why; heic_from_pixels can still convert it),
-// or -1 with the reason in err.
+// data, mattes) are dropped. `exif`, if given (TIFF data), replaces the
+// picture's Exif item, or becomes one when the file has none; `xmp`, if
+// given, replaces the picture's XMP item (none is added). Returns 0 with the
+// malloc'ed file, 1 if this file can't be transcoded (info->note says why;
+// heic_from_pixels can still convert it), or -1 with the reason in err.
 int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const uint8_t *exif, size_t exif_len,
-                   uint8_t **out, size_t *out_len, heic_info_t *info, char *err, size_t err_len);
+                   const uint8_t *xmp, size_t xmp_len, uint8_t **out, size_t *out_len, heic_info_t *info, char *err,
+                   size_t err_len);
 
 // Writes a new SDR HEIC from `img` (8-bit, 3 channels, stored pixels; an
 // alpha channel is dropped, gray expanded) with its color (an ICC profile,

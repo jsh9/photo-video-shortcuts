@@ -489,7 +489,28 @@ typedef struct {
   uint8_t *kept;      // per item (f->items order)
   uint64_t *offsets;  // per item: where its data goes in the output (method 0)
   size_t *lengths;
+  uint32_t add_id;      // the added item (rw->add_type), 0 if none
+  uint64_t add_offset;  // where its data goes in the output
 } rewrite_t;
+
+static void put_infe(bb_t *b, uint32_t id, uint32_t flags, uint32_t type);
+
+// The added item's 'cdsc' reference, in the file's 'iref' format.
+static void put_added_ref(bb_t *b, const rewrite_t *r) {
+  const size_t rs = bb_begin(b, FOURCC('c', 'd', 's', 'c'));
+  if (r->f->iref_version == 0) {
+    bb_u16(b, r->add_id);
+  } else {
+    bb_u32(b, r->add_id);
+  }
+  bb_u16(b, 1);
+  if (r->f->iref_version == 0) {
+    bb_u16(b, r->rw->add_describes);
+  } else {
+    bb_u32(b, r->rw->add_describes);
+  }
+  bb_end(b, rs);
+}
 
 static int is_kept(const rewrite_t *r, uint32_t id) {
   for (size_t i = 0; i < r->f->num_items; i++) {
@@ -509,6 +530,8 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
   const hb_file_t *f = r->f;
   const size_t meta = bb_begin(b, FOURCC('m', 'e', 't', 'a'));
   bb_put(b, f->meta_vf, 4);
+  int has_iref = 0;
+  for (size_t c = 0; c < f->num_children; c++) has_iref |= f->child_types[c] == FOURCC('i', 'r', 'e', 'f');
   for (size_t c = 0; c < f->num_children; c++) {
     const uint32_t ct = f->child_types[c];
     const span_t box = f->children[c];
@@ -517,7 +540,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
     if (ct == FOURCC('i', 'i', 'n', 'f') && pl.n >= 4) {
       const size_t start = bb_begin(b, ct);
       bb_put(b, pl.p, 4);
-      size_t count = 0;
+      size_t count = r->add_id ? 1 : 0;
       for (size_t i = 0; i < f->num_items; i++) count += r->kept[i];
       if (pl.p[0] == 0) {
         bb_u16(b, (unsigned)count);
@@ -527,7 +550,14 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
       for (size_t i = 0; i < f->num_items; i++) {
         if (r->kept[i]) bb_put(b, f->items[i].infe.p, f->items[i].infe.n);
       }
+      if (r->add_id) put_infe(b, r->add_id, 1, r->rw->add_type);
       bb_end(b, start);
+      if (r->add_id && !has_iref) {  // the added item's reference needs an 'iref'
+        const size_t is = bb_begin(b, FOURCC('i', 'r', 'e', 'f'));
+        bb_u32(b, 0);  // version 0 (16-bit ids), no flags
+        put_added_ref(b, r);
+        bb_end(b, is);
+      }
     } else if (ct == FOURCC('i', 'r', 'e', 'f') && pl.n >= 4) {
       const size_t start = bb_begin(b, ct);
       bb_put(b, pl.p, 4);
@@ -554,6 +584,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         }
         bb_end(b, rs);
       }
+      if (r->add_id) put_added_ref(b, r);
       bb_end(b, start);
     } else if (ct == FOURCC('i', 'p', 'r', 'p')) {
       const size_t start = bb_begin(b, ct);
@@ -602,7 +633,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
       bb_u8(b, 0);
       bb_u8(b, 0x44);  // offset_size 4, length_size 4
       bb_u8(b, 0x00);  // base_offset_size 0, index_size 0
-      size_t count = 0;
+      size_t count = r->add_id ? 1 : 0;
       for (size_t i = 0; i < f->num_items; i++) count += r->kept[i] && f->items[i].located;
       if (v < 2) {
         bb_u16(b, (unsigned)count);
@@ -631,6 +662,18 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
             bb_u32(b, (uint32_t)ext->length);
           }
         }
+      }
+      if (r->add_id) {
+        if (v < 2) {
+          bb_u16(b, r->add_id);
+        } else {
+          bb_u32(b, r->add_id);
+        }
+        if (v >= 1) bb_u16(b, 0);  // construction method 0: in 'mdat'
+        bb_u16(b, 0);              // data_reference_index
+        bb_u16(b, 1);
+        bb_u32(b, (uint32_t)(mdat_start + r->add_offset));
+        bb_u32(b, (uint32_t)r->rw->add_len);
       }
       bb_end(b, start);
     } else if (ct == FOURCC('g', 'r', 'p', 'l')) {
@@ -676,6 +719,14 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   int rc = -1;
   bb_t b = {NULL, 0, 0, 0};
   if (!r.kept || !r.offsets || !r.lengths || !order) goto done;
+  r.add_id = 0;
+  r.add_offset = 0;
+  if (rw->add_type) {  // the next id after the file's highest
+    uint32_t top = 0;
+    for (size_t i = 0; i < f->num_items; i++) top = f->items[i].id > top ? f->items[i].id : top;
+    if (top >= 0xffff) goto done;  // 'infe' version 2 and 'iref' version 0 hold 16-bit ids
+    r.add_id = top + 1;
+  }
   for (size_t i = 0; i < f->num_items; i++) {
     for (size_t k = 0; k < rw->num_keep; k++) {
       if (rw->keep[k] == f->items[i].id) r.kept[i] = 1;
@@ -715,6 +766,7 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     r.lengths[i] = len;
     pos += len;
   }
+  r.add_offset = pos;
   // 'meta' once to measure it (its size doesn't depend on the offsets), then
   // for real with the offsets into 'mdat'.
   write_meta(&b, &r, 0);
@@ -736,6 +788,7 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
       for (size_t e = 0; e < f->items[i].num_extents; e++) bb_put(&b, spans[e].p, spans[e].n);
     }
   }
+  if (r.add_id) bb_put(&b, rw->add_data, rw->add_len);
   bb_end(&b, mdat);
   if (b.oom) goto done;
   *out = b.data;

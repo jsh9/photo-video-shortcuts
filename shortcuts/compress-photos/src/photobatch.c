@@ -800,8 +800,8 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
   snprintf(name_orig, sizeof name_orig, "jxl_in_%u.orig", job->index);
   snprintf(name_out, sizeof name_out, "jxl_out_%u.heic", job->index);
   char *p_orig = path_join(dir, name_orig), *p_out = path_join(dir, name_out);
-  uint8_t *orig = NULL, *heic = NULL, *exif = NULL;
-  size_t orig_len = 0, heic_len = 0, exif_len = 0;
+  uint8_t *orig = NULL, *heic = NULL, *exif = NULL, *xmp = NULL;
+  size_t orig_len = 0, heic_len = 0, exif_len = 0, xmp_len = 0;
   meta_t mo;
   memset(&mo, 0, sizeof mo);
   image_t img;
@@ -843,7 +843,16 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
     memcpy(exif, mo.exif.data, mo.exif.size);
     exif_len = mo.exif.size;
   }
-  const int dated = apply_photo_date(job, &exif, &exif_len, NULL, NULL);
+  if (mo.xmp.size) {  // the picture's XMP: its capture dates get the date too
+    xmp = (uint8_t *)malloc(mo.xmp.size);
+    if (!xmp) {
+      snprintf(err, sizeof err, "out of memory");
+      goto done;
+    }
+    memcpy(xmp, mo.xmp.data, mo.xmp.size);
+    xmp_len = mo.xmp.size;
+  }
+  const int dated = apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len);
   if (dated < 0) {
     snprintf(err, sizeof err, "out of memory");
     goto done;
@@ -852,8 +861,8 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
 
   if (format == FMT_HEIF) {
     // Its own container, with the tiles re-encoded.
-    const int rc = heic_transcode(orig, orig_len, &ho, dated ? exif : NULL, dated ? exif_len : 0, &heic, &heic_len,
-                                  &info, err, sizeof err);
+    const int rc = heic_transcode(orig, orig_len, &ho, dated ? exif : NULL, dated ? exif_len : 0, dated ? xmp : NULL,
+                                  dated ? xmp_len : 0, &heic, &heic_len, &info, err, sizeof err);
     if (rc < 0) goto done;
     if (rc == 0) {
       transcoded = 1;
@@ -940,6 +949,7 @@ done:
   free(orig);
   free(heic);
   free(exif);
+  free(xmp);
   free(p_orig);
   free(p_out);
   return ok;
@@ -1570,11 +1580,12 @@ static void selftest_io(const char *label, const char *dir) {
   if (!f) {
     msg = "cannot create a file";
   } else {
-    fputs("photobatch", f);
+    static const char kProbe[] = "photobatch";
+    fputs(kProbe, f);
     fclose(f);
     uint8_t *back = NULL;
     size_t n = 0;
-    if (read_file(path, &back, &n) != 0 || n != 8 || memcmp(back, "photobatch", 8) != 0) {
+    if (read_file(path, &back, &n) != 0 || n != sizeof kProbe - 1 || memcmp(back, kProbe, n) != 0) {
       msg = "wrote a file but could not read it back";
     } else if (remove(path) != 0) {
       msg = "read/write ok, delete failed";
@@ -1725,8 +1736,8 @@ static int selftest_heic(const options_t *opt) {
   uint8_t *out = NULL;
   size_t out_len = 0;
   char err[256] = "";
-  const int rc = heic_transcode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, &ho, NULL, 0, &out, &out_len, &info,
-                                err, sizeof err);
+  const int rc = heic_transcode(kSelftestHdrHeic, sizeof kSelftestHdrHeic, &ho, NULL, 0, NULL, 0, &out, &out_len,
+                                &info, err, sizeof err);
   if (rc != 0) {
     say("  FAILED: %s\n", rc > 0 ? info.note : err);
     return -1;

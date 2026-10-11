@@ -10,28 +10,29 @@ encoder. Every release includes the current files of all shortcuts.
     ask the format (HEIC or JPEG XL), then that format's quality. A HEIC copy
     is the camera's own file with its HEVC tiles re-encoded by x265 (preset
     slow, at the chosen RF: 22 "placebo" to 40, default 26); the gain map,
-    `tmap` item, thumbnail, Exif and XMP stay byte for byte, so Photos shows
-    the copy exactly as the original, without the pink patches an HDR JPEG XL
-    shows in bright skies. Apple's Photographic Styles data (about 0.3 MB) is
-    dropped. *Drop HDR* leaves the gain map out; a JPEG, a PNG, or a HEIF whose
-    picture isn't 8-bit 4:2:0 HEVC tiles is written anew as an SDR HEIC.
+    `tmap` item, thumbnail, Exif and XMP stay byte for byte (the Exif and XMP
+    get the date from Photos, below), so Photos shows the copy exactly as the
+    original, without the pink patches an HDR JPEG XL shows in bright skies.
+    Apple's Photographic Styles data (about 0.3 MB) is dropped. *Drop HDR*
+    leaves the gain map out; a JPEG, a PNG, or a HEIF whose picture isn't 8-bit
+    4:2:0 HEVC tiles is written anew as an SDR HEIC.
     `photobatch --heic [--rf RF]`; x265 is linked into every build (the
     WebAssembly build runs it on the calling thread, about 20 s per 24 MP photo
     under wasmtime on an M4 Pro), which makes the encoders GPL as the
     repository is. The self-test checks a HEIC round trip.
-  - Each JPEG XL copy gets the date Photos shows for its original, in Photos
-    and in its EXIF capture date (`DateTimeOriginal`, `CreateDate` and their
-    time zone), on both platforms. A date changed in Photos (Adjust Date and
-    Time), which Photos keeps in its library and not in the original file, is
-    no longer lost with the original; a photo without a capture date of its own
-    (an image saved from an app that removed it, a screenshot) is no longer
-    dated at the time of the conversion. A photo whose capture date already is
-    that moment keeps its EXIF byte for byte; one without a time zone in its
-    EXIF whose time is that moment in some zone keeps its time and gets the
-    zone. The shortcuts pass the dates to `photobatch` in `jxl_dates.txt`
-    (`i|2024-01-01T17:00:00-05:00`); the log says when a date or zone was
-    written. The Mac's selection route also checks each imported copy's date in
-    Photos.
+  - Each copy, JPEG XL or HEIC, gets the date Photos shows for its original, in
+    Photos and in its EXIF capture date (`DateTimeOriginal`, `CreateDate` and
+    their time zone; a HEIC without an Exif item gets one), on both platforms.
+    A date changed in Photos (Adjust Date and Time), which Photos keeps in its
+    library and not in the original file, is no longer lost with the original;
+    a photo without a capture date of its own (an image saved from an app that
+    removed it, a screenshot) is no longer dated at the time of the conversion.
+    A photo whose capture date already is that moment keeps its EXIF byte for
+    byte; one without a time zone in its EXIF whose time is that moment in some
+    zone keeps its time and gets the zone. The shortcuts pass the dates to
+    `photobatch` in `jxl_dates.txt` (`i|2024-01-01T17:00:00-05:00`); the log
+    says when a date or zone was written. The Mac's selection route also checks
+    each imported copy's date in Photos.
   - Update both the shortcuts and the encoders (`photobatch.wasm`,
     `photobatch-macos`): an older `photobatch` ignores the dates, and an older
     shortcut gives none.

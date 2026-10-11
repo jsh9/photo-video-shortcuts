@@ -335,8 +335,8 @@ keeps only one file, so check which one before you merge.
 
 ### 3.2. Dates
 
-Each JXL gets the date Photos shows for its original, in Photos and in the file
-itself (its EXIF capture date, which other apps read too):
+Each copy gets the date Photos shows for its original, in Photos and in the
+file itself (its EXIF capture date, which other apps read too):
 
 - **A date you changed in Photos** (Adjust Date & Time) is kept. Photos keeps
   such a change in its library, not in the original file, so a plain copy of

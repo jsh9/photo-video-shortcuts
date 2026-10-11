@@ -688,12 +688,16 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   XMP, plus the `altr` group. Dropped: Apple's Photographic Styles data (the
   linear style-delta image, three mattes, the linear thumbnail, the styles
   metadata; about 0.3 MB of a 2.7 MB photo) and any other auxiliary image. A
-  date from Photos replaces the Exif item's data (the 4-byte offset header put
-  back). A single `hvc1` picture is one tile. Measured on a 24 MP photo:
-  per-tile x265 at CRF N gives the same size as x265 on the whole picture at
-  CRF N (within 0.3%), and for a still, CRF N means QP ≈ N − 5.3 (x265's
-  I-frame offset), so RF numbers run finer than in video: RF 26 is 61% of the
-  original at SSIMULACRA2 81 (≈ JPEG XL 83).
+  date from Photos replaces the data of the picture's Exif item (the 4-byte
+  offset header put back) or, when the file has none, adds one (`hb_rewrite_t`
+  `add_*`: a hidden `infe`, a `cdsc` reference to the picture, an `iloc` entry,
+  its data last in `mdat`), and replaces the picture's XMP item with its
+  capture dates changed (`xmp_set_dates`, as in the JPEG XL route). A single
+  `hvc1` picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N
+  gives the same size as x265 on the whole picture at CRF N (within 0.3%), and
+  for a still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers
+  run finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈
+  JPEG XL 83).
 - **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
   HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
   several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full

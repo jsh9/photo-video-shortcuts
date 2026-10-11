@@ -201,6 +201,17 @@ static int keep_metadata(const hb_file_t *f, idset_t *keep, uint32_t id) {
   return 0;
 }
 
+// The kept item of `type` ('Exif' or 'mime') describing the picture, 0 if none.
+static uint32_t metadata_item(const hb_file_t *f, const idset_t *keep, uint32_t type) {
+  for (size_t i = 0; i < f->num_items; i++) {
+    const uint32_t id = f->items[i].id;
+    if (f->items[i].type == type && idset_has(keep, id) && hb_has_ref(f, id, FOURCC('c', 'd', 's', 'c'), f->primary)) {
+      return id;
+    }
+  }
+  return 0;
+}
+
 // 1 if the item is a gain map: an auxiliary image of Apple's
 // urn:com:apple:photo:2020:aux:hdrgainmap type.
 static int is_gain_map(const hb_file_t *f, uint32_t id) {
@@ -217,14 +228,13 @@ static int is_gain_map(const hb_file_t *f, uint32_t id) {
   return 0;
 }
 
-// The picture's layout: its tiles (one for an 'hvc1' primary) and geometry.
-// Returns 0, or 1 with the reason in note when it isn't a grid of 8-bit
-// 4:2:0 HEVC pictures sharing one 'hvcC'.
-static int picture_layout(const hb_file_t *f, uint32_t primary, const uint32_t **tiles, size_t *num_tiles,
-                          uint32_t *rows, uint32_t *cols, uint32_t *tile_w, uint32_t *tile_h, uint32_t *w,
-                          uint32_t *h, uint32_t *hvcc_index, char *note, size_t note_len) {
+// The picture's layout: its tiles (one for an 'hvc1' primary, listed in the
+// caller's `single`) and geometry. Returns 0, or 1 with the reason in note
+// when it isn't a grid of 8-bit 4:2:0 HEVC pictures sharing one 'hvcC'.
+static int picture_layout(const hb_file_t *f, uint32_t primary, uint32_t single[1], const uint32_t **tiles,
+                          size_t *num_tiles, uint32_t *rows, uint32_t *cols, uint32_t *tile_w, uint32_t *tile_h,
+                          uint32_t *w, uint32_t *h, uint32_t *hvcc_index, char *note, size_t note_len) {
   const hb_item_t *item = hb_item(f, primary);
-  static uint32_t single[1];
   if (item->type == FOURCC('h', 'v', 'c', '1')) {
     single[0] = primary;
     *tiles = single;
@@ -318,13 +328,15 @@ static int picture_layout(const hb_file_t *f, uint32_t primary, const uint32_t *
 }
 
 int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const uint8_t *exif, size_t exif_len,
-                   uint8_t **out, size_t *out_len, heic_info_t *info, char *err, size_t err_len) {
+                   const uint8_t *xmp, size_t xmp_len, uint8_t **out, size_t *out_len, heic_info_t *info, char *err,
+                   size_t err_len) {
   *out = NULL;
   *out_len = 0;
   memset(info, 0, sizeof *info);
   hb_file_t f;
   if (hb_parse(buf, len, &f, err, err_len) != 0) return -1;
   int rc = -1;
+  uint32_t single[1] = {0};
   const uint32_t *tiles = NULL;
   size_t num_tiles = 0;
   uint32_t rows = 0, cols = 0, tile_w = 0, tile_h = 0, w = 0, h = 0, hvcc_index = 0;
@@ -340,8 +352,8 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
   uint8_t *hvcc = NULL, *exif_item = NULL;
   size_t hvcc_len = 0;
 
-  if (picture_layout(&f, f.primary, &tiles, &num_tiles, &rows, &cols, &tile_w, &tile_h, &w, &h, &hvcc_index,
-                     info->note, sizeof info->note) != 0) {
+  if (picture_layout(&f, f.primary, single, &tiles, &num_tiles, &rows, &cols, &tile_w, &tile_h, &w, &h,
+                     &hvcc_index, info->note, sizeof info->note) != 0) {
     rc = 1;
     goto done;
   }
@@ -457,8 +469,9 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
     }
   }
 
-  // The new data: every tile, and the Exif when a new one is given.
-  replace = (hb_replace_t *)calloc(num_tiles + 1, sizeof *replace);
+  // The new data: every tile, and the Exif and XMP when new ones are given
+  // (the Exif as a new item describing the picture when the file has none).
+  replace = (hb_replace_t *)calloc(num_tiles + 2, sizeof *replace);
   if (!replace) goto oom;
   for (size_t t = 0; t < num_tiles; t++) {
     replace[t].id = tiles[t];
@@ -466,23 +479,35 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
     replace[t].len = job.pic[t].len;
   }
   size_t num_replace = num_tiles;
+  hb_rewrite_t rw = {keep.ids, keep.n, replace, num_replace, hvcc_index, hvcc, hvcc_len, 0, 0, NULL, 0};
   if (exif) {
-    for (size_t i = 0; i < f.num_items; i++) {
-      const uint32_t id = f.items[i].id;
-      if (f.items[i].type == FOURCC('E', 'x', 'i', 'f') && idset_has(&keep, id)) {
-        exif_item = (uint8_t *)malloc(4 + exif_len);
-        if (!exif_item) goto oom;
-        memset(exif_item, 0, 4);  // the TIFF header follows at once
-        memcpy(exif_item + 4, exif, exif_len);
-        replace[num_replace].id = id;
-        replace[num_replace].data = exif_item;
-        replace[num_replace].len = 4 + exif_len;
-        num_replace++;
-        break;
-      }
+    exif_item = (uint8_t *)malloc(4 + exif_len);
+    if (!exif_item) goto oom;
+    memset(exif_item, 0, 4);  // the TIFF header follows at once
+    memcpy(exif_item + 4, exif, exif_len);
+    const uint32_t id = metadata_item(&f, &keep, FOURCC('E', 'x', 'i', 'f'));
+    if (id) {
+      replace[num_replace].id = id;
+      replace[num_replace].data = exif_item;
+      replace[num_replace].len = 4 + exif_len;
+      num_replace++;
+    } else {
+      rw.add_type = FOURCC('E', 'x', 'i', 'f');
+      rw.add_describes = f.primary;
+      rw.add_data = exif_item;
+      rw.add_len = 4 + exif_len;
     }
   }
-  hb_rewrite_t rw = {keep.ids, keep.n, replace, num_replace, hvcc_index, hvcc, hvcc_len};
+  if (xmp) {
+    const uint32_t id = metadata_item(&f, &keep, FOURCC('m', 'i', 'm', 'e'));
+    if (id) {
+      replace[num_replace].id = id;
+      replace[num_replace].data = xmp;
+      replace[num_replace].len = xmp_len;
+      num_replace++;
+    }
+  }
+  rw.num_replace = num_replace;
   if (hb_rewrite(&f, &rw, out, out_len) != 0) goto oom;
   rc = 0;
   goto done;

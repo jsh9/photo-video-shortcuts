@@ -103,13 +103,22 @@ typedef struct {
   uint32_t hvcc_index;  // property to replace with `hvcc` (0: none)
   const uint8_t *hvcc;  // the new 'hvcC' payload
   size_t hvcc_len;
+  // An item to add (add_type 0: none), such as an 'Exif' item for a file
+  // without one: hidden, without properties, describing ('cdsc') the item
+  // `add_describes`, its data last in 'mdat'. Its id is the next after the
+  // file's highest.
+  uint32_t add_type;
+  uint32_t add_describes;
+  const uint8_t *add_data;
+  size_t add_len;
 } hb_rewrite_t;
 
 // Writes the file again: 'ftyp' as it was; 'meta' with the kept items only
 // ('iinf', 'iref', 'ipma', 'grpl' filtered, 'iloc' regenerated, the property
-// replaced, everything else byte for byte); 'mdat' with the kept items' data
-// in the original order, replaced data where given. malloc'ed. Returns 0, or
-// -1 if out of memory.
+// replaced, the added item in 'iinf', 'iref' and 'iloc', everything else
+// byte for byte); 'mdat' with the kept items' data in the original order,
+// replaced data where given, the added item's data last. malloc'ed. Returns
+// 0, or -1 if out of memory (or the added item's id doesn't fit 16 bits).
 int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t *out_len);
 
 // A new HEIC: one picture as a grid of HEVC tiles (a single 'hvc1' item when
