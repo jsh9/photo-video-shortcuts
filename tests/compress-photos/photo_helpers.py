@@ -261,6 +261,97 @@ def stage(folder, photos):
     return staged
 
 
+# EXIF (TIFF data) written by hand, so that a test knows where every value is,
+# such as an iPhone's GPS IFD whose bytes must not survive its removal.
+
+
+def ascii_value(text):
+    return (2, len(text.encode()) + 1, text.encode() + b'\0')
+
+
+def rationals(*pairs):
+    return (5, len(pairs), b''.join(struct.pack('>II', *p) for p in pairs))
+
+
+def tiff(ifd0, exif=None, gps=None):
+    """
+    Big-endian EXIF (TIFF) data: IFD0 with ``ifd0``'s entries, and an Exif and
+    a GPS IFD with theirs if given, each {tag: (type, count, value)}. A value
+    longer than 4 bytes follows its IFD. Written by hand, so that the test
+    knows where every value is.
+    """
+    ifds = [('ifd0', dict(ifd0))]
+    for name, tag, entries in (('exif', 0x8769, exif), ('gps', 0x8825, gps)):
+        if entries is not None:
+            ifds.append((name, entries))
+            ifds[0][1][tag] = (4, 1, name)
+
+    def size(entries):
+        values = (
+            len(v) for _, _, v in entries.values() if isinstance(v, bytes)
+        )
+        return (
+            2
+            + 12 * len(entries)
+            + 4
+            + sum((n + 1) & ~1 for n in values if n > 4)
+        )
+
+    offsets, at = {}, 8
+    for name, entries in ifds:
+        offsets[name] = at
+        at += size(entries)
+
+    out = bytearray(b'MM\x00\x2a' + struct.pack('>I', 8))
+    for name, entries in ifds:
+        value_at = offsets[name] + 2 + 12 * len(entries) + 4
+        table, values = struct.pack('>H', len(entries)), b''
+        for tag in sorted(entries):
+            kind, count, value = entries[tag]
+            if isinstance(value, str):  # a pointer to that IFD
+                value = struct.pack('>I', offsets[value])
+
+            if len(value) <= 4:
+                table += struct.pack('>HHI', tag, kind, count) + value.ljust(
+                    4, b'\0'
+                )
+            else:
+                table += struct.pack(
+                    '>HHII', tag, kind, count, value_at + len(values)
+                )
+                values += value + b'\0' * (len(value) % 2)
+
+        out += table + struct.pack('>I', 0) + values
+
+    return bytes(out)
+
+
+# An iPhone's GPS IFD (40°42'52.70" N, 73°59'53.71" W, 16.12 m, its
+# direction, speed and positioning error): values whose bytes can be looked for.
+OLD_GPS = {
+    0x0001: ascii_value('N'),
+    0x0002: rationals((40, 1), (42, 1), (5270, 100)),
+    0x0003: ascii_value('W'),
+    0x0004: rationals((73, 1), (59, 1), (5371, 100)),
+    0x0005: (1, 1, b'\0'),
+    0x0006: rationals((1612147834, 100000000)),
+    0x000C: ascii_value('K'),
+    0x000D: rationals((304941505, 1000000000)),
+    0x0011: rationals((1979783019, 10000000)),
+    0x001F: rationals((3345064213, 100000000)),
+}
+OLD_LAT = 40 + 42 / 60 + 52.70 / 3600
+OLD_LON = -(73 + 59 / 60 + 53.71 / 3600)
+OLD_BYTES = [
+    struct.pack('>II', 5270, 100),
+    struct.pack('>II', 5371, 100),
+    struct.pack('>II', 1612147834, 100000000),
+    struct.pack('>II', 1979783019, 10000000),
+]
+TIFF_IFD0 = {0x010F: ascii_value('TestMake')}
+TIFF_EXIF = {0x9003: ascii_value('2024:05:06 07:08:09')}
+
+
 def done_lines(folder):
     """jxl_done.txt's lines, split at "|"; [] if there is none."""
     done = folder / 'jxl_done.txt'

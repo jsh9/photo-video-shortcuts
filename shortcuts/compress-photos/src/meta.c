@@ -1619,19 +1619,22 @@ int exif_description(const uint8_t *p, size_t n, char **text) {
   tiff_t t;
   if (!tiff_open(&t, p, n)) return 0;
   const size_t e = ifd_find(&t, t32(&t, 4), 0x010E);
-  if (!e || t16(&t, e + 2) != TIFF_ASCII) return 0;
+  if (!e) return 0;
+  // Its text up to a NUL, without trailing spaces: "" when it is blank, or
+  // not ASCII as it should be.
   const uint32_t count = t32(&t, e + 4);
   const size_t src = count <= 4 ? e + 8 : t32(&t, e + 8);
-  if (count == 0 || src > n || count > n - src) return 0;
-  const uint8_t *nul = (const uint8_t *)memchr(p + src, 0, count);
-  size_t k = nul ? (size_t)(nul - (p + src)) : count;
-  while (k && p[src + k - 1] == ' ') k--;
-  if (!k) return 0;
+  size_t k = 0;
+  if (t16(&t, e + 2) == TIFF_ASCII && count && src <= n && count <= n - src) {
+    const uint8_t *nul = (const uint8_t *)memchr(p + src, 0, count);
+    k = nul ? (size_t)(nul - (p + src)) : count;
+    while (k && p[src + k - 1] == ' ') k--;
+  }
   *text = (char *)malloc(k + 1);
   if (!*text) return -1;
-  memcpy(*text, p + src, k);
+  if (k) memcpy(*text, p + src, k);
   (*text)[k] = 0;
-  return 0;
+  return 1;
 }
 
 int exif_set_description(const uint8_t *p, size_t n, const char *text, uint8_t **out, size_t *out_len) {

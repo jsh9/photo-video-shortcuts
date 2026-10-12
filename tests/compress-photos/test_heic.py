@@ -513,13 +513,17 @@ class Meta:
         return copy
 
 
-def with_exif_in_idat(path, folder):
+def with_exif_in_idat(path, folder, tiff=None):
     """
     A copy of the HEIC whose Exif item's data is in 'idat' (construction method
-    1, where some writers keep small items) instead of 'mdat'.
+    1, where some writers keep small items) instead of 'mdat'; with ``tiff``
+    (EXIF, TIFF data) as that data instead of the item's own.
     """
     before = items(path)
     (exif_id,) = [i for i, (t, _) in before.items() if t == 'Exif']
+    if tiff is not None:
+        before[exif_id] = ('Exif', b'\0\0\0\0' + tiff)
+
     m = Meta(path)
     for entry in m.entries:
         if entry[0] == exif_id:
@@ -603,6 +607,44 @@ def test_date_lands_in_an_exif_item_stored_in_idat(encoder, tmp_path):
     assert tags['ExifIFD:OffsetTimeOriginal'] == '-05:00'
     assert set(items(out)) == set(items(SINGLE))
     assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
+
+
+@pytest.mark.parametrize('fixture', [SINGLE, GRID])
+@pytest.mark.parametrize('location', ['', '48.8584,2.2945'])
+def test_location_in_an_exif_item_in_idat_leaves_no_trace(
+        encoder, tmp_path, imageio, fixture, location
+):
+    # An Exif item in 'idat' whose location Photos hid (none) or changed: its
+    # new data goes to 'mdat', and the old, GPS and all, must not stay in
+    # 'idat'. The other items there (the gain map's 'tmap', the 'grid') stay
+    # as they were.
+    tiff = ph.tiff(ph.TIFF_IFD0, ph.TIFF_EXIF, ph.OLD_GPS)
+    photo = with_exif_in_idat(fixture, tmp_path / 'src', tiff)
+    assert [b for b in ph.OLD_BYTES if b in photo.read_bytes()]
+    ph.stage(tmp_path, [photo])
+    (tmp_path / 'jxl_meta.txt').write_text(f'1|gps|{location}')
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    out = ph.read_done(tmp_path)[1][0]
+    assert not [b for b in ph.OLD_BYTES if b in out.read_bytes()]
+    gps = {k: v for k, v in ph.exif_tags(out).items() if k.startswith('GPS:')}
+    if location:
+        assert gps['GPS:GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
+    else:
+        assert gps == {}
+
+    assert ph.exif_tags(out)['IFD0:Make'] == 'TestMake'
+    before, after = items(photo), items(out)
+    assert set(after) == set(before)
+    for iid, (typ, data) in before.items():
+        if typ in ('grid', 'tmap'):
+            assert after[iid] == (typ, data), typ
+
+    assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(fixture)
+    assert (
+        imageio(out)[str(out)]['upright']
+        == imageio(fixture)[str(fixture)]['upright']
+    )
 
 
 def test_transparent_image_is_refused_for_heic(encoder, tmp_path):

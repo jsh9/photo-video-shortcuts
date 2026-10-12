@@ -7,11 +7,19 @@ Photos doesn't have, and leaves a file that already agrees as it is. For every
 build (SIMD and scalar WebAssembly, native, macOS), JPEG XL and HEIC.
 """
 
-import struct
-
 import photo_helpers as ph
 import pytest
+from photo_helpers import (
+    OLD_BYTES,
+    OLD_GPS,
+    OLD_LAT,
+    OLD_LON,
+    ascii_value,
+    tiff,
+)
 from PIL import PngImagePlugin
+
+IFD0, EXIF = ph.TIFF_IFD0, ph.TIFF_EXIF
 
 ROUTES = {'jxl': ['-q', '60', '-e', '1'], 'heic': ['--heic', '--rf', '40']}
 
@@ -40,94 +48,7 @@ def said(out, stem):
 
 
 # ---------------------------------------------------------------------------
-# Test photos with metadata the test knows byte for byte
-
-
-def ascii_value(text):
-    return (2, len(text.encode()) + 1, text.encode() + b'\0')
-
-
-def rationals(*pairs):
-    return (5, len(pairs), b''.join(struct.pack('>II', *p) for p in pairs))
-
-
-def tiff(ifd0, exif=None, gps=None):
-    """
-    Big-endian EXIF (TIFF) data: IFD0 with ``ifd0``'s entries, and an Exif and
-    a GPS IFD with theirs if given, each {tag: (type, count, value)}. A value
-    longer than 4 bytes follows its IFD. Written by hand, so that the test
-    knows where every value is.
-    """
-    ifds = [('ifd0', dict(ifd0))]
-    for name, tag, entries in (('exif', 0x8769, exif), ('gps', 0x8825, gps)):
-        if entries is not None:
-            ifds.append((name, entries))
-            ifds[0][1][tag] = (4, 1, name)
-
-    def size(entries):
-        values = (
-            len(v) for _, _, v in entries.values() if isinstance(v, bytes)
-        )
-        return (
-            2
-            + 12 * len(entries)
-            + 4
-            + sum((n + 1) & ~1 for n in values if n > 4)
-        )
-
-    offsets, at = {}, 8
-    for name, entries in ifds:
-        offsets[name] = at
-        at += size(entries)
-
-    out = bytearray(b'MM\x00\x2a' + struct.pack('>I', 8))
-    for name, entries in ifds:
-        value_at = offsets[name] + 2 + 12 * len(entries) + 4
-        table, values = struct.pack('>H', len(entries)), b''
-        for tag in sorted(entries):
-            kind, count, value = entries[tag]
-            if isinstance(value, str):  # a pointer to that IFD
-                value = struct.pack('>I', offsets[value])
-
-            if len(value) <= 4:
-                table += struct.pack('>HHI', tag, kind, count) + value.ljust(
-                    4, b'\0'
-                )
-            else:
-                table += struct.pack(
-                    '>HHII', tag, kind, count, value_at + len(values)
-                )
-                values += value + b'\0' * (len(value) % 2)
-
-        out += table + struct.pack('>I', 0) + values
-
-    return bytes(out)
-
-
-# An iPhone's GPS IFD (40°42'52.70" N, 73°59'53.71" W, 16.12 m, its
-# direction, speed and positioning error): values whose bytes can be looked for.
-OLD_GPS = {
-    0x0001: ascii_value('N'),
-    0x0002: rationals((40, 1), (42, 1), (5270, 100)),
-    0x0003: ascii_value('W'),
-    0x0004: rationals((73, 1), (59, 1), (5371, 100)),
-    0x0005: (1, 1, b'\0'),
-    0x0006: rationals((1612147834, 100000000)),
-    0x000C: ascii_value('K'),
-    0x000D: rationals((304941505, 1000000000)),
-    0x0011: rationals((1979783019, 10000000)),
-    0x001F: rationals((3345064213, 100000000)),
-}
-OLD_LAT = 40 + 42 / 60 + 52.70 / 3600
-OLD_LON = -(73 + 59 / 60 + 53.71 / 3600)
-OLD_BYTES = [
-    struct.pack('>II', 5270, 100),
-    struct.pack('>II', 5371, 100),
-    struct.pack('>II', 1612147834, 100000000),
-    struct.pack('>II', 1979783019, 10000000),
-]
-IFD0 = {0x010F: ascii_value('TestMake')}
-EXIF = {0x9003: ascii_value('2024:05:06 07:08:09')}
+# Test photos with metadata the test knows byte for byte (photo_helpers.tiff)
 
 
 def xmp_packet(*properties, attributes=''):
@@ -326,6 +247,34 @@ def test_location_hidden_in_photos_leaves_none(
     assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
     validate(done[1])
     assert 'lat' not in imageio(done[1])[str(done[1])]
+    assert 'location removed: Photos has none' in said(out, 'IMG_0001')
+
+
+@pytest.mark.parametrize(
+    'partial',
+    [
+        # longitude and altitude, no latitude
+        {k: v for k, v in OLD_GPS.items() if k not in (0x0001, 0x0002)},
+        # an altitude alone
+        {k: v for k, v in OLD_GPS.items() if k in (0x0005, 0x0006)},
+    ],
+)
+def test_location_hidden_in_photos_removes_a_partial_gps(
+        encoder, tmp_path, partial
+):
+    # Photos has none: the GPS IFD goes even when it holds no readable
+    # position, and the rest of the EXIF stays.
+    original = photo(
+        tmp_path / 'src', 'IMG_0001.PNG', tiff(IFD0, EXIF, partial)
+    )
+    out, done = convert(encoder, tmp_path / 'run', [original], ['1|gps|'])
+    assert gps_of(done[1]) == {}
+    data = done[1].read_bytes()
+    assert not [b for b in OLD_BYTES if b in data]
+    tags = ph.exif_tags(done[1])
+    assert tags['IFD0:Make'] == 'TestMake'
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    validate(done[1])
     assert 'location removed: Photos has none' in said(out, 'IMG_0001')
 
 
@@ -539,6 +488,29 @@ def test_caption_follows_into_an_image_description(encoder, imageio, tmp_path):
         'New caption',
         None,
     ]
+
+
+@pytest.mark.parametrize('blank', ['', '   '])
+@pytest.mark.parametrize('xmp_caption', [None, 'Old', 'New caption'])
+def test_a_blank_image_description_gets_the_caption(
+        encoder, imageio, tmp_path, blank, xmp_caption
+):
+    # An empty or spaces-only ImageDescription is still the file's caption
+    # for ImageIO: it gets Photos', also when the XMP's already is Photos'.
+    exif = tiff({**IFD0, 0x010E: ascii_value(blank)}, EXIF)
+    xmp = (
+        None
+        if xmp_caption is None
+        else xmp_packet(alt('description', xmp_caption))
+    )
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif, xmp)
+    _, done = convert(
+        encoder, tmp_path / 'run', [original], ['1|caption|New caption']
+    )
+    assert ph.exif_tags(done[1])['IFD0:ImageDescription'] == 'New caption'
+    assert ph.xmp_properties(done[1])['XMP-dc:Description'] == 'New caption'
+    assert imageio(done[1])[str(done[1])]['caption'] == 'New caption'
+    validate(done[1])
 
 
 def test_other_ways_to_write_the_properties(encoder, tmp_path):

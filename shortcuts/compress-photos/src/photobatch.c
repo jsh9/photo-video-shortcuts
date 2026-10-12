@@ -987,36 +987,32 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
   if (job->given & META_GPS) {
     photo_location_t want, had;
     const int none = !job->gps[0];
+    // A readable position in the file, to compare with Photos'. Removing
+    // doesn't need one: whatever GPS IFD the file has goes (exif_set_gps
+    // says when there is none).
     const int has = *exif && exif_gps(*exif, *exif_len, &had);
     if (!none && !photo_location_parse(job->gps, &want)) {
       say_wrap("  ", "! location not understood (%s); the file's is kept", job->gps);
-    } else if (none ? has : !(has && photo_location_same(&want, &had))) {
+    } else if (none || !(has && photo_location_same(&want, &had))) {
       uint8_t *out = NULL;
       size_t out_len = 0;
       const int rc = exif_set_gps(*exif, *exif_len, none ? NULL : &want, &out, &out_len);
       if (rc == -1) return -1;
-      if (rc == -2) {
-        say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");
-      } else {
+      if (rc == 1) {
         free(*exif);
         *exif = out;
         *exif_len = out_len;
-        if (*xmp && xmp_remove_location(xmp, xmp_len) < 0) return -1;
-        changed = 1;
-        if (none) {
-          say_wrap("  ", "location removed: Photos has none");
-        } else {
-          say_wrap("  ", "location from Photos: %.6f, %.6f (the file had %s)", want.lat, want.lon,
-                   has ? "another" : "none");
-        }
       }
-    } else if (none && *xmp) {
-      // Neither Photos nor the EXIF has one: nor should the XMP.
-      const int removed = xmp_remove_location(xmp, xmp_len);
+      // The XMP's location goes too, whatever the EXIF's was.
+      const int removed = *xmp ? xmp_remove_location(xmp, xmp_len) : 0;
       if (removed < 0) return -1;
-      if (removed) {
-        changed = 1;
+      if (rc == 1 || removed) changed = 1;
+      if (rc == -2) say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");
+      if (none && (rc == 1 || removed)) {
         say_wrap("  ", "location removed: Photos has none");
+      } else if (!none && rc == 1) {
+        say_wrap("  ", "location from Photos: %.6f, %.6f (the file had %s)", want.lat, want.lon,
+                 has ? "another" : "none");
       }
     }
   }
@@ -1025,24 +1021,34 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
   char *had_title = NULL, *had_caption = NULL, *had_description = NULL, **had_keywords = NULL;
   size_t had_num_keywords = 0;
   int rc = 0;
-  if ((*xmp && (xmp_dc_text(*xmp, *xmp_len, "title", &had_title) != 0 ||
-                xmp_dc_text(*xmp, *xmp_len, "description", &had_caption) != 0 ||
-                xmp_dc_subject(*xmp, *xmp_len, &had_keywords, &had_num_keywords) != 0)) ||
-      (*exif && exif_description(*exif, *exif_len, &had_description) != 0)) {
+  // What the file has: 0 nothing, 1 a value (its text, NULL if empty), 2 a
+  // value that can't be read as text (never Photos'). The ImageDescription
+  // counts even when blank: ImageIO takes it over the XMP's caption.
+  int title_state = 0, caption_state = 0, keywords_state = 0;
+  if (*xmp) {
+    title_state = xmp_dc_text(*xmp, *xmp_len, "title", &had_title);
+    caption_state = title_state < 0 ? -1 : xmp_dc_text(*xmp, *xmp_len, "description", &had_caption);
+    keywords_state = caption_state < 0 ? -1 : xmp_dc_subject(*xmp, *xmp_len, &had_keywords, &had_num_keywords);
+  }
+  const int description_state = *exif && keywords_state >= 0 ? exif_description(*exif, *exif_len, &had_description) : 0;
+  if (title_state < 0 || caption_state < 0 || keywords_state < 0 || description_state < 0) {
     rc = -1;
     goto done;
   }
   unsigned which = 0;
-  if ((job->given & META_TITLE) && !same_text(had_title, job->title)) which |= XMP_DC_TITLE;
-  // The caption agrees when the ImageDescription, if any, and the XMP's, if
-  // any, are Photos' (or, with neither, Photos has none).
-  if ((job->given & META_CAPTION) &&
-      !(had_description ? same_text(had_description, job->caption) && (!had_caption || same_text(had_caption, job->caption))
-                        : same_text(had_caption, job->caption))) {
-    which |= XMP_DC_DESCRIPTION;
+  if ((job->given & META_TITLE) && !(title_state != 2 && same_text(had_title, job->title))) which |= XMP_DC_TITLE;
+  // The caption agrees when every caption the file has (an ImageDescription,
+  // the XMP's) is Photos', and, when it has none, Photos has none.
+  if (job->given & META_CAPTION) {
+    int agree = caption_state != 2;
+    if (description_state) agree = agree && same_text(had_description, job->caption);
+    if (caption_state == 1) agree = agree && same_text(had_caption, job->caption);
+    if (!description_state && !caption_state) agree = same_text(NULL, job->caption);
+    if (!agree) which |= XMP_DC_DESCRIPTION;
   }
   if (job->given & META_KEYWORDS) {
-    const int same = same_keywords(had_keywords, had_num_keywords, job->keywords, job->num_keywords);
+    const int same =
+        keywords_state != 2 ? same_keywords(had_keywords, had_num_keywords, job->keywords, job->num_keywords) : 0;
     if (same < 0) {
       rc = -1;
       goto done;
@@ -1090,7 +1096,7 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
       unsigned flag;
       const char *name;
     } kFields[] = {{XMP_DC_TITLE, "title"}, {XMP_DC_DESCRIPTION, "caption"}, {XMP_DC_SUBJECT, "keywords"}};
-    const int had[] = {had_title != NULL, had_caption || had_description, had_num_keywords > 0};
+    const int had[] = {title_state != 0, caption_state != 0 || description_state != 0, keywords_state != 0};
     const int has[] = {job->title && job->title[0], job->caption && job->caption[0], job->num_keywords > 0};
     for (size_t i = 0; i < sizeof kFields / sizeof *kFields; i++) {
       if (!(which & kFields[i].flag)) continue;

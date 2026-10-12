@@ -128,8 +128,9 @@ int photo_location_same(const photo_location_t *a, const photo_location_t *b);
 // be read (it is then kept as it is).
 int exif_set_gps(const uint8_t *tiff, size_t len, const photo_location_t *loc, uint8_t **out, size_t *out_len);
 // IFD0's ImageDescription (the caption EXIF readers show), without trailing
-// spaces and NULs, malloc'ed in *text; NULL when it has none or it is empty.
-// Returns 0, or -1 if out of memory.
+// spaces and NULs, malloc'ed in *text: "" when it is blank (ImageIO still
+// takes it over the XMP's caption). Returns 1 when the EXIF has one, 0 when
+// not (*text NULL), -1 if out of memory.
 int exif_description(const uint8_t *tiff, size_t len, char **text);
 // Sets IFD0's ImageDescription to `text` (UTF-8), or removes it when `text`
 // is NULL or empty; only an EXIF that has one is changed (0 is returned

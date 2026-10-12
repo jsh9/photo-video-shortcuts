@@ -511,6 +511,13 @@ typedef struct {
   size_t *lengths;
   uint32_t add_ids[HB_MAX_ADD];      // the added items' ids (rw->add)
   uint64_t add_offsets[HB_MAX_ADD];  // where their data goes in the output
+  // 'idat' written anew (idat_anew), with only the kept items' data:
+  // idat_offsets and idat_lengths per item (f->items order).
+  int idat_anew;
+  uint8_t *idat;
+  size_t idat_len;
+  uint64_t *idat_offsets;
+  size_t *idat_lengths;
 } rewrite_t;
 
 static void put_infe(bb_t *b, uint32_t id, uint32_t flags, uint32_t type);
@@ -685,6 +692,10 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
           bb_u16(b, 1);
           bb_u32(b, (uint32_t)(mdat_start + r->offsets[i]));
           bb_u32(b, (uint32_t)r->lengths[i]);
+        } else if (r->idat_anew) {  // its data, in one piece, in the new 'idat'
+          bb_u16(b, 1);
+          bb_u32(b, (uint32_t)r->idat_offsets[i]);
+          bb_u32(b, (uint32_t)r->idat_lengths[i]);
         } else {
           bb_u16(b, (unsigned)item->num_extents);
           for (size_t e = 0; e < item->num_extents; e++) {
@@ -730,6 +741,12 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         bb_end(b, start);
       }
       free(groups.data);
+    } else if (ct == FOURCC('i', 'd', 'a', 't') && r->idat_anew) {
+      if (r->idat_len) {  // none: no item is left in it
+        const size_t start = bb_begin(b, ct);
+        bb_put(b, r->idat, r->idat_len);
+        bb_end(b, start);
+      }
     } else {
       bb_put(b, box.p, box.n);  // hdlr, pitm, idat, dinf, ...
     }
@@ -747,9 +764,15 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   r.offsets = (uint64_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.offsets);
   r.lengths = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.lengths);
   size_t *order = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *order);
+  r.idat_anew = 0;
+  r.idat = NULL;
+  r.idat_len = 0;
+  r.idat_offsets = (uint64_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.idat_offsets);
+  r.idat_lengths = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.idat_lengths);
   int rc = -1;
   bb_t b = {NULL, 0, 0, 0};
-  if (!r.kept || !r.offsets || !r.lengths || !order) goto done;
+  bb_t idat = {NULL, 0, 0, 0};
+  if (!r.kept || !r.offsets || !r.lengths || !order || !r.idat_offsets || !r.idat_lengths) goto done;
   if (rw->num_add > HB_MAX_ADD) goto done;
   if (rw->num_add) {  // the next ids after the file's highest
     uint32_t top = 0;
@@ -762,6 +785,31 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     for (size_t k = 0; k < rw->num_keep; k++) {
       if (rw->keep[k] == f->items[i].id) r.kept[i] = 1;
     }
+  }
+  // 'idat' stays as it was unless an item in it is replaced or dropped. Then
+  // it is written anew with the data of the kept items only, each in one
+  // piece, so that no replaced or dropped data stays in the file (an old
+  // Exif's GPS, say); the other items in it (a 'grid', a 'tmap') keep their
+  // bytes.
+  for (size_t i = 0; i < f->num_items; i++) {
+    const hb_item_t *item = &f->items[i];
+    if (item->located && item->method == 1 && (!r.kept[i] || replacement(&r, item->id))) r.idat_anew = 1;
+  }
+  if (r.idat_anew) {
+    for (size_t i = 0; i < f->num_items; i++) {
+      const hb_item_t *item = &f->items[i];
+      if (!r.kept[i] || !item->located || item->method != 1 || replacement(&r, item->id)) continue;
+      span_t spans[1024];
+      if (item->num_extents > 1024) goto done;
+      const size_t len = item_extents(f, item, spans, 1024);
+      if (len == (size_t)-1) goto done;
+      r.idat_offsets[i] = idat.len;
+      r.idat_lengths[i] = len;
+      for (size_t e = 0; e < item->num_extents; e++) bb_put(&idat, spans[e].p, spans[e].n);
+    }
+    if (idat.oom || idat.len > 0xFFFFFFFFu) goto done;
+    r.idat = idat.data;
+    r.idat_len = idat.len;
   }
   // The data's order in the new 'mdat': the kept items with file data, by
   // where their data was (replaced data in the place of the old), and the
@@ -834,9 +882,12 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   rc = 0;
 done:
   free(b.data);
+  free(idat.data);
   free(r.kept);
   free(r.offsets);
   free(r.lengths);
+  free(r.idat_offsets);
+  free(r.idat_lengths);
   free(order);
   return rc;
 }

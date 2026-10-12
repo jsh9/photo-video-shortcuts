@@ -364,10 +364,13 @@ struct Property {
   size_t begin, end;
   bool structured;          // an element holding other elements (rdf:Alt, ...)
   std::vector<Item> items;  // the text items of its arrays, if structured
+  // It holds a value the scanner can't read as text (an array item holding
+  // elements but no rdf:value): present, but never equal to a text.
+  bool opaque;
 };
 
 Property property(const Name &name, const std::vector<Run> &runs, size_t begin, size_t end, bool structured,
-                  const std::vector<Item> &items) {
+                  const std::vector<Item> &items, bool opaque) {
   Property p;
   p.name = name;
   p.runs = runs;
@@ -375,14 +378,18 @@ Property property(const Name &name, const std::vector<Run> &runs, size_t begin, 
   p.end = end;
   p.structured = structured;
   p.items = items;
+  p.opaque = opaque;
   return p;
 }
 
 // What edits need besides the properties: where rdf:RDF ends (its end tag;
-// npos if none was found), and the first node element's rdf:about value as
-// written.
+// npos if none was found) or, for an empty rdf:RDF written as one tag
+// ("<rdf:RDF .../>"), where its "/>" is and its name as written; and the first
+// node element's rdf:about value as written.
 struct Layout {
   size_t rdf_end;
+  size_t rdf_empty;  // npos unless rdf:RDF is one empty tag
+  std::string rdf_qualified;
   std::string about;
   bool has_about;
 };
@@ -455,8 +462,10 @@ std::vector<Character> trimmed(const std::string &s, const Property &p) {
 // node element (rdf:Description) directly inside rdf:RDF, an element when it
 // closes. An element holding nothing but text, CDATA, comments and processing
 // instructions has that text as its value; one holding elements is structured,
-// with the text items (rdf:li) of its arrays. Stops at markup it can't follow.
-// `layout`, if given, gets where rdf:RDF ends and the first rdf:about.
+// with the text items of its arrays (rdf:li), a qualified item's being its
+// rdf:value; an item holding elements but no rdf:value makes it opaque. Stops
+// at markup it can't follow. `layout`, if given, gets where rdf:RDF ends and
+// the first rdf:about.
 std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   struct Element {
     std::string qualified;  // as written, to match its end tag
@@ -467,6 +476,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
     size_t start;      // its '<'
     std::string lang;  // its xml:lang
     std::vector<Item> items;
+    bool has_value;  // an rdf:li: an rdf:value inside it was read
+    bool opaque;     // a top-level property: see Property
   };
   struct Attribute {
     std::string qualified;
@@ -475,6 +486,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   };
   if (layout) {
     layout->rdf_end = std::string::npos;
+    layout->rdf_empty = std::string::npos;
+    layout->rdf_qualified.clear();
     layout->about.clear();
     layout->has_about = false;
   }
@@ -498,6 +511,12 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   };
   // Whether open[i] is directly inside rdf:RDF.
   auto in_rdf = [&](size_t i) { return i >= 1 && is(open[i - 1].name, RDF, "rdf", "RDF"); };
+  // The top-level property open[k] is in (k itself excluded), 0 if none.
+  auto property_of = [&](size_t k) -> size_t {
+    for (size_t p = k; p-- > 1;)
+      if (in_rdf(p - 1)) return p;
+    return 0;
+  };
   // The position just past `close`, searching from `from`; npos if absent.
   auto past = [&](const char *close, size_t from) {
     const size_t at = s.find(close, from);
@@ -528,16 +547,41 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         if (open[k].qualified != qualified) continue;
         const Element &e = open[k];
         if (k >= 1 && in_rdf(k - 1)) {
-          found.push_back(property(e.name, e.children ? std::vector<Run>() : e.text, e.start, end, e.children, e.items));
-        } else if (is(e.name, RDF, "rdf", "li") && !e.children) {
-          // An array's item, for the top-level property it is in.
-          for (size_t p = k; p-- > 1;) {
-            if (!in_rdf(p - 1)) continue;
-            Item item;
-            item.runs = e.text;
-            item.lang = e.lang;
-            open[p].items.push_back(item);
-            break;
+          found.push_back(property(e.name, e.children ? std::vector<Run>() : e.text, e.start, end, e.children, e.items,
+                                   e.opaque));
+        } else if (is(e.name, RDF, "rdf", "li")) {
+          // An array's item, for the top-level property it is in: its text,
+          // or its rdf:value (read when that closed); without either, a value
+          // this scanner can't read.
+          if (const size_t p = property_of(k)) {
+            if (!e.children) {
+              Item item;
+              item.runs = e.text;
+              item.lang = e.lang;
+              open[p].items.push_back(item);
+            } else if (!e.has_value) {
+              open[p].opaque = true;
+            }
+          }
+        } else if (is(e.name, RDF, "rdf", "value")) {
+          // A qualified value: the item of the rdf:li it is in (or of the
+          // property itself), with that rdf:li's language.
+          if (const size_t p = property_of(k)) {
+            size_t li = 0;
+            for (size_t q = k; q-- > p + 1;)
+              if (is(open[q].name, RDF, "rdf", "li")) {
+                li = q;
+                break;
+              }
+            if (e.children) {
+              open[p].opaque = true;
+            } else {
+              Item item;
+              item.runs = e.text;
+              item.lang = !e.lang.empty() || !li ? e.lang : open[li].lang;
+              open[p].items.push_back(item);
+            }
+            if (li) open[li].has_value = true;
           }
         } else if (layout && layout->rdf_end == std::string::npos && is(e.name, RDF, "rdf", "RDF")) {
           layout->rdf_end = i;
@@ -553,7 +597,7 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       // A start tag: its name, then name="value" attributes.
       size_t j = i + 1;
       while (j < len && !whitespace(s[j]) && s[j] != '/' && s[j] != '>') ++j;
-      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}};
+      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}, false, false};
       std::vector<Attribute> attributes;
       bool empty = false;
       for (;;) {
@@ -601,12 +645,17 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
           layout->about = s.substr(a.value.begin, a.value.end - a.value.begin);
           layout->has_about = true;
         }
-        found.push_back(property(name, {a.value}, a.start, a.value.end + 1, false, {}));
+        found.push_back(property(name, {a.value}, a.start, a.value.end + 1, false, {}, false));
       }
       if (empty) {
-        // An empty property element (<dc:title/>).
+        // An empty property element (<dc:title/>), or an empty rdf:RDF
+        // (whose "/>" is just before j).
         if (open.size() >= 2 && in_rdf(open.size() - 2))
-          found.push_back(property(open.back().name, {}, i, j, false, {}));
+          found.push_back(property(open.back().name, {}, i, j, false, {}, false));
+        if (layout && layout->rdf_empty == std::string::npos && is(open.back().name, RDF, "rdf", "RDF")) {
+          layout->rdf_empty = j - 2;
+          layout->rdf_qualified = open.back().qualified;
+        }
         open.pop_back();
       }
       end = j;
@@ -853,10 +902,11 @@ extern "C" int xmp_dc_text(const uint8_t *x, size_t len, const char *local, char
   const std::string s(reinterpret_cast<const char *>(x), len);
   for (const Property &p : scan(s)) {
     if (!is(p.name, DC, "dc", local)) continue;
+    if (p.opaque) return 2;
     const std::string v = alt_text(s, p);
-    if (v.empty()) return 0;
+    if (v.empty()) return 1;
     *text = c_string(v);
-    return *text ? 0 : -1;
+    return *text ? 1 : -1;
   }
   return 0;
 }
@@ -866,8 +916,11 @@ extern "C" int xmp_dc_subject(const uint8_t *x, size_t len, char ***items, size_
   *count = 0;
   const std::string s(reinterpret_cast<const char *>(x), len);
   std::vector<std::string> found;
+  int present = 0;
   for (const Property &p : scan(s)) {
     if (!is(p.name, DC, "dc", "subject")) continue;
+    if (p.opaque) return 2;
+    present = 1;
     if (!p.structured) {
       found.push_back(text_of(s, p.runs));
     } else {
@@ -876,7 +929,7 @@ extern "C" int xmp_dc_subject(const uint8_t *x, size_t len, char ***items, size_
     break;
   }
   found.erase(std::remove(found.begin(), found.end(), std::string()), found.end());
-  if (found.empty()) return 0;
+  if (found.empty()) return present;
   char **list = static_cast<char **>(std::calloc(found.size(), sizeof *list));
   if (!list) return -1;
   for (size_t k = 0; k < found.size(); ++k) {
@@ -889,7 +942,7 @@ extern "C" int xmp_dc_subject(const uint8_t *x, size_t len, char ***items, size_
   }
   *items = list;
   *count = found.size();
-  return 0;
+  return 1;
 }
 
 extern "C" int xmp_set_dc(uint8_t **x, size_t *len, unsigned which, const char *title, const char *description,
@@ -917,14 +970,21 @@ extern "C" int xmp_set_dc(uint8_t **x, size_t *len, unsigned which, const char *
     body += "   </rdf:Bag>\n  </dc:subject>\n";
   }
   if (!body.empty()) {
-    if (layout.rdf_end == std::string::npos) return -2;
+    if (layout.rdf_end == std::string::npos && layout.rdf_empty == std::string::npos) return -2;
     // The same rdf:about as the packet's other descriptions, as XMP requires.
     std::string about;
     for (const char c : layout.about) about += c == '"' ? std::string("&quot;") : std::string(1, c);
-    Edit add = {layout.rdf_end, layout.rdf_end,
-                "<rdf:Description rdf:about=\"" + about + "\" xmlns:rdf=\"" + RDF + "\"\n   xmlns:dc=\"" + DC +
-                    "\">\n" + body + " </rdf:Description>\n"};
-    edits.push_back(add);
+    const std::string description = "<rdf:Description rdf:about=\"" + about + "\" xmlns:rdf=\"" + RDF +
+                                    "\"\n   xmlns:dc=\"" + DC + "\">\n" + body + " </rdf:Description>\n";
+    if (layout.rdf_end != std::string::npos) {
+      Edit add = {layout.rdf_end, layout.rdf_end, description};
+      edits.push_back(add);
+    } else {
+      // An empty rdf:RDF in one tag: its "/>" becomes ">", the description
+      // and its end tag, under the name it is written with.
+      Edit add = {layout.rdf_empty, layout.rdf_empty + 2, ">" + description + "</" + layout.rdf_qualified + ">"};
+      edits.push_back(add);
+    }
   }
   return apply_edits(x, len, s, edits);
 }

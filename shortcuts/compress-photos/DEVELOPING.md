@@ -729,36 +729,43 @@ Photos has none, the file's is removed.
   the same bytes) and the altitude when there is one (centimeters; 0 is none),
   at the end of the EXIF, and IFD0's pointer moved to it (IFD0 rewritten when
   it has none, or without it for a removal): no other value moves. The old
-  fix's direction, speed, positioning error and fix time go. The old GPS IFD
-  and the values it points to are zeroed (sparing IFD0's and the Exif IFD's
-  entries, should a malformed file share them), so the old position isn't left
-  in the file, and the XMP's location goes too (`xmp_remove_location`:
-  `exif:GPS*`, `photoshop:City`, `State` and `Country`, `Iptc4xmpCore:Location`
-  and `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In
-  iPhone 13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
+  fix's direction, speed, positioning error and fix time go. Photos having none
+  removes whatever GPS IFD the file has, also one without a readable position
+  (a longitude, or an altitude, alone). The old GPS IFD and the values it
+  points to are zeroed (sparing IFD0's and the Exif IFD's entries, should a
+  malformed file share them), so the old position isn't left in the file, and
+  the XMP's location goes too (`xmp_remove_location`: `exif:GPS*`,
+  `photoshop:City`, `State` and `Country`, `Iptc4xmpCore:Location` and
+  `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In iPhone
+  13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
   location (their maker notes and XMP hold none).
 - **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_text`, `xmp_dc_subject`,
   `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
   alternatives, `x-default`) and `dc:subject` (a bag), the only place a JPEG XL
   or HEIC has for them (IPTC IIM lives in a JPEG's APP13, which `photobatch`
   doesn't carry). Texts compare without surrounding whitespace and with
-  references decoded; keywords as a set. The file's own are removed wherever
-  they are (an element or an attribute, in any `rdf:Description`), and Photos'
-  are added in a new `rdf:Description` at the end of `rdf:RDF`, with the
-  packet's `rdf:about`; every other byte of the packet stays. A file without
-  XMP gets a minimal packet (`xmp_new_packet`) when there is something to add:
-  a JPEG XL `xml ` box, a HEIC `mime` item. A packet without `rdf:RDF` is kept
-  (`! title, caption and keywords not written`). The scanner is the one
+  references decoded; keywords as a set. A qualified item counts by its
+  `rdf:value` (`<rdf:li rdf:parseType="Resource"><rdf:value>`, or in a nested
+  `rdf:Description`); an item holding elements but no `rdf:value` is a value
+  the scanner can't read, which is never Photos' (the property is rewritten, or
+  removed when Photos has none). The file's own are removed wherever they are
+  (an element or an attribute, in any `rdf:Description`, qualifiers and all),
+  and Photos' are added in a new `rdf:Description` at the end of `rdf:RDF` (an
+  empty `rdf:RDF` written as one tag gets an end tag, under its own prefix),
+  with the packet's `rdf:about`; every other byte of the packet stays. A file
+  without XMP gets a minimal packet (`xmp_new_packet`) when there is something
+  to add: a JPEG XL `xml ` box, a HEIC `mime` item. A packet without `rdf:RDF`
+  is kept (`! title, caption and keywords not written`). The scanner is the one
   orientation and dates use (see [XMP](#12-xmp)), which now also reports
   structured properties, with the text items of their arrays, and where each
   property is written.
 - **Caption and `ImageDescription`:** ImageIO, and so Photos (checked on macOS
   26), takes EXIF's `ImageDescription` over `dc:description` when they
-  disagree, and as the caption when it is alone. So the file agrees with
-  Photos' caption only when both, those it has, are that caption; then an
-  `ImageDescription` the file has is set to it, or removed
-  (`exif_set_description`: the value at the end of the data and the entry
-  patched in place; a removal rewrites IFD0). None is added.
+  disagree, and as the caption when it is alone, even blank. So the file agrees
+  with Photos' caption only when both, those it has (a blank `ImageDescription`
+  too), are that caption; then an `ImageDescription` the file has is set to it,
+  or removed (`exif_set_description`: the value at the end of the data and the
+  entry patched in place; a removal rewrites IFD0). None is added.
 - **Favorite:** no field in a file holds one (Photos doesn't take `xmp:Rating`
   5 as one; checked on macOS 26).
 
@@ -821,12 +828,17 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   item (the 4-byte offset header put back) or, when the file has none, adds one
   (`hb_rewrite_t` `add`: a hidden `infe`, a `cdsc` reference to the picture, an
   `iloc` entry, its data last in `mdat`), and likewise the picture's XMP item
-  (added as a `mime` item, `application/rdf+xml`), as in the JPEG XL route. A
-  single `hvc1` picture is one tile. Measured on a 24 MP photo: per-tile x265
-  at CRF N gives the same size as x265 on the whole picture at CRF N (within
-  0.3%), and for a still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so
-  RF numbers run finer than in video: RF 26 is 61% of the original at
-  SSIMULACRA2 81 (≈ JPEG XL 83).
+  (added as a `mime` item, `application/rdf+xml`), as in the JPEG XL route.
+  Replaced data always goes to `mdat`; when an item kept in `idat`
+  (construction method 1, where some writers put the Exif) is replaced or
+  dropped, `idat` is written anew with only the kept items' data, each in one
+  piece (their `iloc` offsets moved), so that no old Exif (a hidden location's
+  GPS) stays in the file; otherwise it stays byte for byte. A single `hvc1`
+  picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N gives
+  the same size as x265 on the whole picture at CRF N (within 0.3%), and for a
+  still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers run
+  finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈ JPEG
+  XL 83).
 - **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
   HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
   several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full

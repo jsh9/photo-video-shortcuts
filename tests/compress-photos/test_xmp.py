@@ -688,3 +688,128 @@ def test_first_nonempty_packet_kept(encoder, tmp_path, packets, kept):
         encoder, tmp_path / 'job', jpeg(tmp_path / 'packets.jpg', packets)
     )
     assert xml_boxes(out) == ([] if kept is None else [packets[kept]])
+
+
+# ---------------------------------------------------------------------------
+# Title, caption and keywords from Photos (jxl_meta.txt) in packets written
+# in other ways
+
+
+def convert_with_meta(encoder, folder, photo, meta):
+    ph.stage(folder, [photo])
+    (folder / 'jxl_meta.txt').write_text('\n'.join(meta))
+    result = encoder.run(['-q', '100', '-e', '1', 'jxl_job.txt'], folder)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return ph.read_done(folder)[1][0], result.stdout
+
+
+@pytest.mark.parametrize('prefix', ['rdf', 'R'])
+def test_photos_values_added_to_an_empty_rdf_tag(encoder, tmp_path, prefix):
+    # A valid packet whose rdf:RDF is empty and one tag ("<rdf:RDF .../>"):
+    # the title, caption and keywords go into it, its "/>" made an end tag
+    # under the name it is written with; the rest stays byte for byte.
+    head = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        f'<{prefix}:RDF xmlns:{prefix}="{RDF}" xmlns:c="{CUSTOM}"'
+    )
+    xml = (head + '/></x:xmpmeta>').encode()
+    photo = jpeg(tmp_path / 'empty.jpg', xml)
+    meta = ['1|title|T', '1|caption|C', '1|keywords|a,b']
+    out, log = convert_with_meta(encoder, tmp_path / 'run', photo, meta)
+    packet = xml_box(out)
+    assert packet.startswith(head.encode() + b'>')
+    assert packet.endswith(f'</{prefix}:RDF></x:xmpmeta>'.encode())
+    # well-formed, with the three properties and nothing else
+    assert set(properties(packet)) == {
+        f'{{{DC}}}title',
+        f'{{{DC}}}description',
+        f'{{{DC}}}subject',
+    }
+    tags = ph.xmp_properties(out)
+    assert tags['XMP-dc:Title'] == 'T'
+    assert tags['XMP-dc:Description'] == 'C'
+    assert tags['XMP-dc:Subject'] == ['a', 'b']
+    assert 'not written' not in log
+
+
+QUALIFIED_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:parseType="Resource">'
+    '<rdf:value>kw</rdf:value><c:source>camera</c:source>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
+NESTED_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li><rdf:Description>'
+    '<rdf:value>kw</rdf:value><c:source>camera</c:source>'
+    '</rdf:Description></rdf:li></rdf:Bag></dc:subject>'
+)
+# an item the scanner can't read: elements, but no rdf:value
+UNREADABLE_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li><rdf:Description c:word="kw"/>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
+QUALIFIED_TITLE = (
+    '<dc:title><rdf:Alt><rdf:li xml:lang="x-default" rdf:parseType="Resource">'
+    '<rdf:value>T</rdf:value><c:source>camera</c:source>'
+    '</rdf:li></rdf:Alt></dc:title>'
+)
+QUALIFIED_CAPTION = (
+    '<dc:description rdf:parseType="Resource"><rdf:value>C</rdf:value>'
+    '<c:source>camera</c:source></dc:description>'
+)
+
+
+@pytest.mark.parametrize(
+    ('body', 'meta', 'expected'),
+    [
+        # removed when Photos has none, qualifiers too
+        (QUALIFIED_KEYWORD, '1|keywords|', None),
+        (NESTED_KEYWORD, '1|keywords|', None),
+        (UNREADABLE_KEYWORD, '1|keywords|', None),
+        (QUALIFIED_TITLE, '1|title|', None),
+        (QUALIFIED_CAPTION, '1|caption|', None),
+        # replaced when Photos has another
+        (QUALIFIED_KEYWORD, '1|keywords|other', ['other']),
+        (UNREADABLE_KEYWORD, '1|keywords|kw', ['kw']),
+        (QUALIFIED_TITLE, '1|title|New', 'New'),
+        (QUALIFIED_CAPTION, '1|caption|New', 'New'),
+    ],
+)
+def test_qualified_values_removed_or_replaced(
+        encoder, tmp_path, body, meta, expected
+):
+    photo = jpeg(tmp_path / 'q.jpg', packet(body + '<c:other>kept</c:other>'))
+    out, log = convert_with_meta(encoder, tmp_path / 'run', photo, [meta])
+    field = meta.split('|')[1]
+    tag = {
+        'keywords': 'XMP-dc:Subject',
+        'title': 'XMP-dc:Title',
+        'caption': 'XMP-dc:Description',
+    }[field]
+    tags = ph.xmp_properties(out)
+    assert tags.get(tag) == expected
+    assert b'camera' not in xml_box(out)
+    assert properties(xml_box(out))[f'{{{CUSTOM}}}other'] == ('scalar', 'kept')
+    assert field in log
+
+
+@pytest.mark.parametrize(
+    ('body', 'meta'),
+    [
+        (QUALIFIED_KEYWORD, '1|keywords|kw'),
+        (NESTED_KEYWORD, '1|keywords|kw'),
+        (QUALIFIED_TITLE, '1|title|T'),
+        (QUALIFIED_CAPTION, '1|caption|C'),
+        # an ordinary value
+        (
+            '<dc:subject><rdf:Bag><rdf:li>kw</rdf:li></rdf:Bag></dc:subject>',
+            '1|keywords|kw',
+        ),
+    ],
+)
+def test_qualified_values_that_agree_stay(encoder, tmp_path, body, meta):
+    # Photos has the value the qualified item holds: the packet as it was.
+    photo = jpeg(tmp_path / 'q.jpg', packet(body))
+    out, log = convert_with_meta(encoder, tmp_path / 'meta', photo, [meta])
+    plain = convert(encoder, tmp_path / 'plain', photo)
+    assert xml_box(out) == xml_box(plain)
+    assert 'from Photos' not in log and 'removed' not in log

@@ -126,10 +126,13 @@ typedef struct {
 
 // Writes the file again: 'ftyp' as it was; 'meta' with the kept items only
 // ('iinf', 'iref', 'ipma', 'grpl' filtered, 'iloc' regenerated, the property
-// replaced, the added items in 'iinf', 'iref' and 'iloc', everything else
-// byte for byte); 'mdat' with the kept items' data in the original order,
-// replaced data where given, the added items' data last. malloc'ed. Returns
-// 0, or -1 if out of memory (or an added item's id doesn't fit 16 bits).
+// replaced, the added items in 'iinf', 'iref' and 'iloc', 'idat' written anew
+// with the kept items' data only when one of its items is replaced or
+// dropped, everything else byte for byte); 'mdat' with the kept items' data in
+// the original order, replaced data where given (also for an item that was in
+// 'idat'), the added items' data last. No replaced or dropped item's data is
+// left in the file. malloc'ed. Returns 0, or -1 if out of memory (or an added
+// item's id doesn't fit 16 bits).
 int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t *out_len);
 
 // A new HEIC: one picture as a grid of HEVC tiles (a single 'hvc1' item when

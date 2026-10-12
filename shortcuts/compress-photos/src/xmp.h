@@ -35,24 +35,27 @@ int xmp_reset_orientation(uint8_t **xmp, size_t *len);
 int xmp_set_dates(uint8_t **xmp, size_t *len, const char *date);
 
 // The packet's dc:title or dc:description (`local`: "title" or
-// "description"): its x-default item, else its first, references decoded,
-// without surrounding whitespace; malloc'ed in *text, NULL when it has none
-// or it is empty. Returns 0, or -1 if out of memory.
+// "description"): its x-default item, else its first (a qualified item's
+// rdf:value), references decoded, without surrounding whitespace; malloc'ed
+// in *text, NULL when it is empty. Returns 1 when the packet has the property,
+// 0 when not, 2 when it has one whose value isn't readable as text (an item
+// holding elements but no rdf:value; *text NULL), -1 if out of memory.
 int xmp_dc_text(const uint8_t *xmp, size_t len, const char *local, char **text);
-// The packet's dc:subject items (keywords), the empty ones left out: a
-// malloc'ed array of malloc'ed strings in *items, *count of them (NULL and 0
-// when it has none). Returns 0, or -1 if out of memory.
+// The packet's dc:subject items (keywords; a qualified item's rdf:value), the
+// empty ones left out: a malloc'ed array of malloc'ed strings in *items, *count
+// of them (NULL and 0 when none). Returns 1, 0, 2 or -1 as xmp_dc_text.
 int xmp_dc_subject(const uint8_t *xmp, size_t len, char ***items, size_t *count);
 // The properties xmp_set_dc replaces.
 enum { XMP_DC_TITLE = 1, XMP_DC_DESCRIPTION = 2, XMP_DC_SUBJECT = 4 };
 // Replaces dc:title, dc:description and dc:subject, each when its flag is in
 // `which`, in the malloc-owned packet: the packet's own are removed, wherever
-// they are, and the given values that aren't empty (`title`, `description`,
-// the `num_subject` strings of `subject`) are added in a new rdf:Description
-// at the end of rdf:RDF, as a language alternative (x-default) or a bag; every
-// other byte stays. Returns the number of changes (0: none), -1 if out of
-// memory, -2 if a value must be added but the packet has no rdf:RDF to add it
-// to (the packet is unchanged then).
+// they are and however written (qualifiers too), and the given values that
+// aren't empty (`title`, `description`, the `num_subject` strings of
+// `subject`) are added in a new rdf:Description at the end of rdf:RDF (an
+// empty rdf:RDF written as one tag gets an end tag), as a language
+// alternative (x-default) or a bag; every other byte stays. Returns the number
+// of changes (0: none), -1 if out of memory, -2 if a value must be added but
+// the packet has no rdf:RDF to add it to (the packet is unchanged then).
 int xmp_set_dc(uint8_t **xmp, size_t *len, unsigned which, const char *title, const char *description,
                const char *const *subject, size_t num_subject);
 // Removes what tells where the photo was taken from the malloc-owned packet:
