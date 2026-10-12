@@ -1,5 +1,5 @@
 {
-  "encoders": ["jxlbatch.wasm", "jxlbatch-scalar.wasm", "jxlbatch-macos"],
+  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
   "shortcuts": {
     "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
     "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]

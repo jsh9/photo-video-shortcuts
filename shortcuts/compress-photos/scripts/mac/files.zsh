@@ -28,12 +28,12 @@ for f in "$@"; do
   fi
 done
 @RUN@
-# Each result goes next to its original, as Name.jxl, never replacing a file
-# ("Name 2.jxl"). When the original's location is unknown (above) or can't be
-# written, the result goes to FALLBACK instead.
+# Each result goes next to its original, as Name.jxl or Name.heic, never
+# replacing a file ("Name 2.jxl"). When the original's location is unknown
+# (above) or can't be written, the result goes to FALLBACK instead.
 FALLBACK=@FALLBACK@
 wrote=0
-move() {  # move RESULT DESTINATION-FOLDER NAME.jxl
+move() {  # move RESULT DESTINATION-FOLDER NAME.jxl|heic
   local dir=$2
   if [ -z "$dir" ] || ! [ -d "$dir" ] || ! [ -w "$dir" ]; then dir=$FALLBACK; fi
   mkdir -p "$dir" || return
@@ -43,14 +43,14 @@ move() {  # move RESULT DESTINATION-FOLDER NAME.jxl
 }
 if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
-    [ -z "$name" ] && name=$flag  # a line from an older jxlbatch: file|index|name
+    [ -z "$name" ] && name=$flag  # a line from an older photobatch: file|index|name
     [ -n "$file" ] && move "$WORK/$file" "${dests[$idx]}" "$name"
   done < "$WORK/jxl_done.txt"
 fi
 # The log ends with the count; the progress window, if any, with "Done".
-{ echo; echo "Wrote $wrote JPEG XL file(s)."; } >> "$LOG"
+{ echo; echo "Wrote $wrote $FORMAT_NAME file(s)."; } >> "$LOG"
 @FINISH@
 # The output: the log, then the count.
 cat "$LOG"
 echo
-echo "Wrote $wrote JPEG XL file(s)."
+echo "Wrote $wrote $FORMAT_NAME file(s)."

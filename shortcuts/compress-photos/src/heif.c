@@ -19,7 +19,7 @@ void heif_decoder_version(char *buf, size_t len) { snprintf(buf, len, "libheif %
 // image's memory under its context, in a table keyed by the context's
 // address, so the context must outlive its images: released first, a later
 // context at the same address would be charged for the image (with several
-// photos decoding at a time, jxlbatch -j, that failed photos with "Security
+// photos decoding at a time, photobatch -j, that failed photos with "Security
 // limit exceeded"). The context goes with its last hold: heif_decode's own,
 // the photo's, the gain map's.
 typedef struct {
@@ -271,7 +271,7 @@ static int apply_transforms(struct heif_context *ctx, heif_item_id item, int w, 
 
 // 1 if no image that `item` is derived from (at any depth) has transforms of
 // its own, so that `item`'s are the only ones. Then it can be decoded as
-// stored and its transforms applied by jxlbatch: libheif's
+// stored and its transforms applied by photobatch: libheif's
 // ignore_transformations also skips those of the images it is derived from.
 static int only_own_transforms(struct heif_context *ctx, heif_item_id item, int depth) {
   if (depth > 8) return 0;

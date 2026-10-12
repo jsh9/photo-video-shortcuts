@@ -1,5 +1,5 @@
 """
-Helpers for the Compress Photos tests: test photos, running jxlbatch, and
+Helpers for the Compress Photos tests: test photos, running photobatch, and
 reading what Apple's ImageIO, exiftool and djxl see in the results.
 """
 
@@ -14,7 +14,7 @@ import hdr_reference
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps, PngImagePlugin
 
-# SDR white in jxlbatch's PQ result (nits), and PQ's constants
+# SDR white in photobatch's PQ result (nits), and PQ's constants
 from hdr_reference import (  # noqa: E402
     PQ_C1,
     PQ_C2,
@@ -80,7 +80,7 @@ XMP = (
     '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
     '<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"'
     ' xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:Orientation="{o}">'
-    '<dc:description><rdf:Alt><rdf:li xml:lang="x-default">jxlbatch test'
+    '<dc:description><rdf:Alt><rdf:li xml:lang="x-default">photobatch test'
     '</rdf:li></rdf:Alt></dc:description></rdf:Description>'
     '</rdf:RDF></x:xmpmeta>'
 )
@@ -113,7 +113,9 @@ def scene(width, height, seed=0):
         [width // 2, height // 3, width * 9 // 10, height * 9 // 10],
         fill=(30, 60, 190),
     )
-    draw.text((width // 10, height * 3 // 4), 'jxlbatch F', fill=(255, 255, 0))
+    draw.text(
+        (width // 10, height * 3 // 4), 'photobatch F', fill=(255, 255, 0)
+    )
     return img
 
 
@@ -181,7 +183,7 @@ def make_photos(folder, make_photo):
                 'exiftool',
                 '-q',
                 '-overwrite_original',
-                '-XMP-dc:Description=jxlbatch test',
+                '-XMP-dc:Description=photobatch test',
                 f'-XMP-tiff:Orientation={orientation}',
                 '-n',
                 path,
@@ -222,11 +224,11 @@ def orientation_source(orientation, folder):
 
 
 # ---------------------------------------------------------------------------
-# Running jxlbatch
+# Running photobatch
 
 
 class Encoder:
-    """jxlbatch as the shortcut runs it: in the folder holding the job."""
+    """photobatch as the shortcut runs it: in the folder holding the job."""
 
     def __init__(self, name, command):
         self.name = name
@@ -237,7 +239,10 @@ class Encoder:
         cmd = [part.replace('{dir}', str(folder)) for part in self.command] + [
             str(a) for a in args
         ]
-        return run(cmd, cwd=folder)
+        # a batch that hangs fails its test (with its output so far) instead
+        # of holding the whole run; the longest, 48 MP under wasmtime, takes
+        # about a minute
+        return run(cmd, cwd=folder, timeout=600)
 
 
 def stage(folder, photos):
@@ -326,7 +331,7 @@ def xmp_properties(path):
 
 
 def photo_output(output, stem):
-    """What jxlbatch printed for one photo, below its "[i/n] name" line."""
+    """What photobatch printed for one photo, below its "[i/n] name" line."""
     match = re.search(
         r'^\[\d+/\d+\] ' + re.escape(stem) + r'\n((?:  .*\n?)*)', output, re.M
     )
@@ -366,6 +371,60 @@ def load_generator(name='build_shortcuts'):
     scripts/<name>.py (build_shortcuts or build_mac_shortcuts) as a module.
     """
     return shortcut_helpers.load_generator(TOOL / 'scripts', name)
+
+
+def check_photo_dates(actions):
+    """
+    Checks wf.photo_date's steps in a shortcut and returns where each Format
+    Date is: inside a repeat, the Repeat Item's Date Taken (Get Details of
+    Images); only if Match Text finds text in it, Format Date of it as ISO 8601
+    with the time, then "Repeat Index|date" appended to Dates.
+    """
+    by_uuid = {params(a).get('UUID'): a for a in actions}
+    walked = list(walk(actions))
+    match_of = {}  # Match Text UUID -> the output it reads
+    for a in actions:
+        if ident(a) == 'is.workflow.actions.text.match':
+            (read,) = references(params(a)['text'])
+            match_of[params(a)['UUID']] = read.get('OutputUUID')
+
+    found = []
+    for i, (a, depth) in enumerate(walked):
+        if ident(a) != 'is.workflow.actions.format.date':
+            continue
+
+        p = params(a)
+        assert p['WFDateFormatStyle'] == 'ISO 8601'
+        assert p['WFISO8601IncludeTime'] is True
+        assert depth == 1
+        (taken,) = references(p['WFDate'])
+        details = by_uuid[taken['OutputUUID']]
+        assert ident(details) == 'is.workflow.actions.properties.images'
+        assert params(details)['WFContentItemPropertyName'] == 'Date Taken'
+        assert list(references(params(details)['WFInput'])) == [
+            {'Type': 'Variable', 'VariableName': 'Repeat Item'}
+        ]
+        guards = [
+            m for m, read in match_of.items() if read == taken['OutputUUID']
+        ]
+        assert len(guards) == 1
+        inside = dict(
+            (id(x), yes) for x, yes in inside_if_on(actions, guards[0])
+        )
+        assert inside[id(a)], 'formatted only when there is a date'
+        line, append = actions[i + 1], actions[i + 2]
+        assert (
+            render(
+                params(line)['WFTextActionText'],
+                {'Repeat Index': '3', 'Formatted Date': 'D'},
+            )
+            == '3|D'
+        )
+        assert ident(append) == 'is.workflow.actions.appendvariable'
+        assert params(append)['WFVariableName'] == 'Dates'
+        found.append(i)
+
+    return found
 
 
 def ashell_commands(actions, values):
@@ -488,7 +547,7 @@ def read_ppm(path):
 
 def jxl_hdr_pixels(jxl, ppm):
     """
-    jxlbatch's HDR result, decoded by djxl: linear Display P3 (as
+    photobatch's HDR result, decoded by djxl: linear Display P3 (as
     apple_hdr_pixels), 1.0 = SDR white.
     """
     # Asked for Display P3 PQ explicitly: a lossy JPEG XL with an ICC profile
@@ -721,7 +780,7 @@ def _with_icc_tags(icc, tags):
 def hdr_profile(heic):
     """
     Apple's HDR profile in a HEIC: the ICC profile with an 'hdgm' tag on its
-    'tmap' item or gain map item (as jxlbatch looks for it), or None.
+    'tmap' item or gain map item (as photobatch looks for it), or None.
     """
     data = Path(heic).read_bytes()
     _, _, children = _meta(data)
@@ -760,7 +819,7 @@ def with_apple_gain_map_label(heic, out):
     Writes a copy of a HEIC whose gain map is labeled as Apple's, as in iPhone
     photos: an auxiliary image of the photo ('auxl' reference) of Apple's type
     ('auxC' property). ImageIO doesn't label the gain maps it writes, and
-    jxlbatch uses only labeled ones.
+    photobatch uses only labeled ones.
     """
     data = Path(heic).read_bytes()
     _, _, children = _meta(data)

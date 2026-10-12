@@ -17,6 +17,9 @@ namespace {
 const char *RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const char *NOTE = "http://ns.adobe.com/xmp/note/";
 const char *TIFF = "http://ns.adobe.com/tiff/1.0/";
+const char *XAP = "http://ns.adobe.com/xap/1.0/";
+const char *PHOTOSHOP = "http://ns.adobe.com/photoshop/1.0/";
+const char *EXIF = "http://ns.adobe.com/exif/1.0/";
 const char *XML = "http://www.w3.org/XML/1998/namespace";
 
 int fail(char *err, size_t n, const char *message) {
@@ -542,6 +545,29 @@ int orientation(const std::string &s, const Property &p, std::pair<size_t, size_
   if (at) *at = std::make_pair(v[0].begin, v[0].end);
   return v[0].c - '0';
 }
+
+// Replaces each span of the packet `s` (in order, not overlapping) with
+// `text`, in the malloc-owned copy *x. Returns the number of spans, or -1 if
+// out of memory (*x unchanged).
+int replace_spans(uint8_t **x, size_t *len, const std::string &s,
+                  const std::vector<std::pair<size_t, size_t>> &spans, const std::string &text) {
+  if (spans.empty()) return 0;
+  std::string out;
+  size_t from = 0;
+  for (const auto &d : spans) {
+    out.append(s, from, d.first - from);
+    out += text;
+    from = d.second;
+  }
+  out.append(s, from, std::string::npos);
+  uint8_t *copy = static_cast<uint8_t *>(std::malloc(out.size()));
+  if (!copy) return -1;
+  std::memcpy(copy, out.data(), out.size());
+  std::free(*x);
+  *x = copy;
+  *len = out.size();
+  return static_cast<int>(spans.size());
+}
 }  // namespace
 
 extern "C" int xmp_orientation(const uint8_t *x, size_t len) {
@@ -566,20 +592,21 @@ extern "C" int xmp_reset_orientation(uint8_t **x, size_t *len) {
     std::pair<size_t, size_t> at;
     if (orientation(s, p, &at) > 1) digits.push_back(at);
   }
-  if (digits.empty()) return 0;
-  std::string out;
-  size_t from = 0;
-  for (const auto &d : digits) {
-    out.append(s, from, d.first - from);
-    out += '1';
-    from = d.second;
+  return replace_spans(x, len, s, digits, "1");
+}
+
+extern "C" int xmp_set_dates(uint8_t **x, size_t *len, const char *date) {
+  const std::string s(reinterpret_cast<const char *>(*x), *len);
+  std::vector<std::pair<size_t, size_t>> values;
+  for (const Property &p : scan(s)) {
+    if (!is(p.name, XAP, "xmp", "CreateDate") && !is(p.name, PHOTOSHOP, "photoshop", "DateCreated") &&
+        !is(p.name, EXIF, "exif", "DateTimeOriginal") && !is(p.name, EXIF, "exif", "DateTimeDigitized"))
+      continue;
+    const std::vector<Character> v = trimmed(s, p);
+    if (v.empty()) continue;
+    for (const Run &r : p.runs)
+      if (v.front().begin >= r.begin && v.back().end <= r.end) values.emplace_back(v.front().begin, v.back().end);
   }
-  out.append(s, from, std::string::npos);
-  uint8_t *copy = static_cast<uint8_t *>(std::malloc(out.size()));
-  if (!copy) return -1;
-  std::memcpy(copy, out.data(), out.size());
-  std::free(*x);
-  *x = copy;
-  *len = out.size();
-  return static_cast<int>(digits.size());
+  std::sort(values.begin(), values.end());
+  return replace_spans(x, len, s, values, date);
 }

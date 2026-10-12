@@ -441,6 +441,25 @@ class Builder:
         )
         return output_of(a, name)
 
+    def format_date(self, ref):
+        """
+        Format Date, ISO 8601 with the time: "2024-01-01T17:00:00-05:00", the
+        date as the device's clock shows it, with that time zone's offset on
+        that date. Shortcuts formats it in the en_US_POSIX locale (Gregorian
+        calendar, ASCII digits) whatever the device's settings, and in the
+        device's time zone (ContentKit's NSDate(WFFormatting), iOS 18.2). The
+        date goes in as a text field, as the Shortcuts app writes it.
+        """
+        a = self.add(
+            'is.workflow.actions.format.date',
+            {
+                'WFDateFormatStyle': 'ISO 8601',
+                'WFISO8601IncludeTime': True,
+                'WFDate': text(ref),
+            },
+        )
+        return output_of(a, 'Formatted Date')
+
     # Albums: saving an already saved photo (Saved Photo Media) to an album
     # adds it there; it doesn't make another copy.
     def photo_albums(self, ref):

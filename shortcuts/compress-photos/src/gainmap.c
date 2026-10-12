@@ -131,6 +131,12 @@ int gainmap_icc_cicp_primaries(const blob_t *icc) {
   return t && n >= 12 && memcmp(t, "cicp", 4) == 0 ? t[8] : 0;
 }
 
+int gainmap_icc_cicp_transfer(const blob_t *icc) {
+  size_t n = 0;
+  const uint8_t *t = icc_tag(icc, "cicp", &n);
+  return t && n >= 12 && memcmp(t, "cicp", 4) == 0 ? t[9] : 0;
+}
+
 static double s15(const uint8_t *p) { return (double)(int32_t)rd32(p) / 65536.0; }
 
 // Evaluates a 'para' or 'curv' tone curve at x in [0, 1]; returns -1 if unknown.
@@ -163,6 +169,29 @@ static double icc_curve(const uint8_t *t, size_t n, double x) {
     }
   }
   return -1;
+}
+
+static double linear_to_srgb(double v) { return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055; }
+
+int gainmap_gray_icc_srgb_lut(const blob_t *icc, uint8_t lut[256]) {
+  const uint8_t *p = icc->data;
+  if (icc->size < 132 || memcmp(p + 36, "acsp", 4) != 0 || memcmp(p + 16, "GRAY", 4) != 0) return 0;
+  size_t n = 0;
+  const uint8_t *t = icc_tag(icc, "kTRC", &n);
+  if (!t || n < 12) return 0;
+  // A 'curv' with no entry is the identity, with one a gamma (u8.8); the
+  // other curves icc_curve reads.
+  const uint32_t count = memcmp(t, "curv", 4) == 0 ? rd32(t + 8) : 2;
+  if (count == 1 && n < 14) return 0;
+  const double gamma = count == 1 ? (t[12] << 8 | t[13]) / 256.0 : 1;
+  for (int v = 0; v < 256; v++) {
+    const double x = v / 255.0;
+    double y = count == 0 ? x : count == 1 ? pow(x, gamma) : icc_curve(t, n, x);
+    if (!(y >= 0)) return 0;  // an unknown curve (also NaN)
+    if (y > 1) y = 1;
+    lut[v] = (uint8_t)(linear_to_srgb(y) * 255 + 0.5);
+  }
+  return 1;
 }
 
 // 1 if the profile's red, green and blue curves are all sRGB's.

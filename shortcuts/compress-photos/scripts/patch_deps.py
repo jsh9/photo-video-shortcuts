@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Applies jxlbatch's small source edits to the dependency checkouts in .deps/.
+Applies photobatch's small source edits to the dependency checkouts in .deps/.
 
 Used by build-wasm.sh (``--wasi --skcms``) and build-macos.sh (``--skcms``).
 Each edit is idempotent: a file that already has it is left alone, and a file
@@ -30,6 +30,14 @@ def replace(root, rel, old, new):
     path = root / rel
     text = path.read_text()
     if new in text:
+        return
+
+    # A checkout patched before the rename to photobatch: the same edit, with
+    # the old name in its comments. Renamed, not patched again.
+    legacy = new.replace('photobatch', 'jxlbatch')
+    if legacy != new and legacy in text:
+        path.write_text(text.replace(legacy, new, 1))
+        print(f'renamed the patch in {root.name}/{rel}')
         return
 
     if old not in text:
@@ -129,7 +137,7 @@ def patch_skcms(libjxl):
         '        }\n'
         '        profile->has_CICP = true;\n'
         '    }\n'
-        "    // jxlbatch: Apple's HDR profile is PQ by its 'cicp' tag, with A2B0/B2A0\n"
+        "    // photobatch: Apple's HDR profile is PQ by its 'cicp' tag, with A2B0/B2A0\n"
         "    // tags skcms rejects ('mAB ' without B curves). libjxl takes a PQ\n"
         "    // profile's color from the 'cicp' tag alone and never transforms with it.\n"
         '    const bool hdr_by_cicp = profile->has_CICP &&\n'
@@ -148,7 +156,7 @@ def patch_skcms(libjxl):
         '            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n'
         '                // Malformed A2B tag\n',
         '            if (!read_a2b(&tag, &profile->A2B, pcs_is_xyz)) {\n'
-        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                if (hdr_by_cicp) break;  // photobatch: Apple's HDR profile\n"
         '                // Malformed A2B tag\n',
     )
     replace(
@@ -157,7 +165,7 @@ def patch_skcms(libjxl):
         '            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n'
         '                // Malformed B2A tag\n',
         '            if (!read_b2a(&tag, &profile->B2A, pcs_is_xyz)) {\n'
-        "                if (hdr_by_cicp) break;  // jxlbatch: Apple's HDR profile\n"
+        "                if (hdr_by_cicp) break;  // photobatch: Apple's HDR profile\n"
         '                // Malformed B2A tag\n',
     )
     # the 'cicp' tag's original place (read above now)
@@ -178,6 +186,111 @@ def patch_skcms(libjxl):
     )
 
 
+def patch_x265(x265):
+    """
+    x265 on WASI (no threads, no shared memory). Every edit is under
+    ``__wasi__``, so the same checkout still builds natively.
+
+    x265 runs each frame encoder on its own thread. Here ``Thread::start()``
+    runs the thread body on the calling thread instead: ``FrameEncoder::
+    threadMain()`` sets up its thread-local data, signals ``m_done`` and
+    returns, and ``startCompressFrame()`` encodes the frame right away and
+    signals ``m_done`` again, so ``getEncodedPicture()`` finds its event
+    already triggered (WASI's stub condition variables never block, so an
+    untriggered ``Event::wait()`` would spin). photobatch opens the encoder
+    with ``--pools none`` and one frame thread, so nothing else starts a
+    thread.
+    """
+    src = x265 / 'source'
+    replace(
+        src,
+        'common/threading.cpp',
+        'bool Thread::start()\n{\n    if (pthread_create(&thread, NULL, ThreadShim, this))',
+        'bool Thread::start()\n{\n#if defined(__wasi__)\n'
+        '    threadMain();  // no threads: the body runs here and must return (see patch_deps.py)\n'
+        '    thread = 0;\n    return true;\n#endif\n'
+        '    if (pthread_create(&thread, NULL, ThreadShim, this))',
+    )
+    replace(
+        src,
+        'encoder/frameencoder.cpp',
+        '    m_done.trigger();     /* signal that thread is initialized */\n'
+        '    m_enable.wait();      /* Encoder::encode() triggers this event */\n',
+        '    m_done.trigger();     /* signal that thread is initialized */\n'
+        '#if defined(__wasi__)\n'
+        '    return;               /* no threads: startCompressFrame() encodes on the calling thread */\n'
+        '#endif\n'
+        '    m_enable.wait();      /* Encoder::encode() triggers this event */\n',
+    )
+    replace(
+        src,
+        'encoder/frameencoder.cpp',
+        '    m_enable.trigger();\n    return true;\n}\n\nvoid FrameEncoder::threadMain()',
+        '    m_enable.trigger();\n#if defined(__wasi__)\n'
+        '    /* no threads: encode now; getEncodedPicture() then finds m_done triggered */\n'
+        '    for (int layer = 0; layer < m_param->numLayers; layer++)\n'
+        '        compressFrame(layer);\n'
+        '    m_done.trigger();\n#endif\n'
+        '    return true;\n}\n\nvoid FrameEncoder::threadMain()',
+    )
+    # Other bit depths are never loaded at run time: WASI has no dlopen.
+    replace(
+        src,
+        'encoder/api.cpp',
+        '#else\n#include <dlfcn.h>\n#define ext ".so"\n#endif',
+        '#else\n#include <dlfcn.h>\n#define ext ".so"\n#endif\n'
+        '#if defined(__wasi__)\n'
+        '#define dlopen(name, flags) ((void*)0)  /* no dynamic loading on WASI */\n'
+        '#define dlsym(handle, name) ((void*)0)\n'
+        '#endif',
+    )
+    # Named semaphores are never created on WASI (ring memory fails first);
+    # its libc has sem_close but no sem_unlink.
+    replace(
+        src,
+        'common/threading.h',
+        '            sem_close(m_sem);\n            sem_unlink(m_name);',
+        '            sem_close(m_sem);\n#if !defined(__wasi__)\n            sem_unlink(m_name);\n#endif',
+    )
+    # Worker threads never start, but the file must compile: WASI has no nice().
+    replace(
+        src,
+        'common/threadpool.cpp',
+        '#else\n    __attribute__((unused)) int val = nice(10);\n#endif',
+        '#elif !defined(__wasi__)\n    __attribute__((unused)) int val = nice(10);\n#endif',
+    )
+    # Ring memory (multi-pass only) needs shared memory, which WASI lacks:
+    # init() fails, so nothing is ever mapped.
+    replace(
+        src,
+        'common/ringmem.cpp',
+        '#ifndef _WIN32\n#include <sys/mman.h>\n#endif ////< _WIN32',
+        '#if !defined(_WIN32) && !defined(__wasi__)\n#include <sys/mman.h>\n#endif ////< _WIN32',
+    )
+    replace(
+        src,
+        'common/ringmem.cpp',
+        '#ifdef _WIN32\n            HANDLE h = OpenFileMappingA(FILE_MAP_WRITE | FILE_MAP_READ, FALSE, nameBuf);',
+        '#if defined(__wasi__)\n'
+        '            void *pool = NULL;  /* no shared memory on WASI */\n'
+        '            if (!pool)\n                return false;\n'
+        '#elif defined(_WIN32)\n'
+        '            HANDLE h = OpenFileMappingA(FILE_MAP_WRITE | FILE_MAP_READ, FALSE, nameBuf);',
+    )
+    replace(
+        src,
+        'common/ringmem.cpp',
+        '#else /* POSIX / pthreads */\n'
+        '                int32_t shrMemSize = (m_itemSize * m_itemCnt + sizeof(ShrMemCtrl) + RINGMEM_ALLIGNMENT - 1) & (~RINGMEM_ALLIGNMENT - 1);\n'
+        '                munmap(m_shrMem, shrMemSize);',
+        '#elif defined(__wasi__)\n'
+        '                /* never mapped */\n'
+        '#else /* POSIX / pthreads */\n'
+        '                int32_t shrMemSize = (m_itemSize * m_itemCnt + sizeof(ShrMemCtrl) + RINGMEM_ALLIGNMENT - 1) & (~RINGMEM_ALLIGNMENT - 1);\n'
+        '                munmap(m_shrMem, shrMemSize);',
+    )
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -187,12 +300,18 @@ def main():
     ap.add_argument('--skcms', action='store_true', help='the skcms edit')
     ap.add_argument('--libjxl', type=pathlib.Path, required=True)
     ap.add_argument('--libheif', type=pathlib.Path)
+    ap.add_argument(
+        '--x265', type=pathlib.Path, help='x265 checkout to edit for WASI'
+    )
     args = ap.parse_args()
     if args.wasi:
         if not args.libheif:
             ap.error('--wasi needs --libheif')
 
         patch_wasi(args.libjxl, args.libheif)
+
+    if args.x265:
+        patch_x265(args.x265)
 
     if args.skcms:
         patch_skcms(args.libjxl)

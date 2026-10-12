@@ -1,5 +1,6 @@
 // Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG and PNG files, plus
-// in-place helpers for the EXIF/XMP orientation and pixel-dimension tags.
+// in-place helpers for the EXIF/XMP orientation and pixel-dimension tags, and
+// setting the EXIF capture date.
 #ifndef JXLBATCH_META_H
 #define JXLBATCH_META_H
 
@@ -56,5 +57,42 @@ int exif_string(const uint8_t *tiff, size_t len, uint16_t tag, char *buf, size_t
 // Sets Orientation to 1 and PixelXDimension/PixelYDimension to w/h, for the
 // tags that exist. Returns the number of tags changed.
 int exif_patch(uint8_t *tiff, size_t len, uint32_t w, uint32_t h);
+
+// A photo's date as the shortcut gives it (Photos' date): the wall time where
+// the photo is shown, and that place's offset from UTC on that date.
+typedef struct {
+  int year, month, day, hour, minute, second;
+  int millis;  // 0-999, or -1 when not given
+  int offset;  // minutes east of UTC (-05:00 is -300)
+} photo_date_t;
+
+// Parses "2024-01-01T17:00:00-05:00": a space may replace the T, the date's
+// parts may be separated by ":" as in EXIF, fractions of a second may follow
+// the seconds (".123"), and the offset may be "-0500", "-05" or "Z". Returns
+// 1 if valid.
+int photo_date_parse(const char *s, photo_date_t *d);
+// Writes the date as EXIF does, "2024:01:01 17:00:00 -05:00", or for XMP,
+// "2024-01-01T17:00:00.123-05:00" (with the fraction when it has one).
+void photo_date_exif_text(const photo_date_t *d, char *buf, size_t buf_len);
+void photo_date_iso_text(const photo_date_t *d, char *buf, size_t buf_len);
+
+// Makes `date` the EXIF's capture date. When DateTimeOriginal already is that
+// moment (to the second, by its OffsetTimeOriginal, OffsetTimeDigitized or
+// OffsetTime if it has one, else by the clock time), nothing changes and 0 is
+// returned. Otherwise *out gets a new, malloc'ed TIFF structure (from `tiff`,
+// or from scratch when len is 0) with DateTimeOriginal and CreateDate set to
+// the date, OffsetTimeOriginal and OffsetTimeDigitized to its offset, and
+// SubSecTimeOriginal and SubSecTimeDigitized to its milliseconds (removed
+// when it has none); the modification time (DateTime, OffsetTime, SubSecTime)
+// stays. The Exif IFD is rewritten at the end of the data, so no other value
+// moves (maker notes keep their offsets). Returns 1 then.
+// A file without a time zone whose clock time is `date`'s moment in some zone
+// (whole quarter hours, up to 14 h from UTC) keeps that clock time and gets
+// that zone: *date becomes what was written, and 2 is returned.
+// `was` gets the file's own date for a log ("" if none).
+// Returns -1 if out of memory, -2 if the EXIF can't be read (or its Exif IFD
+// can't be followed from IFD0; the EXIF is then kept as it is).
+int exif_set_capture_date(const uint8_t *tiff, size_t len, photo_date_t *date, uint8_t **out, size_t *out_len,
+                          char *was, size_t was_len);
 
 #endif

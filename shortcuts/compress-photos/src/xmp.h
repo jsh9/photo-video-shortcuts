@@ -26,6 +26,12 @@ int xmp_has_extended_reference(const uint8_t *xmp, size_t len);
 // byte stays the same. Returns the number of values changed, or -1 if out of
 // memory (the packet is unchanged).
 int xmp_reset_orientation(uint8_t **xmp, size_t *len);
+// Replaces the value of each capture date the packet has (xmp:CreateDate,
+// photoshop:DateCreated, exif:DateTimeOriginal, exif:DateTimeDigitized) with
+// `date` (ISO 8601) in the malloc-owned packet; none is added, and a value
+// written in pieces (split by a comment or CDATA) stays. Returns the number
+// of values replaced, or -1 if out of memory (the packet is unchanged).
+int xmp_set_dates(uint8_t **xmp, size_t *len, const char *date);
 
 #ifdef __cplusplus
 }

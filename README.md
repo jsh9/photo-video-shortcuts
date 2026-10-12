@@ -7,10 +7,10 @@ free terminal app, because iOS has no JPEG XL encoder or quality-controlled
 video encoder of its own. On the Mac, Shortcuts runs the same encoder itself
 (Run Shell Script).
 
-| Shortcut                                               | What it does                                                                                                           | iPhone             | Mac                                                                       |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → JPEG XL, saved back to Photos; Live Photos and videos are skipped                  | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
-| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
+| Shortcut                                               | What it does                                                                                                                              | iPhone             | Mac                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG and PNG) → smaller HEIC (HDR kept as it is) or JPEG XL, saved back to Photos; Live Photos and videos are skipped | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped                    | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
 
 <!--TOC-->
 
@@ -55,14 +55,14 @@ ______________________________________________________________________
    download the encoder:
 
    ```
-   curl -L -o ~/Documents/bin/jxlbatch.wasm https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch.wasm
+   curl -L -o ~/Documents/bin/photobatch.wasm https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch.wasm
    ```
 
    When the download has finished and the prompt is back, paste this command
    and tap Return to check that the encoder works:
 
    ```
-   jxlbatch --selftest
+   photobatch --selftest
    ```
 
    It should end with "Self-test passed". Its encode test takes a few seconds.
@@ -72,8 +72,8 @@ ______________________________________________________________________
    the command again.
 
    If a-Shell reports a WebAssembly compile error, download
-   `jxlbatch-scalar.wasm` instead, saved as `jxlbatch.wasm`. That build has no
-   SIMD, so it's slower.
+   `photobatch-scalar.wasm` instead, saved as `photobatch.wasm`. That build has
+   no SIMD, so it's slower.
 
 2. **Add the shortcuts.** On the iPhone, open the
    [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases), and
@@ -102,7 +102,7 @@ itself.
 1. **Install the encoder.** In Terminal, paste this line and press Return:
 
    ```
-   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/jxlbatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch-macos && chmod +x ~/.local/bin/jxlbatch && ~/.local/bin/jxlbatch --selftest
+   mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/photobatch https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch-macos && chmod +x ~/.local/bin/photobatch && ~/.local/bin/photobatch --selftest
    ```
 
    It should end with "Self-test passed".
@@ -154,11 +154,11 @@ How to use it: [Compress Videos](shortcuts/compress-videos/README.md).
 ## 2. Updating
 
 Each shortcut has its own version, shown in the note at the top of the shortcut
-and by its encoder (for example `jxlbatch --version`, `vidmeta --version`). The
-[Releases page](https://github.com/jsh9/photo-video-shortcuts/releases) says
-which files each release changed; download only those, the same way as above.
-The iPhone and Mac files of a shortcut share its version, so a release may
-change only one platform's files.
+and by its encoder (for example `photobatch --version`, `vidmeta --version`).
+The [Releases page](https://github.com/jsh9/photo-video-shortcuts/releases)
+says which files each release changed; download only those, the same way as
+above. The iPhone and Mac files of a shortcut share its version, so a release
+may change only one platform's files.
 
 ## 3. Repository layout
 

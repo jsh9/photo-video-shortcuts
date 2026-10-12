@@ -84,6 +84,26 @@ int image_make_packed(image_t *img) {
   return 0;
 }
 
+int image_to_8bit(image_t *img) {
+  if (img->bytes_per_sample == 1) return 0;
+  if (image_make_packed(img) != 0) return -1;
+  const size_t n = (size_t)img->w * img->h * (size_t)img->channels;
+  uint8_t *out = (uint8_t *)malloc(n ? n : 1);
+  if (!out) return -1;
+  const uint16_t *in = (const uint16_t *)img->data;
+  const uint32_t max = (1u << img->bits) - 1;
+  for (size_t i = 0; i < n; i++) {
+    const uint32_t v = in[i] > max ? max : in[i];
+    out[i] = (uint8_t)((v * 255u + max / 2) / max);
+  }
+  image_free(img);
+  img->data = out;
+  img->bytes_per_sample = 1;
+  img->bits = 8;
+  img->stride = (size_t)img->w * (size_t)img->channels;
+  return 0;
+}
+
 void image_crop(image_t *img, uint32_t left, uint32_t top, uint32_t w, uint32_t h) {
   const size_t ps = pixel_size(img);
   uint8_t *src = img->data + (size_t)top * img->stride + (size_t)left * ps;

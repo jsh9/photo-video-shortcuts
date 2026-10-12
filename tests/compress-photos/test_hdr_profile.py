@@ -98,7 +98,7 @@ def last_profile(variants, name):
 def converted(wasm, variants, tmp_path_factory):
     """
     The variants converted in one batch at quality 83: {name: (jxl, what
-    jxlbatch printed for it)}.
+    photobatch printed for it)}.
     """
     folder = tmp_path_factory.mktemp('converted')
     staged = ph.stage(folder, [heic for heic, _ in variants.values()])

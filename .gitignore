@@ -77,3 +77,6 @@ __pycache__/
 # Test photos and videos: personal, and may contain GPS locations
 /tests/samples/
 testdata/
+
+# photobatch --selftest's scratch files, should a run be interrupted
+photobatch_selftest.*

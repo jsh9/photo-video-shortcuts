@@ -36,7 +36,7 @@ EVERY_BUILD = ['o5', 'crop_o6', 'apple_older_o6', 'ten_bit', 'multichannel',
 
 
 def convert(encoder, names, folder):
-    """{name: (jxl or None, what jxlbatch printed for it, original kept)}"""
+    """{name: (jxl or None, what photobatch printed for it, original kept)}"""
     staged = ph.stage(folder, [FIXTURES / f'{n}.heic' for n in names])
     result = encoder.run(['-q', '100', 'jxl_job.txt'], folder)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -114,7 +114,7 @@ def test_gain_map_not_used(converted, name):
     assert 'saved as SDR' in output
     assert 'PQ' not in ph.run(['jxlinfo', jxl], check=True).stdout
     # its HDR isn't in the JXL, so the shortcut mustn't offer to delete it;
-    # except for a photo not taken by an iPhone, whose gain map jxlbatch
+    # except for a photo not taken by an iPhone, whose gain map photobatch
     # doesn't use (the owner's choice)
     assert kept == (not CASES[name].get('delete')), output
 

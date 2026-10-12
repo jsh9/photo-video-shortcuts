@@ -6,7 +6,7 @@ photo, as libheif does), derived 'iden' photos whose source is turned itself,
 and transparency (alpha) images with transforms of their own. Converted
 losslessly in every build, each must come out exactly as expected, upright, and
 its original may be offered for deletion. A crop that leaves nothing fails the
-photo, as in libheif (and jxlbatch 0.1.1).
+photo, as in libheif (and photobatch 0.1.1).
 """
 
 import numpy as np

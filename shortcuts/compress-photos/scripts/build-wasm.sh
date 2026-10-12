@@ -1,9 +1,9 @@
 #!/bin/sh
-# Builds jxlbatch as a WASI WebAssembly command for a-Shell.
+# Builds photobatch as a WASI WebAssembly command for a-Shell.
 #
 # Outputs:
-#   dist/jxlbatch.wasm         WebAssembly SIMD build (iOS 16.4+)
-#   dist/jxlbatch-scalar.wasm  fallback without SIMD
+#   dist/photobatch.wasm         WebAssembly SIMD build (iOS 16.4+)
+#   dist/photobatch-scalar.wasm  fallback without SIMD
 #
 # Needs: Homebrew cmake, ninja, binaryen (wasm-opt). Downloads wasi-sdk,
 # libjxl, libheif and libde265 into the repository's .deps/ on first run
@@ -18,11 +18,14 @@ WASI_SDK_VERSION=34
 LIBJXL_VERSION=v0.11.2
 LIBHEIF_VERSION=v1.23.5
 LIBDE265_VERSION=v1.1.3
+X265_VERSION=4.3  # the same release Compress Videos builds (shared source folder)
+X265_SHA256=83c53e4c8bbb8f1e33ed59e10a7d621d1d7801ca853910c3eb41f038b8ffb121
 DEPS="$REPO/.deps"
 WASI_SDK="$DEPS/wasi-sdk-$WASI_SDK_VERSION.0-arm64-macos"
 LIBJXL="$DEPS/libjxl"
 LIBHEIF="$DEPS/libheif"
 LIBDE265="$DEPS/libde265"
+X265="$DEPS/x265-$X265_VERSION"
 
 mkdir -p "$DEPS" "$ROOT/dist" "$ROOT/build"
 
@@ -48,12 +51,31 @@ if [ ! -d "$LIBDE265/.git" ]; then
   echo "Cloning libde265 $LIBDE265_VERSION..."
   git clone -q --depth 1 -b "$LIBDE265_VERSION" https://github.com/strukturag/libde265 "$LIBDE265"
 fi
+# x265 (HEVC encoder, for HEIC output): a release archive, checked by hash,
+# as Compress Videos' build-macos.sh fetches it.
+if [ ! -d "$X265" ]; then
+  archive="$DEPS/x265_$X265_VERSION.tar.gz"
+  echo "Downloading x265 $X265_VERSION..."
+  /usr/bin/curl -sSfL -o "$archive" \
+    "https://github.com/Multicorewareinc/x265/releases/download/$X265_VERSION/x265_$X265_VERSION.tar.gz"
+  if [ "$(shasum -a 256 "$archive" | cut -d ' ' -f 1)" != "$X265_SHA256" ]; then
+    echo "build-wasm.sh: $archive is not the expected file (SHA-256 differs)" >&2
+    rm -f "$archive"
+    exit 1
+  fi
+  rm -rf "$X265.tmp"
+  mkdir -p "$X265.tmp"
+  tar xf "$archive" -C "$X265.tmp" --strip-components 1
+  mv "$X265.tmp" "$X265"
+  rm -f "$archive"
+fi
 
 # WASI (the non-threads target) has no threads, no C++ exceptions and no
 # mkstemp. patch_deps.py edits the libraries so they build and decode
 # single-threaded, and lets skcms, libjxl's color engine here, read Apple's
 # HDR profile (shared with build-macos.sh, which applies only the skcms edit).
-python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --libjxl "$LIBJXL" --libheif "$LIBHEIF"
+# x265 encodes each picture on the calling thread (--x265).
+python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --libjxl "$LIBJXL" --libheif "$LIBHEIF" --x265 "$X265"
 
 build_variant() {
   variant=$1   # simd | scalar
@@ -99,6 +121,18 @@ build_variant() {
     >"$bdir-heif.log" 2>&1 || { tail -30 "$bdir-heif.log"; exit 1; }
   ninja -C "$bdir-heif" install >>"$bdir-heif.log" 2>&1 || { tail -30 "$bdir-heif.log"; exit 1; }
 
+  # x265 (HEVC encoder, for HEIC output): 8-bit, no assembly (there is none
+  # for WebAssembly), no threads (patch_deps.py --x265), no command-line tool.
+  # CMAKE_POLICY_VERSION_MINIMUM: x265's CMakeLists predates CMake 4.
+  # shellcheck disable=SC2086
+  cmake -S "$X265/source" -B "$bdir-x265" -G Ninja -Wno-dev $toolchain \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_C_FLAGS="$flags -fno-exceptions" -DCMAKE_CXX_FLAGS="$flags -fno-exceptions" \
+    -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DENABLE_ASSEMBLY=OFF -DENABLE_PIC=OFF -DENABLE_LIBNUMA=OFF \
+    >"$bdir-x265.log" 2>&1 || { tail -30 "$bdir-x265.log"; exit 1; }
+  ninja -C "$bdir-x265" install >>"$bdir-x265.log" 2>&1 || { tail -30 "$bdir-x265.log"; exit 1; }
+
   # libjxl (encoder).
   # shellcheck disable=SC2086
   cmake -S "$LIBJXL" -B "$bdir" -G Ninja -Wno-dev $toolchain \
@@ -130,31 +164,34 @@ build_variant() {
   ninja -C "$bdir" jxl jxl_cms >"$bdir.ninja.log" 2>&1 || { tail -40 "$bdir.ninja.log"; exit 1; }
 
   cc="$WASI_SDK/bin/clang --target=wasm32-wasip1 --sysroot=$WASI_SDK/share/wasi-sysroot"
-  objdir="$bdir/jxlbatch-obj"
+  objdir="$bdir/photobatch-obj"
   mkdir -p "$objdir"
-  for src in jxlbatch meta pixels heif gainmap hdr grain; do
+  objs=''  # this build's objects only: an earlier version's may be in the folder
+  for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
-      -I"$prefix/include" -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
+      -I"$prefix/include" -DJXLBATCH_HEIC -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
+    objs="$objs $objdir/$src.o"
   done
   for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
+    obj="$objdir/$(basename "$src" .cpp).o"
     "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \
-      -std=c++11 -O3 $flags -fno-exceptions -Wall -Wextra \
-      -c "$src" -o "$objdir/$(basename "$src" .cpp).o"
+      -std=c++11 -O3 $flags -fno-exceptions -Wall -Wextra -c "$src" -o "$obj"
+    objs="$objs $obj"
   done
   # 8 MiB stack (the 64 KiB default can silently overflow into the heap) and
   # stack-first layout, so an overflow traps instead of corrupting memory.
   "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \
-    -O3 $flags -fno-exceptions "$objdir"/*.o \
-    "$prefix/lib/libheif.a" "$prefix/lib/libde265.a" \
+    -O3 $flags -fno-exceptions $objs \
+    "$prefix/lib/libheif.a" "$prefix/lib/libde265.a" "$prefix/lib/libx265.a" \
     "$bdir/lib/libjxl.a" "$bdir/lib/libjxl_cms.a" "$bdir/third_party/highway/libhwy.a" \
     "$bdir/third_party/brotli/libbrotlienc.a" "$bdir/third_party/brotli/libbrotlidec.a" \
     "$bdir/third_party/brotli/libbrotlicommon.a" \
     -Wl,-z,stack-size=8388608 -Wl,--stack-first -Wl,--max-memory=4294967296 \
     -Wl,--strip-debug \
-    -o "$bdir/jxlbatch.wasm"
-  wasm-opt -O3 "$bdir/jxlbatch.wasm" -o "$out"
+    -o "$bdir/photobatch.wasm"
+  wasm-opt -O3 "$bdir/photobatch.wasm" -o "$out"
   echo "wrote $out ($(wc -c <"$out" | tr -d ' ') bytes)"
 }
 
-build_variant simd "-msimd128" "$ROOT/dist/jxlbatch.wasm"
-build_variant scalar "" "$ROOT/dist/jxlbatch-scalar.wasm"
+build_variant simd "-msimd128" "$ROOT/dist/photobatch.wasm"
+build_variant scalar "" "$ROOT/dist/photobatch-scalar.wasm"

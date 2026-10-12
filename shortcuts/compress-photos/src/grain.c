@@ -1,8 +1,18 @@
 #include "grain.h"
 
+#include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "gainmap.h"
+
+// A bright sky (grain_bright_sky): a smooth cell counts when its mean
+// luminance is above SKY_BRIGHT times SDR white and its brightest channel is
+// above SKY_SATURATED times its darkest (a blue sky is about 1.45, clouds
+// less). Calibrated on nine iPhone HDR photos against Apple's rendering
+// error (docs/compress-photos-pink-sky.md).
+#define SKY_BRIGHT 1.0
+#define SKY_SATURATED 1.2
 
 #define CELL 16  // the smoothness mask's cell size, in pixels
 #define CELL_SHIFT 4
@@ -29,17 +39,14 @@ typedef struct {
 } grained_t;
 
 grain_opts_t grain_auto(float quality) {
-  // From the tuning on a sunset skyline (docs/compress-photos-banding-plan.md,
-  // package C): lower qualities remove more of the grain, so they get more;
-  // the file grows by about 10-15% at each quality. The user chose the
-  // lightest of the candidates whose banding looked the same (60+40 at q83);
-  // the coarse layer is 2/3 of the fine one.
-  grain_opts_t g;
-  float fine = 60.0f + (83.0f - quality) * 2.0f;
-  if (fine < 40.0f) fine = 40.0f;
-  if (fine > 130.0f) fine = 130.0f;
-  g.fine = (int)(fine + 0.5f);
-  g.coarse = g.fine * 2 / 3;
+  // None, since 0.7.0: the grain only hid the steps of Apple's rendering of
+  // an HDR JPEG XL, which shows worse artifacts anyway (pink patches, see
+  // README); the HEIC route avoids that rendering altogether, and the JPEG
+  // XL route keeps the photo as it is. --grain and --grain-coarse still add
+  // it. (The amounts that were tuned, docs/compress-photos-banding-plan.md:
+  // fine 60 + (83 - quality) * 2, clamped to 60-130, coarse 2/3 of it.)
+  (void)quality;
+  grain_opts_t g = {0, 0};
   return g;
 }
 
@@ -177,6 +184,60 @@ static void grained_free(void *owner) {
   image_free(&g->inner);
   free(g->weight);
   free(g);
+}
+
+// Linear light, 1.0 = SDR white, of each 8-bit PQ code (the high byte of a
+// 16-bit code: enough for a decision).
+static void pq8_to_linear(double *t) {
+  const double m1 = 2610.0 / 16384, m2 = 2523.0 / 4096 * 128;
+  const double c1 = 3424.0 / 4096, c2 = 2413.0 / 4096 * 32, c3 = 2392.0 / 4096 * 32;
+  for (int i = 0; i < 256; i++) {
+    const double p = pow(i / 255.0, 1 / m2), n = p - c1 > 0 ? p - c1 : 0;
+    t[i] = 10000.0 * pow(n / (c2 - c3 * p), 1 / m1) / GAINMAP_SDR_WHITE_NITS;
+  }
+}
+
+double grain_bright_sky(const image_t *img) {
+  const image_t *base = gainmap_base(img);
+  if (!img->render || !base || img->channels < 3 || img->bytes_per_sample != 2) return 0;
+  grained_t g;
+  memset(&g, 0, sizeof g);
+  if (make_weights(&g, base) != 0) return -1;
+  const int ch = img->channels;
+  const size_t stride = (size_t)img->w * (size_t)ch * 2;
+  uint16_t *row = (uint16_t *)malloc(stride);
+  if (!row) {
+    free(g.weight);
+    return -1;
+  }
+  double linear[256];
+  pq8_to_linear(linear);
+  size_t sky = 0;
+  for (uint32_t cy = 0; cy < g.ch; cy++) {
+    // the cell row's middle row of pixels stands for the cells
+    const uint32_t y = cy * CELL + CELL / 2 < img->h ? cy * CELL + CELL / 2 : img->h - 1;
+    if (img->render(img->owner, 0, y, img->w, 1, (uint8_t *)row, stride) != 0) {
+      free(row);
+      free(g.weight);
+      return -1;
+    }
+    for (uint32_t cx = 0; cx < g.cw; cx++) {
+      // any cell that isn't textured: a sky's own grain is about a level
+      if (!g.weight[(size_t)cy * g.cw + cx]) continue;
+      const uint32_t x0 = cx * CELL, x1 = x0 + CELL < img->w ? x0 + CELL : img->w;
+      double sum[3] = {0, 0, 0};
+      for (uint32_t x = x0; x < x1; x++) {
+        for (int c = 0; c < 3; c++) sum[c] += linear[row[(size_t)x * (size_t)ch + (size_t)c] >> 8];
+      }
+      const double n = (double)(x1 - x0), r = sum[0] / n, gr = sum[1] / n, b = sum[2] / n;
+      const double y_lin = 0.2126 * r + 0.7152 * gr + 0.0722 * b;
+      const double hi = fmax(r, fmax(gr, b)), lo = fmin(r, fmin(gr, b));
+      if (y_lin > SKY_BRIGHT && hi > SKY_SATURATED * lo) sky++;
+    }
+  }
+  free(row);
+  free(g.weight);
+  return (double)sky / ((double)g.cw * (double)g.ch);
 }
 
 int grain_attach(image_t *img, const grain_opts_t *opts) {

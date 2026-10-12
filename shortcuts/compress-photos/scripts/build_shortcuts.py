@@ -3,7 +3,7 @@
 Generates the two iPhone shortcuts as signed .shortcut files.
 
 - "Compress Photos": share-sheet shortcut that stages the still photos in
-  a-Shell (Live Photos and videos are skipped) and runs jxlbatch (see
+  a-Shell (Live Photos and videos are skipped) and runs photobatch (see
   ../README.md).
 - "JXL-Import": started by a-Shell when encoding is done; saves the JXL files
   to Photos and cleans up.
@@ -45,13 +45,15 @@ from wf import (  # noqa: E402
     SHORTCUT_INPUT,
     VERSION,
     Ref,
+    TITLE,
     Sample,
     attachment,
-    choose_quality,
+    choose_format,
     collect_in_album,
     copy_to_albums,
     keep_still_photos,
     output_of,
+    photo_date,
     plain_or_text,
     text,
     variable,
@@ -167,17 +169,35 @@ class Builder(wf.Builder):
 # The two shortcuts
 
 
-def run_jxlbatch(b, quality, then):
+def choose_args(b):
     """
-    a-Shell command: run jxlbatch, then the command ``then``.
+    The format and quality questions (wf.choose_format), then the variable
+    Args: photobatch's options for them, "--heic --rf 26" or "-q 83 -e 7" (an
+    If on the Format variable, since the command is one text).
+    """
+    fmt, quality = choose_format(b)
+    b.if_has_value(
+        b.match_text(fmt, '^heic$'),
+        lambda: b.set_variable('Args', b.text('--heic --rf ', quality)),
+        lambda: b.set_variable(
+            'Args', b.text('-q ', quality, f' -e {EFFORT}')
+        ),
+    )
+    return variable('Args')
+
+
+def run_photobatch(b, args, then):
+    """
+    a-Shell command: run photobatch with ``args`` (the variable Args, see
+    choose_args), then the command ``then``.
 
     When this launches a-Shell, a-Shell restores its last session (its folder
     too) while it starts these commands, and its WebAssembly engine may still
-    be loading, which ends jxlbatch before it runs. So wait 2 s, change to the
-    Shortcuts folder (~shortcuts, where Put File saves), and run jxlbatch; then
-    run it with --retry, which does nothing if the first run started (it
-    created jxl_started). Not through dash: a-Shell adds ".wasm" to a command's
-    name, dash doesn't, so it can't find jxlbatch.
+    be loading, which ends photobatch before it runs. So wait 2 s, change to
+    the Shortcuts folder (~shortcuts, where Put File saves), and run
+    photobatch; then run it with --retry, which does nothing if the first run
+    started (it created jxl_started). Not through dash: a-Shell adds ".wasm" to
+    a command's name, dash doesn't, so it can't find photobatch.
 
     The variable Skipped Echo (an echo of what the shortcut skipped, set by
     keep_still_photos only when something was) is printed before and after the
@@ -187,11 +207,11 @@ def run_jxlbatch(b, quality, then):
     b.ashell_execute(
         'sleep 2\ncd ~shortcuts\n',
         echo,
-        '\njxlbatch -q ',
-        quality,
-        f' -e {EFFORT} jxl_job.txt\njxlbatch --retry -q ',
-        quality,
-        f' -e {EFFORT} jxl_job.txt\n',
+        '\nphotobatch ',
+        args,
+        ' jxl_job.txt\nphotobatch --retry ',
+        args,
+        ' jxl_job.txt\n',
         echo,
         '\n' + then,
         keep_going=False,
@@ -207,7 +227,7 @@ def save_results(b, originals=None, album=None):
     Each line is "file|index|delete or keep|name". With ``originals`` (the
     staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the
     albums are read from the original at the line's index, and that original is
-    collected in the album (collect_in_album). The flag is jxlbatch's: "keep"
+    collected in the album (collect_in_album). The flag is photobatch's: "keep"
     means the JPEG XL lacks the original's HDR, which a-Shell's output says
     too; it doesn't change what happens here. Without ``originals``, the albums
     are read from jxl_albums_<index>.txt, one album name per line, if that file
@@ -250,14 +270,14 @@ def save_results(b, originals=None, album=None):
     return b.count(lines)
 
 
-CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_done.txt jxl_started'
+CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started'
 
 
 def build_compress(sample):
     b = Builder(sample)
     b.comment(
         f'{NAME_A} {VERSION}. '
-        'Converts photos to JPEG XL with a-Shell (jxlbatch), keeping their metadata. '
+        'Converts photos to HEIC or JPEG XL with a-Shell (photobatch), keeping their metadata. '
         'Only still photos are converted: Live Photos and videos are skipped. '
         'From the Photos share sheet, JXL-Import then saves the results. Started any '
         'other way, it shows a photo picker (which gives the original HEIF files), '
@@ -275,27 +295,37 @@ def build_compress(sample):
     # From here on only the still photos: they are staged, and their positions
     # in Stills are the job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
-    quality = choose_quality(b)
-    # A stale album file from an unfinished run would put a photo into the
-    # wrong albums; jxl_in_* files are overwritten anyway.
+    args = choose_args(b)
+    # A stale album or dates file from an unfinished run would put a photo
+    # into the wrong albums or give it a wrong date; jxl_in_* files are
+    # overwritten anyway.
     b.ashell_execute(
-        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_started',
+        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started',
         keep_going=True,
         open_app='close',
     )
 
-    # Only the original file goes to a-Shell: jxlbatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step.
+    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
+    # PNG itself, so there is no Convert Image step. Each photo's date in
+    # Photos goes too (jxl_dates.txt; see wf.photo_date).
     def per_photo():
         name = b.get_name(REPEAT_ITEM)
         b.ashell_put_file(
             b.set_name(REPEAT_ITEM, 'jxl_in_', REPEAT_INDEX, '.orig')
         )
         b.append_variable('Jobs', b.text(REPEAT_INDEX, '|', name))
+        photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
 
     b.repeat_each(photos, per_photo)
     b.ashell_put_file(
         b.set_name(b.combine(variable('Jobs'), '\n'), 'jxl_job.txt')
+    )
+    b.if_has_value(
+        variable('Dates'),
+        lambda: b.ashell_put_file(
+            b.set_name(b.combine(variable('Dates'), '\n'), 'jxl_dates.txt')
+        ),
+        lambda: None,
     )
 
     def from_share_sheet():
@@ -323,12 +353,10 @@ def build_compress(sample):
         # conversion fails is in the album too; a-Shell's output names it.
         album = b.text(ORIGINALS_ALBUM)
         b.repeat_each(photos, lambda: collect_in_album(b, REPEAT_ITEM, album))
-        run_jxlbatch(
-            b, quality, f'open shortcuts://run-shortcut?name={NAME_B}'
-        )
+        run_photobatch(b, args, f'open shortcuts://run-shortcut?name={NAME_B}')
 
     def from_picker():
-        run_jxlbatch(b, quality, 'open shortcuts://')
+        run_photobatch(b, args, 'open shortcuts://')
         b.wait_to_return()
         album = b.text(ORIGINALS_ALBUM)
         count = save_results(b, photos, album)
@@ -337,7 +365,7 @@ def build_compress(sample):
         b.if_has_value(
             variable('Collected'),
             lambda: b.notification(
-                'JPEG XL',
+                TITLE,
                 'Saved ',
                 count,
                 ' photo(s) to Photos. ',
@@ -345,7 +373,7 @@ def build_compress(sample):
                 f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
             ),
             lambda: b.notification(
-                'JPEG XL', 'Saved ', count, ' photo(s) to Photos.'
+                TITLE, 'Saved ', count, ' photo(s) to Photos.'
             ),
         )
 
@@ -357,12 +385,12 @@ def build_import(sample):
     b = Builder(sample)
     b.comment(
         f'{NAME_B} ({NAME_A} {VERSION}). '
-        'Started by a-Shell when jxlbatch finishes. Saves the converted JPEG XL '
+        'Started by a-Shell when photobatch finishes. Saves the converted JPEG XL '
         'files to Photos. Keep this name: a-Shell starts it by name.'
     )
     count = save_results(b)
     b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
-    b.notification('JPEG XL', 'Saved ', count, ' photo(s) to Photos.')
+    b.notification(TITLE, 'Saved ', count, ' photo(s) to Photos.')
     return b.actions
 
 

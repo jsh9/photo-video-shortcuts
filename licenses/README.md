@@ -11,14 +11,14 @@ ______________________________________________________________________
 
 **Table of Contents**
 
-- [1. `jxlbatch.wasm` (Compress Photos)](#1-jxlbatchwasm-compress-photos)
+- [1. `photobatch.wasm` (Compress Photos)](#1-photobatchwasm-compress-photos)
 - [2. `ffmpeg-macos` and `ffprobe-macos` (Compress Videos)](#2-ffmpeg-macos-and-ffprobe-macos-compress-videos)
 
 ______________________________________________________________________
 
 <!--TOC-->
 
-## 1. `jxlbatch.wasm` (Compress Photos)
+## 1. `photobatch.wasm` (Compress Photos)
 
 | Library                                                                         | Version              | License                                                                              |
 | ------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |

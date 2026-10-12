@@ -11,13 +11,14 @@ Generates the two Mac shortcuts as signed .shortcut files.
 - "Compress Photo Files (macOS)": image files or folders from Finder (Quick
   Actions) → .jxl files next to the originals.
 
-Both run jxlbatch (the native macOS build, dist/jxlbatch-macos, installed as
-~/.local/bin/jxlbatch) through Shortcuts' Run Shell Script action, which waits
-for the script, so there is no a-Shell, no helper shortcut and no handoff. The
-shell scripts are in scripts/mac/*.zsh and lib/mac/*.zsh (the progress window
-and the finish step), the AppleScripts in lib/mac/*.applescript (lib/ is shared
-with the other tools' shortcuts); tests/compress-photos/test_mac_script.py runs
-the shell scripts for real. See ../README-mac.md and ../DEVELOPING.md.
+Both run photobatch (the native macOS build, dist/photobatch-macos, installed
+as ~/.local/bin/photobatch) through Shortcuts' Run Shell Script action, which
+waits for the script, so there is no a-Shell, no helper shortcut and no
+handoff. The shell scripts are in scripts/mac/*.zsh and lib/mac/*.zsh (the
+progress window and the finish step), the AppleScripts in lib/mac/*.applescript
+(lib/ is shared with the other tools' shortcuts);
+tests/compress-photos/test_mac_script.py runs the shell scripts for real. See
+../README-mac.md and ../DEVELOPING.md.
 
 Usage::
 
@@ -37,15 +38,19 @@ sys.path.insert(0, str(HERE))
 import wf  # noqa: E402
 from wf import (  # noqa: E402
     EFFORT,
+    OLD_ORIGINALS_ALBUM,
     ORIGINALS_ALBUM,
+    REPEAT_INDEX,
     REPEAT_ITEM,
     SHORTCUT_INPUT,
     VERSION,
+    TITLE,
     Sample,
-    choose_quality,
+    choose_format,
     collect_in_album,
     copy_to_albums,
     keep_still_photos,
+    photo_date,
     variable,
     workflow,
 )
@@ -57,16 +62,16 @@ OUT = HERE.parent / 'build' / 'shortcuts'
 NAME_PHOTOS = 'Compress Photos (macOS)'
 NAME_FILES = 'Compress Photo Files (macOS)'
 HELP_URL = 'https://github.com/jsh9/photo-video-shortcuts/blob/main/shortcuts/compress-photos/README-mac.md'
-ENCODER_URL = 'https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/jxlbatch-macos'
+ENCODER_URL = 'https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch-macos'
 
 # Where the script looks for the encoder, in order. ~/.local/bin is the
 # documented install location (see README-mac.md); the others are common
 # places a user may put it instead.
 ENCODER_PATHS = [
-    '$HOME/.local/bin/jxlbatch',
-    '$HOME/bin/jxlbatch',
-    '/usr/local/bin/jxlbatch',
-    '/opt/homebrew/bin/jxlbatch',
+    '$HOME/.local/bin/photobatch',
+    '$HOME/bin/photobatch',
+    '/usr/local/bin/photobatch',
+    '/opt/homebrew/bin/photobatch',
 ]
 # The work folders, one per user and fixed, so that the shortcut's later steps
 # find the results without parsing the script's output.
@@ -103,13 +108,15 @@ ROUTES = {
     WORK_FILES: 'files',
 }
 # Where the file shortcut saves when it can't write next to the original.
-FALLBACK_FOLDER = '"$HOME/Pictures/JPEG XL"'
-# A log line worth showing: jxlbatch's "!" notes, errors, failed photos.
+FALLBACK_FOLDER = (
+    '"$HOME/Pictures/$FORMAT_NAME"'  # ~/Pictures/HEIC or ~/Pictures/JPEG XL
+)
+# A log line worth showing: photobatch's "!" notes, errors, failed photos.
 WARNINGS = r'(^|\n) *(!|ERROR|[0-9]+ failed)'
 # The question after the quality: how the Mac's cores are used, as a menu
 # (two short choices; the first is the usual one). Each title's value is what
 # the script reads in CORES (run.zsh): "all" converts several photos at a
-# time with all the cores (jxlbatch -j 0), "one" converts one photo at a time
+# time with all the cores (photobatch -j 0), "one" converts one photo at a time
 # on one thread (-j 1 -t 1), leaving the Mac free for other work.
 CORES_PROMPT = 'Cores to use'
 CORES_CHOICES = [
@@ -117,7 +124,7 @@ CORES_CHOICES = [
     ('One core (keeps the Mac responsive)', 'one'),
 ]
 # The third question: whether an HDR photo's HDR goes into the JPEG XL. The
-# script reads HDR (run.zsh): "drop" adds jxlbatch --sdr, so every photo is
+# script reads HDR (run.zsh): "drop" adds photobatch --sdr, so every photo is
 # saved as an ordinary 8-bit SDR JPEG XL (smaller, no banding in smooth skies,
 # and shown correctly by viewers that can't tone-map HDR); anything else keeps
 # the HDR (PQ).
@@ -137,15 +144,18 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # The placeholders that become Shortcuts variables, and the variable each one
 # is in the shortcut: the chosen quality (Match Text's Matches), the cores
 # choice (the variable Cores, see choose_cores), the lines of NAMES or PATHS
-# (Combine Text), and Skipped Echo (an echo of what the shortcut skipped;
-# empty when nothing was, which leaves ">> $LOG" alone, a command that only
-# touches the log).
+# (Combine Text), Skipped Echo (an echo of what the shortcut skipped; empty
+# when nothing was, which leaves ">> $LOG" alone, a command that only touches
+# the log), and the picker route's Dates ("index|date" lines, wf.photo_date; a
+# list in a text field is one item per line).
 SLOTS = {
-    '@QUALITY@': 'Matches',
+    '@FORMAT@': 'Format',
+    '@QUALITY@': 'Quality',
     '@CORES@': 'Cores',
     '@HDR@': 'HDR',
     '@LINES@': 'Combined Text',
     '@SKIPPED@': 'Skipped Echo',
+    '@DATES@': 'Dates',
 }
 
 
@@ -186,8 +196,9 @@ def work_check(work):
 
 def script_text(name, body, label, work):
     """
-    The script as one text with the five @SLOTS@ still in it: common.zsh, then
-    ``body`` (photos.zsh or files.zsh) with run.zsh at its @RUN@.
+    The script as one text with the @SLOTS@ still in it: common.zsh, then
+    ``body`` (photos.zsh, selection.zsh or files.zsh) with run.zsh at its
+    @RUN@.
     """
     text = (MAC / 'common.zsh').read_text() + (MAC / body).read_text()
     text = text.replace('@RUN@\n', (MAC / 'run.zsh').read_text())
@@ -217,15 +228,16 @@ def script_text(name, body, label, work):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@ and @ORIGINALS_ALBUM@ filled in.
-    Plain text: a Shortcuts variable inside a Run AppleScript's text keeps it
-    from compiling (it then produces no output and no error; seen on macOS 26),
-    so values go in through the action's input
+    lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@ and
+    @OLD_ORIGINALS_ALBUM@ filled in. Plain text: a Shortcuts variable inside a
+    Run AppleScript's text keeps it from compiling (it then produces no output
+    and no error; seen on macOS 26), so values go in through the action's input
     (``wf.Builder.run_applescript``).
     """
     text = (LIB_MAC / f'{name}.applescript').read_text()
     text = text.replace('@NAME@', NAME_PHOTOS)
     text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
+    text = text.replace('@OLD_ORIGINALS_ALBUM@', OLD_ORIGINALS_ALBUM)
     assert not re.findall('@[A-Z_]+@', text), name
     return text
 
@@ -253,19 +265,20 @@ def finish_script(work):
     )
 
 
-def script(name, body, label, work, quality, cores, hdr, lines):
-    """The Run Shell Script text parts: strings and the five variables."""
+def script(name, body, label, work, fmt, quality, cores, hdr, lines):
+    """The Run Shell Script text parts: strings and the variables."""
     refs = {
+        '@FORMAT@': fmt,
         '@QUALITY@': quality,
         '@CORES@': cores,
         '@HDR@': hdr,
         '@LINES@': lines,
         '@SKIPPED@': variable('Skipped Echo'),
+        '@DATES@': variable('Dates'),
     }
     parts = []
     for piece in re.split(
-        '(@QUALITY@|@CORES@|@HDR@|@LINES@|@SKIPPED@)',
-        script_text(name, body, label, work),
+        '(' + '|'.join(SLOTS) + ')', script_text(name, body, label, work)
     ):
         if piece in refs:
             parts.append(refs[piece])
@@ -309,7 +322,7 @@ def build_photos(sample):
     b = wf.Builder(sample)
     b.comment(
         f'{NAME_PHOTOS} {VERSION}. '
-        'Converts photos to JPEG XL with jxlbatch (Run Shell Script), keeping their '
+        'Converts photos to HEIC or JPEG XL with photobatch (Run Shell Script), keeping their '
         'metadata. Only still photos are converted: Live Photos and videos are '
         'skipped. Started while Photos is in front with photos selected (Share menu, '
         'right-click > Shortcuts, menu bar), it converts that selection: Photos '
@@ -317,7 +330,7 @@ def build_photos(sample):
         f'albums, and the converted originals go into the album "{ORIGINALS_ALBUM}" '
         'for you to review and delete. Started any other way, it shows a photo picker, saves the '
         "copies to Photos in the originals' albums, and collects the originals in that album too. "
-        'Needs jxlbatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
+        'Needs photobatch in ~/.local/bin and Allow Running Scripts in Shortcuts > Settings > '
         f'Advanced. Setup and help: {HELP_URL}'
     )
 
@@ -332,7 +345,7 @@ def build_photos(sample):
             # shown, so the user knows why the picker opens instead.
             b.if_has_value(
                 b.match_text(probe, '^ERROR'),
-                lambda: b.notification('JPEG XL', probe),
+                lambda: b.notification(TITLE, probe),
                 lambda: None,
             )
             b.set_variable('Photos', b.select_photos())
@@ -363,12 +376,12 @@ def selection_route(b):
     them, and Photos imports the results into the originals' albums and
     collects the converted originals in ORIGINALS_ALBUM.
     """
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     count = b.match_text(variable('Selection'), r'\d+')
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         count,
         ' photo(s) selected in Photos… A notification follows when they are saved.',
@@ -384,6 +397,7 @@ def selection_route(b):
             'selection.zsh',
             'IDS',
             WORK_SELECTION,
+            fmt,
             quality,
             cores,
             hdr,
@@ -411,7 +425,7 @@ def selection_route(b):
     b.if_has_value(
         b.match_text(b.item_at_index(lines, 2), '^collected=[1-9]'),
         lambda: b.notification(
-            'JPEG XL',
+            TITLE,
             'Saved ',
             imported,
             ' photo(s) to Photos. ',
@@ -419,7 +433,7 @@ def selection_route(b):
             f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
         ),
         lambda: b.notification(
-            'JPEG XL', 'Saved ', imported, ' photo(s) to Photos.'
+            TITLE, 'Saved ', imported, ' photo(s) to Photos.'
         ),
     )
 
@@ -436,27 +450,31 @@ def picker_route(b):
     # From here on only the still photos: their positions in Stills are the
     # job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         b.count(photos),
         ' photo(s)… A notification follows when they are saved.',
     )
+
     # The photos' names, one per line in job order: Shortcuts names the files
     # it passes to the script, and the JPEG XL copies keep the photos' names.
-    b.repeat_each(
-        photos,
-        lambda: b.append_variable('Names', b.text(b.get_name(REPEAT_ITEM))),
-    )
+    # And their dates in Photos (wf.photo_date), for jxl_dates.txt.
+    def per_photo():
+        b.append_variable('Names', b.text(b.get_name(REPEAT_ITEM)))
+        photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
+
+    b.repeat_each(photos, per_photo)
     result = b.run_shell_script(
         *script(
             NAME_PHOTOS,
             'photos.zsh',
             'NAMES',
             WORK_PHOTOS,
+            fmt,
             quality,
             cores,
             hdr,
@@ -532,7 +550,7 @@ def picker_route(b):
     b.if_has_value(
         variable('Collected'),
         lambda: b.notification(
-            'JPEG XL',
+            TITLE,
             'Saved ',
             variable('Saved'),
             ' photo(s) to Photos. ',
@@ -540,7 +558,7 @@ def picker_route(b):
             f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
         ),
         lambda: b.notification(
-            'JPEG XL', 'Saved ', variable('Saved'), ' photo(s) to Photos.'
+            TITLE, 'Saved ', variable('Saved'), ' photo(s) to Photos.'
         ),
     )
 
@@ -549,27 +567,27 @@ def build_files(sample):
     b = wf.Builder(sample)
     b.comment(
         f'{NAME_FILES} {VERSION}. '
-        'Converts image files (HEIF, JPEG, PNG) to JPEG XL with jxlbatch (Run Shell '
+        'Converts image files (HEIF, JPEG, PNG) to HEIC or JPEG XL with photobatch (Run Shell '
         'Script), keeping their metadata. Select files or folders in Finder ▸ '
-        'Quick Actions. Each .jxl is saved next to its original (never replacing a '
-        'file); nothing is deleted, and Photos is not involved. Needs jxlbatch in '
+        'Quick Actions. Each .heic or .jxl is saved next to its original (never replacing a '
+        'file); nothing is deleted, and Photos is not involved. Needs photobatch in '
         '~/.local/bin and Allow Running Scripts in Shortcuts ▸ Settings ▸ Advanced. '
         f'Setup and help: {HELP_URL}'
     )
 
     def no_input():
         b.notification(
-            'JPEG XL',
+            TITLE,
             'Select files or folders in Finder, then run it from Quick Actions.',
         )
         b.stop()
 
     b.if_has_value(SHORTCUT_INPUT, lambda: None, no_input)
-    quality = choose_quality(b)
+    fmt, quality = choose_format(b)
     cores = choose_cores(b)
     hdr = choose_hdr(b)
     b.notification(
-        'JPEG XL',
+        TITLE,
         'Converting ',
         b.count(SHORTCUT_INPUT),
         ' item(s)… A notification follows when the files are written.',
@@ -589,6 +607,7 @@ def build_files(sample):
             'files.zsh',
             'PATHS',
             WORK_FILES,
+            fmt,
             quality,
             cores,
             hdr,
@@ -596,15 +615,13 @@ def build_files(sample):
         ),
         input_ref=SHORTCUT_INPUT,
     )
-    # The output is the log and, last, "Wrote N JPEG XL file(s)."
+    # The output is the log and, last, "Wrote N HEIC file(s)." (or JPEG XL).
     b.if_has_value(
         b.match_text(result, WARNINGS),
         lambda: b.quick_look(result),
         lambda: None,
     )
-    b.notification(
-        'JPEG XL', b.item_from_list(b.split(result, '\n'), 'Last Item')
-    )
+    b.notification(TITLE, b.item_from_list(b.split(result, '\n'), 'Last Item'))
     return b.actions
 
 

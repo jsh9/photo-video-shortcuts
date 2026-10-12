@@ -77,5 +77,12 @@ const image_t *gainmap_base(const image_t *hdr);
 int gainmap_icc_has_tag(const blob_t *icc, const char sig[4]);
 // The CICP color primaries in an ICC profile's 'cicp' tag; 0 if it has none.
 int gainmap_icc_cicp_primaries(const blob_t *icc);
+// The CICP transfer characteristics in an ICC profile's 'cicp' tag; 0 if none.
+int gainmap_icc_cicp_transfer(const blob_t *icc);
+// For a grayscale ICC profile (color space 'GRAY') whose tone curve ('kTRC')
+// can be read: lut[v] is the sRGB-encoded value of the 8-bit gray sample v,
+// so that the picture can be written as sRGB. Returns 1, or 0 when the
+// profile isn't such a profile or its curve isn't understood.
+int gainmap_gray_icc_srgb_lut(const blob_t *icc, uint8_t lut[256]);
 
 #endif

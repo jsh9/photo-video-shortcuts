@@ -1,4 +1,4 @@
-# @NAME@ @VERSION@, @ROUTE@: converts photos with jxlbatch.
+# @NAME@ @VERSION@, @ROUTE@: converts photos with photobatch.
 # Help: @HELP_URL@
 setopt extendedglob
 @WORK_SETUP@
@@ -9,33 +9,36 @@ LOGDIR="$HOME/Library/Caches/compress-photos-macos"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/@ROUTE@.log"
 : > "$LOG"
-# unique PATH: PATH if nothing is there, else "PATH 2", "PATH 3"... (for .jxl)
+# unique PATH: PATH if nothing is there, else "PATH 2", "PATH 3"... (before
+# the extension: "Name 2.heic")
 unique() {
-  local dest=$1 base=${1%.jxl} k=2
-  while [ -e "$dest" ]; do dest="$base $k.jxl"; k=$((k + 1)); done
+  local dest=$1 base=${1%.*} ext=${1##*.} k=2
+  while [ -e "$dest" ]; do dest="$base $k.$ext"; k=$((k + 1)); done
   print -r -- "$dest"
 }
 @WORK_CHECK@
 VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
+FORMAT='@FORMAT@'  # heic: HEIC (x265, QUALITY is the RF); anything else: JPEG XL (QUALITY is the quality)
+case $FORMAT in heic) FORMAT_NAME=HEIC;; *) FORMAT_NAME='JPEG XL';; esac
 QUALITY='@QUALITY@'
 CORES='@CORES@'  # all: several photos at a time, every core; one: one photo, one thread
-HDR='@HDR@'  # keep: HDR photos become HDR (PQ) JPEG XL; drop: every photo becomes SDR
+HDR='@HDR@'  # keep: HDR photos keep their HDR; drop: every photo becomes SDR
 # @LABEL@: one per input file, in the same order (see the shortcut)
 @LABEL@=$(cat <<'JXL_LINES'
 @LINES@
 JXL_LINES
 )
 @SKIPPED@ >> "$LOG"
-jxlbatch=''
+photobatch=''
 for c in "${JXLBATCH:-}" @CANDIDATES@; do  # JXLBATCH: an override (used by the tests)
-  if [ -n "$c" ] && [ -x "$c" ]; then jxlbatch=$c; break; fi
+  if [ -n "$c" ] && [ -x "$c" ]; then photobatch=$c; break; fi
 done
-if [ -z "$jxlbatch" ]; then
-  echo "ERROR: jxlbatch is not installed (looked in @LOOKED@)." >> "$LOG"
+if [ -z "$photobatch" ]; then
+  echo "ERROR: photobatch is not installed (looked in @LOOKED@)." >> "$LOG"
   echo "Install it: see @HELP_URL@" >> "$LOG"
   exit 0
 fi
-if ! "$jxlbatch" --version 2>/dev/null | grep -q "^jxlbatch $VERSION "; then
-  echo "! $jxlbatch is not jxlbatch $VERSION, the version this shortcut was made for; see Updating in @HELP_URL@" >> "$LOG"
+if ! "$photobatch" --version 2>/dev/null | grep -q "^photobatch $VERSION "; then
+  echo "! $photobatch is not photobatch $VERSION, the version this shortcut was made for; see Updating in @HELP_URL@" >> "$LOG"
 fi

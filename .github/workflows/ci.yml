@@ -34,7 +34,7 @@ jobs:
       # already; listed so the build doesn't depend on that.
       - name: Install build and test tools
         run: brew install --quiet cmake ninja meson pkgconf binaryen wasmtime exiftool
-          jpeg-xl libheif ffmpeg
+          jpeg-xl libheif x265 ffmpeg
       # wasi-sdk and the library sources (about 800 MB), downloaded by the
       # build scripts; refreshed when a build script changes.
       - name: Cache downloaded toolchains and sources

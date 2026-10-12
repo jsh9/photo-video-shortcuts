@@ -1,11 +1,12 @@
 -- @NAME@: imports the files the shell made, each into the albums its
--- original is in, and collects every imported file's original in the album
--- "@ORIGINALS_ALBUM@", for the user to review and delete (a script cannot
--- delete them). The log says which copies lack their original's HDR.
+-- original is in, with its original's date, and collects every imported
+-- file's original in the album "@ORIGINALS_ALBUM@", for the user to review
+-- and delete (a script cannot delete them). The log says which copies lack
+-- their original's HDR.
 --
 -- Input: one line per result, "path|original id|delete or keep|name" (the id
 -- may be empty when the exported file could not be matched to an item; the
--- flag is jxlbatch's and is not acted on here).
+-- flag is photobatch's and is not acted on here).
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -103,6 +104,25 @@ on run {input, parameters}
 		end repeat
 		set tImport to (current date) - t0
 	end if
+	-- Dates: each copy has its original's date in Photos, which photobatch
+	-- wrote into the file (EXIF) for Photos to read on import. Should Photos
+	-- have read another, the copy gets the original's (two calls per copy).
+	if (count of pairs) > 0 then
+		set redated to 0
+		tell application "Photos"
+			repeat with pair in pairs
+				try
+					set want to date of media item id ((item 1 of pair) as text)
+					set copyItem to item 2 of pair
+					if (date of copyItem) is not want then
+						set date of copyItem to want
+						set redated to redated + 1
+					end if
+				end try
+			end repeat
+		end tell
+		if redated > 0 then set problems to problems & "Photos dated " & redated & " copy(ies) differently from the original; they now have the original's date." & linefeed
+	end if
 	-- Albums: each new item joins every album its original is in. The albums'
 	-- contents are read one folder at a time (addToAlbums), one call for all of
 	-- a folder's albums, where a call per album would take 12 s for 689
@@ -161,10 +181,10 @@ on addToAlbums(albumList, albumIds, folderList, pairs)
 		repeat with pair in pairs
 			if (item i of albumIds) contains (item 1 of pair) then set end of members to item 2 of pair
 		end repeat
-		-- The review album "@ORIGINALS_ALBUM@" holds originals already
-		-- converted once; a copy must not join it, or it could be deleted
-		-- with them.
-		if (count of members) > 0 and (name of (item i of albumList)) is not "@ORIGINALS_ALBUM@" then
+		-- The review albums "@ORIGINALS_ALBUM@" and "@OLD_ORIGINALS_ALBUM@"
+		-- (an earlier version's) hold originals already converted once; a
+		-- copy must not join them, or it could be deleted with them.
+		if (count of members) > 0 and (name of (item i of albumList)) is not in {"@ORIGINALS_ALBUM@", "@OLD_ORIGINALS_ALBUM@"} then
 			tell application "Photos"
 				try
 					add members to (item i of albumList)

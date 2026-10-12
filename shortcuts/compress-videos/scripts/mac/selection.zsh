@@ -1,5 +1,6 @@
 # The items selected in Photos: Photos exported their original files into
-# $WORK/in (see export.applescript), and IDS has one "id|filename" line per
+# $WORK/in (see export.applescript), and IDS has one "id|date|filename" line
+# (the date unused here; older exporters gave "id|filename") per
 # selected item (or "ERROR: ..."). Only videos are converted. Photos are
 # skipped, and so are Live Photos (a photo whose .mov of the same name is not
 # an item of its own), videos whose picture this ffmpeg can't decode, and the
@@ -19,7 +20,7 @@ esac
 typeset -A ids seen
 for line in "${(@f)IDS}"; do
   case $line in *'|'*) ;; *) continue;; esac
-  name=${line#*|}
+  name=${line##*|}
   if (( ${+seen[$name]} )); then
     if [ -n "${ids[$name]}" ]; then
       echo "! two or more selected items are named $name: their copies are saved, but not added to albums, and the originals are not collected" >> "$LOG"
