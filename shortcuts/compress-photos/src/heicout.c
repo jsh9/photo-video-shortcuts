@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gainmap.h"
 #include "heifbox.h"
 #include "hevcenc.h"
 #ifdef JXLBATCH_THREADS
@@ -201,13 +202,21 @@ static int keep_metadata(const hb_file_t *f, idset_t *keep, uint32_t id) {
   return 0;
 }
 
-// The kept item of `type` ('Exif' or 'mime') describing the picture, 0 if none.
+// The kept item of `type` describing the picture, 0 if none: its Exif
+// ('Exif'), or its XMP (the 'mime' item of type application/rdf+xml; a file
+// can have other 'mime' items).
 static uint32_t metadata_item(const hb_file_t *f, const idset_t *keep, uint32_t type) {
   for (size_t i = 0; i < f->num_items; i++) {
     const uint32_t id = f->items[i].id;
-    if (f->items[i].type == type && idset_has(keep, id) && hb_has_ref(f, id, FOURCC('c', 'd', 's', 'c'), f->primary)) {
-      return id;
+    if (f->items[i].type != type || !idset_has(keep, id) || !hb_has_ref(f, id, FOURCC('c', 'd', 's', 'c'), f->primary)) {
+      continue;
     }
+    if (type == FOURCC('m', 'i', 'm', 'e')) {
+      char content_type[64];
+      hb_item_content_type(f, id, content_type, sizeof content_type);
+      if (strcmp(content_type, "application/rdf+xml") != 0) continue;
+    }
+    return id;
   }
   return 0;
 }
@@ -561,11 +570,27 @@ int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *ex
   size_t hvcc_len = 0;
   if (!y || !u || !v || !cb || !cr) goto oom;
   const int ch_in = img->channels;
+  // A gray picture with a gray ICC profile: its samples go through the
+  // profile's curve to sRGB, and the picture is written as sRGB (the profile
+  // can't describe the RGB written). A profile whose curve can't be read is
+  // refused rather than attached.
+  uint8_t lut[256];
+  const uint8_t *gray = NULL;
+  int srgb_gray = 0;
+  if (ch_in < 3 && color->icc.size) {
+    if (gainmap_gray_icc_srgb_lut(&color->icc, lut)) {
+      gray = lut;
+      srgb_gray = 1;
+    } else if (color->icc.size >= 20 && memcmp(color->icc.data + 16, "GRAY", 4) == 0) {
+      snprintf(err, err_len, "a grayscale image whose color profile can't be read can't be saved as HEIC; choose JPEG XL for it");
+      goto done;
+    }
+  }
   for (uint32_t yy = 0; yy < h2; yy++) {
     const uint8_t *row = img->data + (size_t)(yy < h ? yy : h - 1) * img->stride;
     for (uint32_t xx = 0; xx < w2; xx++) {
       const uint8_t *px = row + (size_t)(xx < w ? xx : w - 1) * ch_in;
-      const double r = px[0], g = ch_in >= 3 ? px[1] : px[0], b = ch_in >= 3 ? px[2] : px[0];
+      const double r = gray ? gray[px[0]] : px[0], g = ch_in >= 3 ? px[1] : r, b = ch_in >= 3 ? px[2] : r;
       const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
       y[(size_t)yy * w2 + xx] = clamp8(luma);
       const size_t c = (size_t)(yy / 2) * cw + xx / 2;
@@ -596,7 +621,10 @@ int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *ex
   job.rf = opt->rf;
   job.vui.matrix = 6;
   job.vui.full_range = 1;
-  if (color->cicp_present) {
+  if (srgb_gray) {
+    job.vui.primaries = 1;
+    job.vui.transfer = 13;
+  } else if (color->cicp_present) {
     job.vui.primaries = color->cicp[0];
     job.vui.transfer = color->cicp[1];
   } else if (color->icc.size) {
@@ -622,8 +650,8 @@ int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *ex
   n.tiles = job.pic;
   n.hvcc = hvcc;
   n.hvcc_len = hvcc_len;
-  n.icc = color->icc.size ? color->icc.data : NULL;
-  n.icc_len = color->icc.size;
+  n.icc = color->icc.size && !srgb_gray ? color->icc.data : NULL;
+  n.icc_len = srgb_gray ? 0 : color->icc.size;
   n.nclx = job.vui;
   n.exif = exif;
   n.exif_len = exif_len;

@@ -87,6 +87,9 @@ int hb_property(const hb_file_t *f, uint32_t index, uint32_t *type, span_t *payl
 uint32_t hb_item_property(const hb_file_t *f, uint32_t id, uint32_t type);
 // A copy of the item's data (its extents concatenated), or NULL.
 uint8_t *hb_item_data(const hb_file_t *f, uint32_t id, size_t *len);
+// The content type of a 'mime' item, from its 'infe' ("" when it has none),
+// in buf. Returns 0 if there is no such item.
+int hb_item_content_type(const hb_file_t *f, uint32_t id, char *buf, size_t len);
 
 // New data for an item that is kept.
 typedef struct {

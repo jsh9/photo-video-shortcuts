@@ -900,9 +900,20 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
       color.cicp_present = mo.png_cicp_present;
       memcpy(color.cicp, mo.png_cicp, sizeof color.cicp);
     }
-    if (img.bytes_per_sample != 1 || img.bits > 8) {
-      snprintf(err, sizeof err, "unsupported for HEIC output: %d-bit pixels (8-bit only)", img.bits);
-      goto done;
+    if (img.bytes_per_sample == 2) {
+      // 10 bits and more (a HEIF with such tiles, a 16-bit PNG): 8 bits for
+      // the SDR HEIC. An HDR transfer curve (PQ, HLG) would band at 8 bits,
+      // and such a picture is HDR without a gain map: refused.
+      const int transfer = color.icc.size ? gainmap_icc_cicp_transfer(&color.icc) : color.cicp_present ? color.cicp[1] : 0;
+      if (transfer == 16 || transfer == 18) {
+        snprintf(err, sizeof err, "an HDR photo without a gain map (%s) can't be saved as HEIC; choose JPEG XL for it",
+                 transfer == 16 ? "PQ" : "HLG");
+        goto done;
+      }
+      if (image_to_8bit(&img) != 0) {
+        snprintf(err, sizeof err, "out of memory");
+        goto done;
+      }
     }
     image_drop_opaque_alpha(&img);
     if (img.channels == 2 || img.channels == 4) {

@@ -707,9 +707,13 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   written as a new file (`hb_write_new`: `ftyp`, `meta` with a `grid` item in
   `idat`, `ispe`, `pixi`, `colr` with the source's ICC profile or an nclx, one
   shared `hvcC`, an Exif item and an XMP `mime` item, the orientation reset in
-  both as the pixels are upright). Always SDR: a gain map isn't carried, and a
-  picture with transparency is refused (no alpha image is written; the JPEG XL
-  route keeps it).
+  both as the pixels are upright). 10-bit and 16-bit pixels are rounded to 8
+  bits first; a gray picture with a gray ICC profile goes through the profile's
+  curve (`gainmap_gray_icc_srgb_lut`) and is written as sRGB, since the profile
+  can't describe the RGB written. Always SDR: a gain map isn't carried, and
+  refused are a picture with transparency (no alpha image is written), an HDR
+  picture without a gain map (PQ or HLG, which would band at 8 bits) and a gray
+  profile whose curve can't be read; the JPEG XL route takes them all.
 - Threads: `-t` threads encode a photo's tiles at the same time (one x265
   encoder each); the WebAssembly build runs them one after the other.
 - A real iPhone file's bytes are the test oracle:

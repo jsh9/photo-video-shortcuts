@@ -110,8 +110,12 @@
   let dragging = null, wipeDrag = false, cursor = null, raf = 0;
   const sample = document.createElement('canvas'); sample.width = sample.height = 1;
   const sctx = sample.getContext('2d', { willReadFrequently: true, colorSpace: 'display-p3' }) || sample.getContext('2d', { willReadFrequently: true });
+  // The difference buffers in the view's color space: drawn into sRGB
+  // canvases, Display P3 colors would be clipped before the subtraction.
   const offA = document.createElement('canvas'), offB = document.createElement('canvas');
-  const octxA = offA.getContext('2d', { willReadFrequently: true }), octxB = offB.getContext('2d', { willReadFrequently: true });
+  const p3read = { willReadFrequently: true, colorSpace: 'display-p3' };
+  const octxA = offA.getContext('2d', p3read) || offA.getContext('2d', { willReadFrequently: true });
+  const octxB = offB.getContext('2d', p3read) || offB.getContext('2d', { willReadFrequently: true });
 
   function fmtSize(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + ' MB' : Math.round(n / 1e3) + ' KB'; }
 

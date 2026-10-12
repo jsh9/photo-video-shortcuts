@@ -362,80 +362,143 @@ def test_date_from_photos_lands_in_the_xmp_too(encoder, tmp_path):
     assert ph.xmp_tags(out)['CreateDate'] == '2024:05:06 07:08:09-05:00'
 
 
-def with_exif_in_idat(path, folder):
-    """
-    A copy of the HEIC whose Exif item's data is in 'idat' (construction method
-    1, where some writers keep small items) instead of 'mdat': the 'iloc' is
-    rewritten, the data appended to an 'idat' (added if there is none), and the
-    'mdat' offsets moved by what 'meta' grew.
-    """
-    buf = path.read_bytes()
+def boxes(buf, start, end):
+    """The boxes in buf[start:end], as (type, start, end) with 32-bit sizes."""
+    p = start
+    while p + 8 <= end:
+        size, typ = struct.unpack('>I4s', buf[p : p + 8])
+        yield typ, p, p + size
+        p += size
 
-    def boxes(start, end):
-        p = start
-        while p + 8 <= end:
-            size, typ = struct.unpack('>I4s', buf[p : p + 8])
-            yield typ, p, p + size
-            p += size
 
-    (meta,) = [(a, b) for t, a, b in boxes(0, len(buf)) if t == b'meta']
-    children = list(boxes(meta[0] + 12, meta[1]))  # after version and flags
-    before = items(path)
-    (exif_id,) = [i for i, (t, _) in before.items() if t == 'Exif']
-    idat = next(((a, b) for t, a, b in children if t == b'idat'), None)
-    payload = buf[idat[0] + 8 : idat[1]] if idat else b''
-    # the 'iloc' entries: version 1, 4-byte offsets and lengths, no base
-    # offsets or extent indices (the fixtures')
-    (iloc,) = [(a, b) for t, a, b in children if t == b'iloc']
-    body = buf[iloc[0] + 8 : iloc[1]]
-    assert body[0] == 1 and body[4] == 0x44 and body[5] == 0
-    count = struct.unpack('>H', body[6:8])[0]
-    entries, q = [], 8
-    for _ in range(count):
-        iid, method, dref, n = struct.unpack('>HHHH', body[q : q + 8])
-        q += 8
-        exts = [
-            struct.unpack('>II', body[q + 8 * k : q + 8 * k + 8])
-            for k in range(n)
+class Meta:
+    """
+    A HEIC's 'meta' box taken apart for editing: its child boxes' payloads in
+    order (bytearrays), the 'iloc' entries ([id, construction method, data
+    reference, [(offset, length)]]) and the 'idat' payload. The fixtures'
+    'iloc' is version 1 with 4-byte offsets and lengths, no base offsets or
+    extent indices. write() puts the file together again, with the 'mdat'
+    offsets moved by what 'meta' grew.
+    """
+
+    def __init__(self, path):
+        self.buf = buf = path.read_bytes()
+        (self.meta,) = [
+            (a, b) for t, a, b in boxes(buf, 0, len(buf)) if t == b'meta'
         ]
-        q += 8 * n
-        entries.append([iid, method, dref, exts])
+        # after the box's version and flags
+        self.children = [
+            (t, bytearray(buf[a + 8 : b]))
+            for t, a, b in boxes(buf, self.meta[0] + 12, self.meta[1])
+        ]
+        iloc = self.child(b'iloc')
+        assert iloc[0] == 1 and iloc[4] == 0x44 and iloc[5] == 0
+        self.iloc_header = bytes(iloc[:6])
+        count = struct.unpack('>H', iloc[6:8])[0]
+        self.entries, q = [], 8
+        for _ in range(count):
+            iid, method, dref, n = struct.unpack('>HHHH', iloc[q : q + 8])
+            q += 8
+            exts = [
+                struct.unpack('>II', iloc[q + 8 * k : q + 8 * k + 8])
+                for k in range(n)
+            ]
+            q += 8 * n
+            self.entries.append([iid, method, dref, exts])
 
-    for entry in entries:
-        if entry[0] == exif_id:
-            entry[1] = 1
-            entry[3] = [(len(payload), len(before[exif_id][1]))]
+        idat = self.child(b'idat')
+        self.had_idat = idat is not None
+        self.idat = bytearray(idat) if idat is not None else bytearray()
 
-    payload += before[exif_id][1]
+    def child(self, typ):
+        return next((p for t, p in self.children if t == typ), None)
 
-    def build(shift):
+    def build(self, shift):
         out = bytearray()
-        for t, a, b in children:
+        for t, payload in self.children:
             if t == b'iloc':
-                ent = bytearray(body[:6]) + struct.pack('>H', count)
-                for iid, method, dref, exts in entries:
+                ent = bytearray(self.iloc_header)
+                ent += struct.pack('>H', len(self.entries))
+                for iid, method, dref, exts in self.entries:
                     ent += struct.pack('>HHHH', iid, method, dref, len(exts))
                     for off, ln in exts:
                         moved = off + (shift if method == 0 else 0)
                         ent += struct.pack('>II', moved, ln)
 
-                out += struct.pack('>I4s', 8 + len(ent), b'iloc') + ent
+                payload = ent
             elif t == b'idat':
-                out += struct.pack('>I4s', 8 + len(payload), b'idat') + payload
-            else:
-                out += buf[a:b]
+                payload = self.idat
 
-        if not idat:
-            out += struct.pack('>I4s', 8 + len(payload), b'idat') + payload
+            out += struct.pack('>I4s', 8 + len(payload), t) + payload
+
+        if not self.had_idat:
+            out += struct.pack('>I4s', 8 + len(self.idat), b'idat') + self.idat
 
         header = struct.pack('>I4s', 12 + len(out), b'meta')
-        return header + buf[meta[0] + 8 : meta[0] + 12] + out
+        return header + self.buf[self.meta[0] + 8 : self.meta[0] + 12] + out
 
-    shift = len(build(0)) - (meta[1] - meta[0])
-    folder.mkdir(parents=True, exist_ok=True)
-    copy = folder / path.name
-    copy.write_bytes(buf[: meta[0]] + build(shift) + buf[meta[1] :])
+    def write(self, copy):
+        shift = len(self.build(0)) - (self.meta[1] - self.meta[0])
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes(
+            self.buf[: self.meta[0]]
+            + self.build(shift)
+            + self.buf[self.meta[1] :]
+        )
+        return copy
+
+
+def with_exif_in_idat(path, folder):
+    """
+    A copy of the HEIC whose Exif item's data is in 'idat' (construction method
+    1, where some writers keep small items) instead of 'mdat'.
+    """
+    before = items(path)
+    (exif_id,) = [i for i, (t, _) in before.items() if t == 'Exif']
+    m = Meta(path)
+    for entry in m.entries:
+        if entry[0] == exif_id:
+            entry[1] = 1
+            entry[3] = [(len(m.idat), len(before[exif_id][1]))]
+
+    m.idat += before[exif_id][1]
+    copy = m.write(folder / path.name)
     assert items(copy) == before
+    return copy
+
+
+def with_mime_item(path, folder, content_type, data, before_id):
+    """
+    A copy of the HEIC with another 'mime' item describing the picture (item
+    1): hidden, of ``content_type``, with ``data`` in 'idat', listed in 'iinf'
+    before the item ``before_id``.
+    """
+    m = Meta(path)
+    new_id = max(items(path)) + 1
+    infe = b'\x02\x00\x00\x01' + struct.pack('>HH', new_id, 0)  # hidden
+    infe += b'mime\x00' + content_type.encode() + b'\x00'
+    infe = struct.pack('>I4s', 8 + len(infe), b'infe') + infe
+    iinf = m.child(b'iinf')
+    assert iinf[0] == 0  # a 16-bit count
+    count = struct.unpack('>H', iinf[4:6])[0]
+    at, q = len(iinf), 6
+    for _ in range(count):
+        size = struct.unpack('>I', iinf[q : q + 4])[0]
+        if struct.unpack('>H', iinf[q + 12 : q + 14])[0] == before_id:
+            at = q
+            break
+
+        q += size
+
+    iinf[at:at] = infe
+    iinf[4:6] = struct.pack('>H', count + 1)
+    m.child(b'iref').extend(
+        struct.pack('>I4s', 14, b'cdsc') + struct.pack('>HHH', new_id, 1, 1)
+    )
+    m.entries.append([new_id, 1, 0, [(len(m.idat), len(data))]])
+    m.idat += data
+    copy = m.write(folder / path.name)
+    assert items(copy)[new_id] == ('mime', data)
     return copy
 
 
@@ -540,6 +603,99 @@ def test_hvcc_profile_tier_level_is_the_parameter_sets(encoder, tmp_path):
     out, _, _ = convert(encoder, tmp_path / 'png', png)
     (rec,) = hvcc_records(out)
     check_hvcc(rec)
+
+
+def test_xmp_is_told_from_other_mime_items(encoder, tmp_path):
+    # The XMP is the 'mime' item of type application/rdf+xml. Another 'mime'
+    # item describing the picture, listed before it, stays as it is.
+    photo = with_xmp_date(OLDER, tmp_path / 'a')
+    (xmp_id,) = [i for i, (t, _) in items(photo).items() if t == 'mime']
+    photo = with_mime_item(
+        photo, tmp_path / 'b', 'text/plain', b'a note', xmp_id
+    )
+    note_id = max(items(photo))
+    ph.stage(tmp_path, [photo])
+    (tmp_path / 'jxl_dates.txt').write_text('1|2024-05-06T07:08:09-05:00')
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    out = ph.read_done(tmp_path)[1][0]
+    assert items(out)[note_id] == ('mime', b'a note')
+    assert ph.xmp_tags(out)['CreateDate'] == '2024:05:06 07:08:09-05:00'
+
+
+def gray_icc(gamma):
+    """
+    A minimal grayscale ICC profile (version 2) whose tone curve is the plain
+    gamma ``gamma`` (1: linear light).
+    """
+
+    def s15(v):
+        return struct.pack('>i', round(v * 65536))
+
+    d50 = s15(0.9642) + s15(1.0) + s15(0.8249)
+    tags = {
+        b'wtpt': b'XYZ \x00\x00\x00\x00' + d50,
+        b'kTRC': b'curv\x00\x00\x00\x00'
+        + struct.pack('>IH', 1, round(gamma * 256)),
+        b'cprt': b'text\x00\x00\x00\x00none\x00',
+    }
+    table, body = struct.pack('>I', len(tags)), b''
+    first = 128 + 4 + 12 * len(tags)
+    for sig, data in tags.items():
+        table += sig + struct.pack('>II', first + len(body), len(data))
+        body += data + b'\x00' * (-len(data) % 4)
+
+    header = struct.pack('>I', 128 + len(table) + len(body))
+    header += (
+        b'\x00' * 4 + b'\x02\x10\x00\x00' + b'mntrGRAYXYZ ' + b'\x00' * 12
+    )
+    header += b'acsp' + b'\x00' * 28 + d50 + b'\x00' * 48
+    assert len(header) == 128
+    return header + table + body
+
+
+def test_gray_profile_is_applied_and_the_picture_written_as_srgb(
+        encoder, tmp_path, apple_sdr
+):
+    # A gray PNG with a linear-light profile: its mid gray is half of white,
+    # which the HEIC (sRGB, no profile: one for gray can't describe the RGB
+    # written) shows as such.
+    png = tmp_path / 'gray.png'
+    Image.new('L', (300, 200), 128).save(png, 'PNG', icc_profile=gray_icc(1))
+    out, _, log = convert(encoder, tmp_path, png)
+    assert 'PNG 300x200, SDR HEIC' in log
+    buf = out.read_bytes()
+    (meta,) = [(a, b) for t, a, b in boxes(buf, 0, len(buf)) if t == b'meta']
+    colr = buf.find(b'colr', meta[0], meta[1])
+    assert (
+        buf[colr + 4 : colr + 8] == b'nclx'
+        and b'prof' not in buf[meta[0] : meta[1]]
+    )
+    rendered = apple_sdr(out)
+    assert abs(float(rendered.mean()) - 128 / 255) < 0.02
+
+
+def test_ten_bit_pixels_are_written_as_an_eight_bit_sdr_heic(
+        encoder, tmp_path, imageio
+):
+    # A HEIF whose tiles are 10-bit can't be transcoded: decoded, rounded to 8
+    # bits and written anew (its HDR not kept, so the original is kept). A
+    # 16-bit PNG likewise.
+    ten = HDR / 'ten_bit.heic'
+    png = tmp_path / 'deep.png'
+    Image.new('I;16', (300, 200), 40000).save(png, 'PNG')
+    ph.stage(tmp_path, [ten, png])
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    log = ' '.join(result.stdout.split())
+    assert 'written anew, as SDR' in log
+    assert 'HDR not kept; saved as SDR' in log
+    assert 'PNG 300x200, SDR HEIC' in log
+    done = ph.read_done(tmp_path)
+    assert set(done) == {1, 2}
+    assert 1 in ph.kept_originals(tmp_path)
+    for index in done:
+        assert str(done[index][0]) in imageio(done[index][0])
 
 
 def test_rf_needs_heic(encoder, tmp_path):

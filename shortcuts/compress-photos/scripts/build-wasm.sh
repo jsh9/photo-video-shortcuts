@@ -166,19 +166,22 @@ build_variant() {
   cc="$WASI_SDK/bin/clang --target=wasm32-wasip1 --sysroot=$WASI_SDK/share/wasi-sysroot"
   objdir="$bdir/photobatch-obj"
   mkdir -p "$objdir"
+  objs=''  # this build's objects only: an earlier version's may be in the folder
   for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_HEIC -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
+    objs="$objs $objdir/$src.o"
   done
   for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
+    obj="$objdir/$(basename "$src" .cpp).o"
     "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \
-      -std=c++11 -O3 $flags -fno-exceptions -Wall -Wextra \
-      -c "$src" -o "$objdir/$(basename "$src" .cpp).o"
+      -std=c++11 -O3 $flags -fno-exceptions -Wall -Wextra -c "$src" -o "$obj"
+    objs="$objs $obj"
   done
   # 8 MiB stack (the 64 KiB default can silently overflow into the heap) and
   # stack-first layout, so an overflow traps instead of corrupting memory.
   "$WASI_SDK/bin/clang++" --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" \
-    -O3 $flags -fno-exceptions "$objdir"/*.o \
+    -O3 $flags -fno-exceptions $objs \
     "$prefix/lib/libheif.a" "$prefix/lib/libde265.a" "$prefix/lib/libx265.a" \
     "$bdir/lib/libjxl.a" "$bdir/lib/libjxl_cms.a" "$bdir/third_party/highway/libhwy.a" \
     "$bdir/third_party/brotli/libbrotlienc.a" "$bdir/third_party/brotli/libbrotlidec.a" \

@@ -153,21 +153,24 @@ ninja -C "$bdir/jxl" jxl jxl_cms jxl_threads >"$bdir/jxl.ninja.log" 2>&1 || { ta
 objdir="$bdir/photobatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
+objs=''  # this build's objects only: an earlier version's may be in the folder
 for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2086
   cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
     -I"$LIBJXL/lib/include" -I"$bdir/jxl/lib/include" -I"$prefix/include" \
     -c "src/$src.c" -o "$objdir/$src.o"
+  objs="$objs $objdir/$src.o"
 done
 for src in src/xmp.cpp third_party/tinyxml2/tinyxml2.cpp; do
+  obj="$objdir/$(basename "$src" .cpp).o"
   # shellcheck disable=SC2086
-  c++ $flags -std=c++11 -Wall -Wextra -fno-exceptions \
-    -c "$src" -o "$objdir/$(basename "$src" .cpp).o"
+  c++ $flags -std=c++11 -Wall -Wextra -fno-exceptions -c "$src" -o "$obj"
+  objs="$objs $obj"
 done
 out="$ROOT/dist/photobatch-macos"
 # shellcheck disable=SC2086
-c++ $flags "$objdir"/*.o \
+c++ $flags $objs \
   "$bdir/jxl/lib/libjxl.a" "$bdir/jxl/lib/libjxl_cms.a" "$bdir/jxl/lib/libjxl_threads.a" \
   "$bdir/jxl/third_party/highway/libhwy.a" \
   "$bdir/jxl/third_party/brotli/libbrotlienc.a" "$bdir/jxl/third_party/brotli/libbrotlidec.a" \

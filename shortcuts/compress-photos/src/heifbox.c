@@ -383,6 +383,26 @@ uint32_t hb_item_property(const hb_file_t *f, uint32_t id, uint32_t type) {
   return 0;
 }
 
+int hb_item_content_type(const hb_file_t *f, uint32_t id, char *buf, size_t len) {
+  const hb_item_t *item = hb_item(f, id);
+  if (len) buf[0] = 0;
+  if (!item || item->infe.n < 8) return 0;
+  const uint8_t *p = item->infe.p;
+  const size_t n = item->infe.n;
+  size_t q = rd32be(p) == 1 ? 16 : 8;  // the box header
+  if (q + 4 > n) return 1;
+  q += 4 + (p[q] == 2 ? 2 : 4) + 2 + 4;  // version and flags, id, protection, type
+  while (q < n && p[q]) q++;             // the name
+  if (q < n) q++;
+  size_t k = 0;
+  while (q + k < n && p[q + k] && k + 1 < len) k++;
+  if (len) {
+    memcpy(buf, p + q, k);
+    buf[k] = 0;
+  }
+  return 1;
+}
+
 // The item's extents, each as a span into the file (or 'idat'); returns the
 // total length, or (size_t)-1 if one lies outside.
 static size_t item_extents(const hb_file_t *f, const hb_item_t *item, span_t *spans, size_t max_spans) {
