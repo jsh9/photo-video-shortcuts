@@ -363,12 +363,33 @@ def test_date_from_photos_lands_in_the_xmp_too(encoder, tmp_path):
 
 
 def boxes(buf, start, end):
-    """The boxes in buf[start:end], as (type, start, end) with 32-bit sizes."""
+    """
+    The boxes in buf[start:end], as (type, start, end). A size of 1 means a
+    64-bit size follows, 0 that the box runs to ``end``; anything else below 8
+    is damage, where the walk stops.
+    """
     p = start
     while p + 8 <= end:
         size, typ = struct.unpack('>I4s', buf[p : p + 8])
+        if size == 1:
+            size = struct.unpack('>Q', buf[p + 8 : p + 16])[0]
+        elif size == 0:
+            size = end - p
+
+        if size < 8:
+            return
+
         yield typ, p, p + size
         p += size
+
+
+def payload(buf, start):
+    """
+    Where the box at ``start`` has its payload: after an 8- or 16-byte header.
+    """
+    return start + (
+        16 if struct.unpack('>I', buf[start : start + 4])[0] == 1 else 8
+    )
 
 
 class Meta:
@@ -388,7 +409,7 @@ class Meta:
         ]
         # after the box's version and flags
         self.children = [
-            (t, bytearray(buf[a + 8 : b]))
+            (t, bytearray(buf[payload(buf, a) : b]))
             for t, a, b in boxes(buf, self.meta[0] + 12, self.meta[1])
         ]
         iloc = self.child(b'iloc')
@@ -513,7 +534,7 @@ def with_icc_profile(path, folder, icc):
     (ipco,) = [(a, b) for t, a, b in boxes(iprp, 0, len(iprp)) if t == b'ipco']
     box = struct.pack('>I4s4s', 12 + len(icc), b'colr', b'prof') + icc
     inner, replaced = bytearray(), 0
-    for t, a, b in boxes(iprp, ipco[0] + 8, ipco[1]):
+    for t, a, b in boxes(iprp, payload(iprp, ipco[0]), ipco[1]):
         inner += box if t == b'colr' else iprp[a:b]
         replaced += t == b'colr'
 
@@ -576,14 +597,7 @@ def unescaped(nal):
 def hvcc_records(path):
     """Every 'hvcC' property's payload in the file's 'meta' box."""
     buf = path.read_bytes()
-    p, meta = 0, None
-    while p + 8 <= len(buf) and meta is None:
-        size, typ = struct.unpack('>I4s', buf[p : p + 8])
-        if typ == b'meta':
-            meta = (p, p + size)
-
-        p += size
-
+    (meta,) = [(a, b) for t, a, b in boxes(buf, 0, len(buf)) if t == b'meta']
     found, p = [], buf.find(b'hvcC', meta[0], meta[1])
     while p > 0:
         size = int.from_bytes(buf[p - 4 : p], 'big')

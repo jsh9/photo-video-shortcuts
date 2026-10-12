@@ -239,7 +239,10 @@ class Encoder:
         cmd = [part.replace('{dir}', str(folder)) for part in self.command] + [
             str(a) for a in args
         ]
-        return run(cmd, cwd=folder)
+        # a batch that hangs fails its test (with its output so far) instead
+        # of holding the whole run; the longest, 48 MP under wasmtime, takes
+        # about a minute
+        return run(cmd, cwd=folder, timeout=600)
 
 
 def stage(folder, photos):
