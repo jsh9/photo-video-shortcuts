@@ -1003,8 +1003,10 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
         *exif = out;
         *exif_len = out_len;
       }
-      // The XMP's location goes too, whatever the EXIF's was.
-      const int removed = *xmp ? xmp_remove_location(xmp, xmp_len) : 0;
+      // The XMP's location goes too: when Photos has none, whatever the
+      // EXIF's was; for another location, only once it is written (a file
+      // whose EXIF can't take it keeps its location, in the XMP too).
+      const int removed = *xmp && (none || rc == 1) ? xmp_remove_location(xmp, xmp_len) : 0;
       if (removed < 0) return -1;
       if (rc == 1 || removed) changed = 1;
       if (rc == -2) say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");

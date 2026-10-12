@@ -756,6 +756,32 @@ QUALIFIED_CAPTION = (
     '<dc:description rdf:parseType="Resource"><rdf:value>C</rdf:value>'
     '<c:source>camera</c:source></dc:description>'
 )
+# the same, with rdf:value and the qualifiers as attributes
+KEYWORD_ATTRIBUTES = (
+    '<dc:subject><rdf:Bag>'
+    '<rdf:li rdf:value="kw" c:source="camera" c:confidence="0.9"/>'
+    '</rdf:Bag></dc:subject>'
+)
+KEYWORD_ATTRIBUTES_END_TAG = (
+    '<dc:subject><rdf:Bag>'
+    '<rdf:li rdf:value="kw" c:source="camera"></rdf:li>'
+    '</rdf:Bag></dc:subject>'
+)
+KEYWORD_NESTED_ATTRIBUTES = (
+    '<dc:subject><rdf:Bag><rdf:li>'
+    '<rdf:Description rdf:value="kw" c:source="camera"/>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
+TITLE_ATTRIBUTES = (
+    '<dc:title><rdf:Alt><rdf:li xml:lang="x-default" rdf:value="T"'
+    ' c:source="camera"/></rdf:Alt></dc:title>'
+)
+CAPTION_ATTRIBUTES = '<dc:description rdf:value="C" c:source="camera"/>'
+# fields, but no value: not readable
+KEYWORD_FIELDS_ONLY = (
+    '<dc:subject><rdf:Bag><rdf:li c:word="kw" c:source="camera"/>'
+    '</rdf:Bag></dc:subject>'
+)
 
 
 @pytest.mark.parametrize(
@@ -767,11 +793,21 @@ QUALIFIED_CAPTION = (
         (UNREADABLE_KEYWORD, '1|keywords|', None),
         (QUALIFIED_TITLE, '1|title|', None),
         (QUALIFIED_CAPTION, '1|caption|', None),
+        (KEYWORD_ATTRIBUTES, '1|keywords|', None),
+        (KEYWORD_ATTRIBUTES_END_TAG, '1|keywords|', None),
+        (KEYWORD_NESTED_ATTRIBUTES, '1|keywords|', None),
+        (KEYWORD_FIELDS_ONLY, '1|keywords|', None),
+        (TITLE_ATTRIBUTES, '1|title|', None),
+        (CAPTION_ATTRIBUTES, '1|caption|', None),
         # replaced when Photos has another
         (QUALIFIED_KEYWORD, '1|keywords|other', ['other']),
         (UNREADABLE_KEYWORD, '1|keywords|kw', ['kw']),
         (QUALIFIED_TITLE, '1|title|New', 'New'),
         (QUALIFIED_CAPTION, '1|caption|New', 'New'),
+        (KEYWORD_ATTRIBUTES, '1|keywords|other', ['other']),
+        (KEYWORD_FIELDS_ONLY, '1|keywords|kw', ['kw']),
+        (TITLE_ATTRIBUTES, '1|title|New', 'New'),
+        (CAPTION_ATTRIBUTES, '1|caption|New', 'New'),
     ],
 )
 def test_qualified_values_removed_or_replaced(
@@ -799,6 +835,11 @@ def test_qualified_values_removed_or_replaced(
         (NESTED_KEYWORD, '1|keywords|kw'),
         (QUALIFIED_TITLE, '1|title|T'),
         (QUALIFIED_CAPTION, '1|caption|C'),
+        (KEYWORD_ATTRIBUTES, '1|keywords|kw'),
+        (KEYWORD_ATTRIBUTES_END_TAG, '1|keywords|kw'),
+        (KEYWORD_NESTED_ATTRIBUTES, '1|keywords|kw'),
+        (TITLE_ATTRIBUTES, '1|title|T'),
+        (CAPTION_ATTRIBUTES, '1|caption|C'),
         # an ordinary value
         (
             '<dc:subject><rdf:Bag><rdf:li>kw</rdf:li></rdf:Bag></dc:subject>',

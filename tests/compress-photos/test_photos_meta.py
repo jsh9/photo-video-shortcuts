@@ -7,6 +7,8 @@ Photos doesn't have, and leaves a file that already agrees as it is. For every
 build (SIMD and scalar WebAssembly, native, macOS), JPEG XL and HEIC.
 """
 
+import struct
+
 import photo_helpers as ph
 import pytest
 from photo_helpers import (
@@ -276,6 +278,37 @@ def test_location_hidden_in_photos_removes_a_partial_gps(
     assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
     validate(done[1])
     assert 'location removed: Photos has none' in said(out, 'IMG_0001')
+
+
+@pytest.mark.parametrize('location', ['48.8584,2.2945', ''])
+def test_an_unreadable_exif_keeps_the_xmp_location_unless_removed(
+        encoder, tmp_path, location
+):
+    # EXIF whose IFD0 lies outside it: no location can be written there. A
+    # new one from Photos then changes nothing, the XMP's location included;
+    # Photos having none still removes the XMP's.
+    exif = b'MM\x00\x2a' + struct.pack('>I', 0x7FFF) + b'\0' * 8
+    xmp = xmp_packet(
+        '<exif:GPSLatitude>40,42.878333N</exif:GPSLatitude>',
+        '<photoshop:City>New York</photoshop:City>',
+    )
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif, xmp)
+    out, done = convert(
+        encoder, tmp_path / 'run', [original], [f'1|gps|{location}']
+    )
+    properties = ph.xmp_properties(done[1])
+    log = said(out, 'IMG_0001')
+    if location:
+        assert b'<exif:GPSLatitude>40,42.878333N<' in box_xml(done[1])
+        assert properties['XMP-photoshop:City'] == 'New York'
+        assert (
+            "! location not written: the EXIF can't be read; the file's is kept"
+            in log
+        )
+    else:
+        assert 'XMP-exif:GPSLatitude' not in properties
+        assert 'XMP-photoshop:City' not in properties
+        assert 'location removed: Photos has none' in log
 
 
 def test_the_same_location_leaves_the_exif_as_it_is(encoder, tmp_path):

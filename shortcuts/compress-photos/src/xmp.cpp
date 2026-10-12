@@ -463,9 +463,9 @@ std::vector<Character> trimmed(const std::string &s, const Property &p) {
 // closes. An element holding nothing but text, CDATA, comments and processing
 // instructions has that text as its value; one holding elements is structured,
 // with the text items of its arrays (rdf:li), a qualified item's being its
-// rdf:value; an item holding elements but no rdf:value makes it opaque. Stops
-// at markup it can't follow. `layout`, if given, gets where rdf:RDF ends and
-// the first rdf:about.
+// rdf:value (an element or an attribute); an item holding elements or fields
+// but no rdf:value makes it opaque. Stops at markup it can't follow.
+// `layout`, if given, gets where rdf:RDF ends and the first rdf:about.
 std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   struct Element {
     std::string qualified;  // as written, to match its end tag
@@ -478,6 +478,9 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
     std::vector<Item> items;
     bool has_value;  // an rdf:li: an rdf:value inside it was read
     bool opaque;     // a top-level property: see Property
+    Run value_attr;  // its rdf:value attribute, if has_value_attr
+    bool has_value_attr;
+    bool fields;  // it has attributes that are fields or qualifiers (not rdf:, xml:lang)
   };
   struct Attribute {
     std::string qualified;
@@ -517,6 +520,64 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       if (in_rdf(p - 1)) return p;
     return 0;
   };
+  auto blank = [&](const std::vector<Run> &runs) {
+    for (const Run &r : runs)
+      for (size_t c = r.begin; c < r.end; ++c)
+        if (!whitespace(s[c])) return false;
+    return true;
+  };
+  // Closes open[k], which ends at `end` (its end tag starts at `at`, npos
+  // for an empty-element tag). A top-level property is found, its value its
+  // text or an rdf:value attribute. Inside one: an array item (rdf:li), a
+  // qualified value (an rdf:value element, or an element with an rdf:value
+  // attribute) adds its text as an item; an item holding elements or fields
+  // but no value makes the property opaque. rdf:RDF's end tag goes to
+  // `layout`.
+  auto close_element = [&](size_t k, size_t end, size_t at) {
+    Element &e = open[k];
+    std::vector<Run> value = e.children ? std::vector<Run>() : e.text;
+    if (e.has_value_attr) value = std::vector<Run>(1, e.value_attr);
+    // fields or qualifiers, but no value
+    const bool bare = e.fields && !e.has_value_attr && blank(value);
+    if (k >= 1 && in_rdf(k - 1)) {
+      found.push_back(property(e.name, e.children ? std::vector<Run>() : value, e.start, end, e.children, e.items,
+                               e.opaque || (bare && !e.children)));
+    } else if (is(e.name, RDF, "rdf", "li")) {
+      if (const size_t p = property_of(k)) {
+        if (e.has_value_attr || (!e.children && !bare)) {
+          Item item;
+          item.runs = value;
+          item.lang = e.lang;
+          open[p].items.push_back(item);
+        } else if (bare || !e.has_value) {
+          open[p].opaque = true;
+        }
+      }
+    } else if (is(e.name, RDF, "rdf", "value") || e.has_value_attr) {
+      // the item of the rdf:li it is in (or of the property itself), with
+      // that rdf:li's language
+      if (const size_t p = property_of(k)) {
+        size_t li = 0;
+        for (size_t q = k; q-- > p + 1;)
+          if (is(open[q].name, RDF, "rdf", "li")) {
+            li = q;
+            break;
+          }
+        if (e.children && !e.has_value_attr) {
+          open[p].opaque = true;
+        } else {
+          Item item;
+          item.runs = value;
+          item.lang = !e.lang.empty() || !li ? e.lang : open[li].lang;
+          open[p].items.push_back(item);
+        }
+        if (li) open[li].has_value = true;
+      }
+    } else if (layout && at != std::string::npos && layout->rdf_end == std::string::npos &&
+               is(e.name, RDF, "rdf", "RDF")) {
+      layout->rdf_end = at;
+    }
+  };
   // The position just past `close`, searching from `from`; npos if absent.
   auto past = [&](const char *close, size_t from) {
     const size_t at = s.find(close, from);
@@ -545,47 +606,7 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       // Close the element, and any left open inside it; ignore a stray end tag.
       for (size_t k = open.size(); k-- > 0;) {
         if (open[k].qualified != qualified) continue;
-        const Element &e = open[k];
-        if (k >= 1 && in_rdf(k - 1)) {
-          found.push_back(property(e.name, e.children ? std::vector<Run>() : e.text, e.start, end, e.children, e.items,
-                                   e.opaque));
-        } else if (is(e.name, RDF, "rdf", "li")) {
-          // An array's item, for the top-level property it is in: its text,
-          // or its rdf:value (read when that closed); without either, a value
-          // this scanner can't read.
-          if (const size_t p = property_of(k)) {
-            if (!e.children) {
-              Item item;
-              item.runs = e.text;
-              item.lang = e.lang;
-              open[p].items.push_back(item);
-            } else if (!e.has_value) {
-              open[p].opaque = true;
-            }
-          }
-        } else if (is(e.name, RDF, "rdf", "value")) {
-          // A qualified value: the item of the rdf:li it is in (or of the
-          // property itself), with that rdf:li's language.
-          if (const size_t p = property_of(k)) {
-            size_t li = 0;
-            for (size_t q = k; q-- > p + 1;)
-              if (is(open[q].name, RDF, "rdf", "li")) {
-                li = q;
-                break;
-              }
-            if (e.children) {
-              open[p].opaque = true;
-            } else {
-              Item item;
-              item.runs = e.text;
-              item.lang = !e.lang.empty() || !li ? e.lang : open[li].lang;
-              open[p].items.push_back(item);
-            }
-            if (li) open[li].has_value = true;
-          }
-        } else if (layout && layout->rdf_end == std::string::npos && is(e.name, RDF, "rdf", "RDF")) {
-          layout->rdf_end = i;
-        }
+        close_element(k, end, i);
         open.erase(open.begin() + k, open.end());
         break;
       }
@@ -597,7 +618,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       // A start tag: its name, then name="value" attributes.
       size_t j = i + 1;
       while (j < len && !whitespace(s[j]) && s[j] != '/' && s[j] != '>') ++j;
-      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}, false, false};
+      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}, false, false, Run(), false,
+                         false};
       std::vector<Attribute> attributes;
       bool empty = false;
       for (;;) {
@@ -637,6 +659,13 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         const Name name = resolve(a.qualified, true);
         if (is(name, XML, "xml", "lang")) {
           for (const Character &c : characters(s, {a.value})) open.back().lang += c.c;
+        } else if (is(name, RDF, "rdf", "value")) {
+          open.back().value_attr = a.value;
+          open.back().has_value_attr = true;
+        } else if (!(name.uri == RDF || (name.uri.empty() && name.prefix == "rdf")) ||
+                   is(name, RDF, "rdf", "resource")) {
+          // a field or qualifier (rdf:resource: a value that isn't text)
+          open.back().fields = true;
         }
         if (!in_rdf(open.size() - 1)) continue;
         // A node element's attributes are properties; its rdf:about is kept for
@@ -648,10 +677,9 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         found.push_back(property(name, {a.value}, a.start, a.value.end + 1, false, {}, false));
       }
       if (empty) {
-        // An empty property element (<dc:title/>), or an empty rdf:RDF
-        // (whose "/>" is just before j).
-        if (open.size() >= 2 && in_rdf(open.size() - 2))
-          found.push_back(property(open.back().name, {}, i, j, false, {}, false));
+        // An empty-element tag closes at once (<dc:title/>, <rdf:li
+        // rdf:value="..."/>); an empty rdf:RDF has its "/>" just before j.
+        close_element(open.size() - 1, j, std::string::npos);
         if (layout && layout->rdf_empty == std::string::npos && is(open.back().name, RDF, "rdf", "RDF")) {
           layout->rdf_empty = j - 2;
           layout->rdf_qualified = open.back().qualified;
