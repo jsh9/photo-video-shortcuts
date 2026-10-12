@@ -750,7 +750,7 @@ def test_gray_profile_on_a_heif_written_anew(
     ph.run([helpers['make_photo'], png, heic, '--depth16'], check=True)
     photo = with_icc_profile(heic, tmp_path / 'src', gray_icc(1))
     out, _, log = convert(encoder, tmp_path / 'job', photo)
-    assert 'written anew, as SDR' in log
+    assert 'written anew, as SDR' in ' '.join(log.split())  # wrapped lines
     assert_half_white_srgb(out, apple_sdr)
 
 
