@@ -441,6 +441,23 @@ class Builder:
         )
         return output_of(a, name)
 
+    def location_details(self, ref, name):
+        """
+        Get Details of Locations: the property ``name`` of the location
+        ``ref``, as photo_details does for images (the same action class,
+        WFContentItemPropertiesAction, with ``is.workflow.actions.properties
+        .locations``, in the macOS 26 frameworks). Latitude and Longitude are
+        text, the coordinate formatted with "%0.16g" (ContentKit's
+        WFLocationContentItem, iOS 18.2): "." as the decimal point whatever the
+        device's region. Altitude is a Number, which a text shows in the
+        device's region's format.
+        """
+        a = self.add(
+            'is.workflow.actions.properties.locations',
+            {'WFContentItemPropertyName': name, 'WFInput': attachment(ref)},
+        )
+        return output_of(a, name)
+
     def format_date(self, ref):
         """
         Format Date, ISO 8601 with the time: "2024-01-01T17:00:00-05:00", the

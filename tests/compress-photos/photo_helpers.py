@@ -427,6 +427,86 @@ def check_photo_dates(actions):
     return found
 
 
+def check_photo_locations(actions):
+    """
+    Checks wf.photo_location's steps in a shortcut and returns where each
+    photo's Location is read: inside a repeat, the Repeat Item's Location (Get
+    Details of Images); if it has a value, its Latitude and Longitude (Get
+    Details of Locations) in "Repeat Index|gps|lat,lon", appended to Meta;
+    otherwise, only for a library photo (Is Favorite, through Match Text),
+    "Repeat Index|gps|".
+    """
+    by_uuid = {params(a).get('UUID'): a for a in actions}
+    walked = list(walk(actions))
+    found = []
+    for i, (a, depth) in enumerate(walked):
+        p = params(a)
+        if not (
+            ident(a) == 'is.workflow.actions.properties.images'
+            and p['WFContentItemPropertyName'] == 'Location'
+        ):
+            continue
+
+        assert depth == 1
+        assert list(references(p['WFInput'])) == [
+            {'Type': 'Variable', 'VariableName': 'Repeat Item'}
+        ]
+        inside = dict(
+            (id(x), yes) for x, yes in inside_if_on(actions, p['UUID'])
+        )
+        details = {
+            params(x)['WFContentItemPropertyName']: x
+            for x in actions
+            if ident(x) == 'is.workflow.actions.properties.locations'
+            and [r.get('OutputUUID') for r in references(params(x)['WFInput'])]
+            == [p['UUID']]
+        }
+        assert set(details) == {'Latitude', 'Longitude'}
+        assert all(inside[id(x)] for x in details.values())
+        lines = [
+            (j, x)
+            for j, x in enumerate(actions)
+            if ident(x) == 'is.workflow.actions.gettext'
+            and '|gps|' in repr(params(x)['WFTextActionText'])
+        ]
+        rendered = {
+            render(
+                params(x)['WFTextActionText'],
+                {'Repeat Index': '3', 'Latitude': 'LAT', 'Longitude': 'LON'},
+            ): j
+            for j, x in lines
+        }
+        assert set(rendered) == {'3|gps|LAT,LON', '3|gps|'}
+        for line, j in rendered.items():
+            append = actions[j + 1]
+            assert ident(append) == 'is.workflow.actions.appendvariable'
+            assert params(append)['WFVariableName'] == 'Meta'
+            # the coordinates when there is a location, else the empty line
+            assert inside[id(actions[j])] == (line != '3|gps|')
+
+        favorite = [
+            x
+            for x in actions[i:]
+            if ident(x) == 'is.workflow.actions.properties.images'
+            and params(x)['WFContentItemPropertyName'] == 'Is Favorite'
+        ][0]
+        guard = next(
+            params(x)['UUID']
+            for x in actions
+            if ident(x) == 'is.workflow.actions.text.match'
+            and [r.get('OutputUUID') for r in references(params(x)['text'])]
+            == [params(favorite)['UUID']]
+        )
+        empty = actions[rendered['3|gps|']]
+        assert dict((id(x), yes) for x, yes in inside_if_on(actions, guard))[
+            id(empty)
+        ]
+        assert by_uuid[p['UUID']] is a
+        found.append(i)
+
+    return found
+
+
 def ashell_commands(actions, values):
     """The command text of each a-Shell Execute Command action."""
     return [

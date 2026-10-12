@@ -16,7 +16,9 @@ case $IDS in
 esac
 # filename -> id. A name two selected items share can't be told apart in the
 # export, so it gets no id: its copy is saved but joins no album, and neither
-# original is collected for deletion.
+# original is collected for deletion. The exporter's "id<tab>field<tab>value"
+# lines (what else Photos has for an item, for Compress Photos) have no "|":
+# skipped.
 typeset -A ids seen
 for line in "${(@f)IDS}"; do
   case $line in *'|'*) ;; *) continue;; esac

@@ -149,6 +149,7 @@ def test_cleanup_removes_every_file(gen):
         'jxl_albums_*',
         'jxl_job.txt',
         'jxl_dates.txt',
+        'jxl_meta.txt',
         'jxl_done.txt',
         'jxl_started',
     ):
@@ -191,6 +192,47 @@ def test_dates_in_photos_go_to_photobatch(gen, shortcuts):
         len(stale) == 1 and 'jxl_dates.txt' in dict(commands)[stale[0]].split()
     )
     assert stale[0] < formats[0] < rename < min(runs)
+
+
+def test_locations_in_photos_go_to_photobatch(gen, shortcuts):
+    # Each staged photo's location in Photos becomes a line "index|gps|..."
+    # (ph.check_photo_locations), read before Put File fetches the photo's
+    # file (after it, Location is the file's GPS), and the lines go to a-Shell
+    # as jxl_meta.txt when there are any, before photobatch runs. A stale file
+    # from an unfinished run is removed first.
+    actions = shortcuts[gen.NAME_A]
+    (read,) = ph.check_photo_locations(actions)
+    staged = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and 'jxl_in_' in repr(ph.params(a)['WFName'])
+    ]
+    assert read < staged[0]
+    renames = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and ph.params(a)['WFName']['Value']['string'] == 'jxl_meta.txt'
+    ]
+    assert len(renames) == 1
+    rename = renames[0]
+    assert ph.ident(actions[rename + 1]).endswith('PutFileIntent')
+    inside = [yes for _, yes in ph.inside_if_on(actions, "'Meta'")]
+    assert inside[rename] and inside[rename + 1]
+    commands = [
+        (i, ph.params(a)['command'])
+        for i, a in enumerate(actions)
+        if ph.ident(a).endswith('ExecuteCommandIntent')
+    ]
+    stale = [
+        i
+        for i, c in commands
+        if isinstance(c, str) and c.startswith('rm -f jxl_done.txt')
+    ]
+    runs = [i for i, c in commands if 'photobatch' in repr(c)]
+    assert 'jxl_meta.txt' in dict(commands)[stale[0]].split()
+    assert stale[0] < read < rename < min(runs)
 
 
 def test_share_sheet_settings(gen, shortcuts):
@@ -260,11 +302,19 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     assert checks[0] < saves[0] < checks[1] < saves[1]
     # only library photos: an image from another app answers nothing to
     # Is Favorite, and Save to Photo Album would import it as a new photo
+    # (after the staging: the one before it is wf.photo_location's)
+    staged = min(
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and 'jxl_in_' in repr(ph.params(a)['WFName'])
+    )
     favorites = [
         i
         for i, a in enumerate(actions)
         if ph.ident(a) == 'is.workflow.actions.properties.images'
         and ph.params(a)['WFContentItemPropertyName'] == 'Is Favorite'
+        and i > staged
     ]
     assert len(favorites) == 2
     assert favorites[0] < checks[0] and favorites[1] < checks[1]

@@ -26,6 +26,7 @@ VALUES = {
     'Skipped Echo': '',
     'AppleScript Result': 'ID|2024-01-01 17:00:00|IMG_0001.HEIC',
     'Dates': '1|2024-01-01T17:00:00-05:00',
+    'Meta': '1|gps|40.5,-73.25',
 }
 
 
@@ -765,6 +766,96 @@ def test_applescripts_compile(gen):
             assert result.returncode == 0, (name, result.stderr)
 
 
+def run_handlers(gen, name, start, call):
+    """
+    Runs the handlers of lib/mac/<name>.applescript from the comment line
+    ``start`` on (those that don't talk to Photos) with osascript, then
+    ``call``; returns its result as text.
+    """
+    import shutil
+    import subprocess
+
+    ph.need(shutil.which('osascript'), 'osascript is needed')
+    text = gen.applescript_text(name)
+    script = text[text.index(start) :] + '\n' + call
+    result = subprocess.run(
+        ['osascript', '-'], input=script, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.rstrip('\n')
+
+
+def test_export_lines_of_what_else_photos_has(gen):
+    # export.applescript's lines for photobatch, from records like Photos'
+    # "properties of" (fields by code): coordinates to 6 decimals without a
+    # real's text (which follows the Mac's number format), an altitude of 0
+    # left out, values escaped, empty ones for none.
+    records = (
+        '{«class ID  »:"A", «class IPlo»:{40.758441666667, -73.829766666667},'
+        ' «class alti»:11.730902867811, «class pnam»:"T|x%" & tab & "y",'
+        ' «class IPde»:"Line 1" & linefeed & "Line 2" & return,'
+        ' «class IPkw»:{"a,b", "c"}}',
+        '{«class ID  »:"B", «class IPlo»:{missing value, missing value},'
+        ' «class alti»:missing value, «class pnam»:missing value,'
+        ' «class IPde»:missing value, «class IPkw»:missing value}',
+        '{«class ID  »:"C", «class IPlo»:{-0.00005, 25.7708431},'
+        ' «class alti»:0.0, «class pnam»:"", «class IPde»:"",'
+        ' «class IPkw»:{}}',
+    )
+    call = 'return ' + ' & '.join(
+        f'metaLines("{i}", {r})' for i, r in zip('ABC', records)
+    )
+    lines = run_handlers(gen, 'export', '-- "2024-01-01 17:00:00"', call)
+    assert lines.split('\n') == [
+        'A\tgps\t40.758442,-73.829767,11.73',
+        'A\ttitle\tT%7Cx%25%09y',
+        'A\tcaption\tLine 1%0ALine 2%0D',
+        'A\tkeywords\ta%2Cb,c',
+        'B\tgps\t',
+        'B\ttitle\t',
+        'B\tcaption\t',
+        'B\tkeywords\t',
+        'C\tgps\t-0.000050,25.770843',
+        'C\ttitle\t',
+        'C\tcaption\t',
+        'C\tkeywords\t',
+    ]
+
+
+def test_import_compares_what_photos_has(gen):
+    # import.applescript's comparisons of an original's fields with its
+    # copy's: locations within 0.00001 degree, missing value and "" both none,
+    # case counts, keywords in any order.
+    calls = [
+        'sameLocation({40.7584416, -73.8297666}, {40.758445, -73.829766})',
+        'sameLocation({40.75, -73.82}, {40.76, -73.82})',
+        'sameLocation({missing value, missing value}, {missing value, missing value})',
+        'sameLocation({missing value, missing value}, {1.0, 2.0})',
+        'sameText(missing value, "")',
+        'sameText("a", "A")',
+        'sameKeywords(missing value, {})',
+        'sameKeywords({"a", "b"}, {"b", "a"})',
+        'sameKeywords({"a"}, {"A"})',
+        'sameKeywords({"a", "b"}, {"a"})',
+    ]
+    call = 'return {' + ', '.join(f'my {c}' for c in calls) + '}'
+    got = run_handlers(
+        gen, 'import', '-- Locations as Photos gives them', call
+    )
+    assert got.split(', ') == [
+        'true',
+        'false',
+        'true',
+        'false',
+        'true',
+        'false',
+        'true',
+        'true',
+        'false',
+        'false',
+    ]
+
+
 def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
     # The picker route reads each photo's date in Photos (Date Taken) in the
     # repeat that collects the names (ph.check_photo_dates), and its batch
@@ -782,7 +873,27 @@ def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
     script = ph.render(ph.params(actions[batches[0]])['Script'], VALUES)
     assert 'for f in "$@"; do' in script  # the picker route's
     assert '1|2024-01-01T17:00:00-05:00\nJXL_DATES' in script
-    assert 'set dateText to my wallTime(date of m)' in gen.applescript_text(
-        'export'
+    assert 'set dateText to my wallTime(«class idat» of p)' in (
+        gen.applescript_text('export')
     )
     assert not ph.check_photo_dates(shortcuts[FILES])
+
+
+def test_photos_locations_in_photos_go_to_photobatch(gen, shortcuts):
+    # The picker route reads each photo's location in Photos
+    # (ph.check_photo_locations) before its batch script gets the photos'
+    # files, and the script gets Meta; the selection route has the location,
+    # title, caption and keywords from Photos' AppleScript (export.applescript's
+    # "id<tab>field<tab>value" lines), and the Finder shortcut none.
+    actions = shortcuts[PHOTOS]
+    (read,) = ph.check_photo_locations(actions)
+    batches = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL and 'Meta' in repr(ph.params(a)['Script'])
+    ]
+    assert len(batches) == 1 and read < batches[0]
+    script = ph.render(ph.params(actions[batches[0]])['Script'], VALUES)
+    assert '1|gps|40.5,-73.25\nJXL_META' in script
+    assert 'my metaLines(itemId, p)' in gen.applescript_text('export')
+    assert not ph.check_photo_locations(shortcuts[FILES])

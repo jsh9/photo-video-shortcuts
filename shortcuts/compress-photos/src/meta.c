@@ -1357,3 +1357,323 @@ int exif_set_capture_date(const uint8_t *p, size_t n, photo_date_t *date, uint8_
   *out_len = len;
   return zone_only ? 2 : 1;
 }
+
+// ---------------------------------------------------------------------------
+// GPS position and caption
+
+enum { TIFF_BYTE = 1, TIFF_RATIONAL = 5 };
+
+int photo_location_parse(const char *s, photo_location_t *loc) {
+  double v[3];
+  int n = 0;
+  const char *p = s;
+  for (;;) {
+    while (*p == ' ') p++;
+    // Only decimal numbers: strtod would take "inf", "nan" and hex too.
+    const char *q = p + (*p == '+' || *p == '-');
+    if (!((*q >= '0' && *q <= '9') || (*q == '.' && q[1] >= '0' && q[1] <= '9'))) return 0;
+    if (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) return 0;
+    char *end;
+    v[n++] = strtod(p, &end);
+    p = end;
+    while (*p == ' ') p++;
+    if (*p == 0) break;
+    if (*p != ',' || n == 3) return 0;
+    p++;
+  }
+  if (n < 2 || !(v[0] >= -90 && v[0] <= 90 && v[1] >= -180 && v[1] <= 180)) return 0;
+  loc->lat = v[0];
+  loc->lon = v[1];
+  loc->has_alt = n == 3 && v[2] != 0 && v[2] > -100000 && v[2] < 100000;
+  loc->alt = loc->has_alt ? v[2] : 0;
+  return 1;
+}
+
+int photo_location_same(const photo_location_t *a, const photo_location_t *b) {
+  const double lat = a->lat - b->lat, lon = a->lon - b->lon;
+  return lat <= 1e-5 && lat >= -1e-5 && lon <= 1e-5 && lon >= -1e-5;
+}
+
+// Three rationals (degrees, minutes, seconds) at entry `e`'s value, as
+// degrees. Returns 1 if read.
+static int entry_degrees(const tiff_t *t, size_t e, double *deg) {
+  if (!e || t16(t, e + 2) != TIFF_RATIONAL || t32(t, e + 4) != 3) return 0;
+  const size_t at = t32(t, e + 8);
+  if (at > t->n || t->n - at < 24) return 0;
+  double parts[3];
+  for (int i = 0; i < 3; i++) {
+    const uint32_t num = t32(t, at + 8 * (size_t)i), den = t32(t, at + 8 * (size_t)i + 4);
+    if (den == 0 && num != 0) return 0;
+    parts[i] = den ? (double)num / den : 0;  // 0/0: an unused part
+  }
+  *deg = parts[0] + parts[1] / 60 + parts[2] / 3600;
+  return 1;
+}
+
+static uint32_t gps_ifd_offset(const tiff_t *t) {
+  uint32_t off = 0;
+  if (!entry_uint(t, ifd_find(t, t32(t, 4), 0x8825), &off)) return 0;
+  return off;
+}
+
+int exif_gps(const uint8_t *p, size_t n, photo_location_t *loc) {
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return 0;
+  const uint32_t gps = gps_ifd_offset(&t);
+  double lat, lon;
+  if (!gps || !ifd_ok(&t, gps) || !entry_degrees(&t, ifd_find(&t, gps, 0x0002), &lat) ||
+      !entry_degrees(&t, ifd_find(&t, gps, 0x0004), &lon)) {
+    return 0;
+  }
+  char lat_ref[4], lon_ref[4];
+  entry_text(&t, ifd_find(&t, gps, 0x0001), lat_ref, sizeof lat_ref);
+  entry_text(&t, ifd_find(&t, gps, 0x0003), lon_ref, sizeof lon_ref);
+  loc->lat = lat_ref[0] == 'S' ? -lat : lat;
+  loc->lon = lon_ref[0] == 'W' ? -lon : lon;
+  double alt = 0;
+  loc->has_alt = entry_number(&t, ifd_find(&t, gps, 0x0006), 0, &alt);
+  const size_t ref = ifd_find(&t, gps, 0x0005);  // 1: below sea level
+  loc->alt = loc->has_alt && ref && t16(&t, ref + 2) == TIFF_BYTE && t.p[ref + 8] == 1 ? -alt : alt;
+  return 1;
+}
+
+static size_t type_size(uint16_t type) {
+  switch (type) {
+    case 1: case 2: case 6: case 7: return 1;
+    case 3: case 8: return 2;
+    case 4: case 9: case 11: case 13: return 4;
+    case 5: case 10: case 12: return 8;
+    default: return 0;
+  }
+}
+
+// The bytes the IFD at `ifd` takes, entries and next-IFD offset.
+static size_t ifd_bytes(const tiff_t *t, uint32_t ifd) { return 2 + (size_t)t16(t, ifd) * 12 + 4; }
+
+// Ranges of the data a zeroing must spare: the header, IFD0's entries and
+// the Exif IFD's (a malformed file may point a value into them).
+typedef struct {
+  size_t at[3], n[3];
+} spared_t;
+
+static void spared_init(const tiff_t *t, spared_t *s) {
+  const uint32_t ifd0 = t32(t, 4), exif = exif_ifd_offset(t);
+  s->at[0] = 0;
+  s->n[0] = 8;
+  s->at[1] = ifd0;
+  s->n[1] = ifd_ok(t, ifd0) ? ifd_bytes(t, ifd0) : 0;
+  s->at[2] = exif;
+  s->n[2] = exif && ifd_ok(t, exif) ? ifd_bytes(t, exif) : 0;
+}
+
+static void zero_range(const tiff_t *t, uint64_t at, uint64_t n, const spared_t *s) {
+  if (at > t->n || n > t->n - at) return;
+  for (int k = 0; k < 3; k++) {
+    if (at < s->at[k] + s->n[k] && s->at[k] < at + n) return;
+  }
+  memset(t->p + at, 0, (size_t)n);
+}
+
+// Zeroes the value of entry `e` when it is stored outside the entry.
+static void zero_value(const tiff_t *t, size_t e, const spared_t *s) {
+  const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
+  if (size > 4) zero_range(t, t32(t, e + 8), size, s);
+}
+
+// Zeroes the IFD at `ifd` and the values its entries hold outside it.
+static void zero_ifd(const tiff_t *t, uint32_t ifd, const spared_t *s) {
+  if (!ifd_ok(t, ifd)) return;
+  const size_t count = t16(t, ifd);
+  for (size_t i = 0; i < count; i++) zero_value(t, ifd + 2 + i * 12, s);
+  zero_range(t, ifd, ifd_bytes(t, ifd), s);
+}
+
+// Writes IFD0 anew at the end of the data in *buf, with its entries but
+// `tag`, plus `add` if not NULL, and points the header to it. Returns 0, or
+// -1 if out of memory.
+static int rewrite_ifd0(uint8_t **buf, size_t *len, int le, uint16_t tag, const entry_t *add) {
+  tiff_t t = {*buf, *len, le};
+  const uint32_t ifd0 = t32(&t, 4);
+  const size_t old = t16(&t, ifd0);
+  entry_t *entries = (entry_t *)calloc(old + 1, sizeof *entries);
+  if (!entries) return -1;
+  size_t count = 0;
+  for (size_t i = 0; i < old; i++) {
+    const size_t e = ifd0 + 2 + i * 12;
+    if (t16(&t, e) != tag) entry_copy(&entries[count++], &t, e);
+  }
+  if (add) entries[count++] = *add;
+  const uint32_t next = t32(&t, ifd0 + 2 + old * 12);
+  const uint32_t at = append_ifd(buf, len, le, entries, count, next);
+  free(entries);
+  if (!at) return -1;
+  t.p = *buf;
+  t.n = *len;
+  w32(&t, 4, at);
+  return 0;
+}
+
+static void put_rational(uint8_t *v, int le, uint32_t num, uint32_t den) {
+  const tiff_t t = {v, 8, le};
+  w32(&t, 0, num);
+  w32(&t, 4, den);
+}
+
+// Degrees as three rationals, degrees/1, minutes/1 and seconds/10000, from a
+// whole number of ten-thousandths of a second. The product is rounded in a
+// statement of its own, so that no build fuses it into the addition: every
+// build writes the same bytes.
+static void put_degrees(uint8_t *v, int le, double deg) {
+  const double scaled = (deg < 0 ? -deg : deg) * 36000000.0;
+  const uint64_t units = (uint64_t)(scaled + 0.5);
+  put_rational(v, le, (uint32_t)(units / 36000000), 1);
+  put_rational(v + 8, le, (uint32_t)(units / 600000 % 60), 1);
+  put_rational(v + 16, le, (uint32_t)(units % 600000), 10000);
+}
+
+int exif_set_gps(const uint8_t *p, size_t n, const photo_location_t *loc, uint8_t **out, size_t *out_len) {
+  // No EXIF: a TIFF header and an empty IFD0, which then gets a GPS IFD.
+  static const uint8_t kEmpty[14] = {'M', 'M', 0, 42, 0, 0, 0, 8};
+  if (n == 0) {
+    if (!loc) return 0;
+    p = kEmpty;
+    n = sizeof kEmpty;
+  }
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return -2;
+  const uint32_t ifd0 = t32(&t, 4);
+  if (!ifd_ok(&t, ifd0)) return -2;
+  if (!loc && !ifd_find(&t, ifd0, 0x8825)) return 0;
+
+  uint8_t *buf = (uint8_t *)malloc(n);
+  if (!buf) return -1;
+  memcpy(buf, p, n);
+  size_t len = n;
+  const int le = t.le;
+  tiff_t nt = {buf, len, le};
+  // The old position goes from the data, not only from IFD0.
+  const uint32_t old = gps_ifd_offset(&nt);
+  if (old) {
+    spared_t spared;
+    spared_init(&nt, &spared);
+    zero_ifd(&nt, old, &spared);
+  }
+  if (!loc) {
+    if (rewrite_ifd0(&buf, &len, le, 0x8825, NULL) != 0) {
+      free(buf);
+      return -1;
+    }
+    *out = buf;
+    *out_len = len;
+    return 1;
+  }
+
+  static const uint8_t kVersion[4] = {2, 2, 0, 0};
+  const char lat_ref[2] = {loc->lat < 0 ? 'S' : 'N', 0}, lon_ref[2] = {loc->lon < 0 ? 'W' : 'E', 0};
+  uint8_t lat[24], lon[24], alt[8];
+  const uint8_t alt_ref = loc->alt < 0;  // 1: below sea level
+  put_degrees(lat, le, loc->lat);
+  put_degrees(lon, le, loc->lon);
+  entry_t entries[7];
+  size_t count = 0;
+  entry_set(&entries[count++], le, 0x0000, TIFF_BYTE, 4, kVersion, 4);
+  entry_set(&entries[count++], le, 0x0001, TIFF_ASCII, 2, lat_ref, 2);
+  entry_set(&entries[count++], le, 0x0002, TIFF_RATIONAL, 3, lat, sizeof lat);
+  entry_set(&entries[count++], le, 0x0003, TIFF_ASCII, 2, lon_ref, 2);
+  entry_set(&entries[count++], le, 0x0004, TIFF_RATIONAL, 3, lon, sizeof lon);
+  if (loc->has_alt) {
+    const double scaled = (loc->alt < 0 ? -loc->alt : loc->alt) * 100.0;
+    put_rational(alt, le, (uint32_t)(scaled + 0.5), 100);  // centimeters
+    entry_set(&entries[count++], le, 0x0005, TIFF_BYTE, 1, &alt_ref, 1);
+    entry_set(&entries[count++], le, 0x0006, TIFF_RATIONAL, 1, alt, sizeof alt);
+  }
+  const uint32_t gps = append_ifd(&buf, &len, le, entries, count, 0);
+  if (!gps) {
+    free(buf);
+    return -1;
+  }
+  nt.p = buf;
+  nt.n = len;
+  const size_t e = ifd_find(&nt, ifd0, 0x8825);
+  if (e) {
+    // IFD0's pointer, in place (a LONG now, should it have been a SHORT or
+    // an IFD).
+    w16(&nt, e + 2, TIFF_LONG);
+    w32(&nt, e + 4, 1);
+    w32(&nt, e + 8, gps);
+  } else {
+    entry_t pointer;
+    entry_long(&pointer, le, 0x8825, gps);
+    if (rewrite_ifd0(&buf, &len, le, 0x8825, &pointer) != 0) {
+      free(buf);
+      return -1;
+    }
+  }
+  *out = buf;
+  *out_len = len;
+  return 1;
+}
+
+int exif_description(const uint8_t *p, size_t n, char **text) {
+  *text = NULL;
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return 0;
+  const size_t e = ifd_find(&t, t32(&t, 4), 0x010E);
+  if (!e || t16(&t, e + 2) != TIFF_ASCII) return 0;
+  const uint32_t count = t32(&t, e + 4);
+  const size_t src = count <= 4 ? e + 8 : t32(&t, e + 8);
+  if (count == 0 || src > n || count > n - src) return 0;
+  const uint8_t *nul = (const uint8_t *)memchr(p + src, 0, count);
+  size_t k = nul ? (size_t)(nul - (p + src)) : count;
+  while (k && p[src + k - 1] == ' ') k--;
+  if (!k) return 0;
+  *text = (char *)malloc(k + 1);
+  if (!*text) return -1;
+  memcpy(*text, p + src, k);
+  (*text)[k] = 0;
+  return 0;
+}
+
+int exif_set_description(const uint8_t *p, size_t n, const char *text, uint8_t **out, size_t *out_len) {
+  if (n == 0) return 0;
+  tiff_t t;
+  if (!tiff_open(&t, p, n)) return -2;
+  const uint32_t ifd0 = t32(&t, 4);
+  if (!ifd_ok(&t, ifd0)) return -2;
+  const size_t e = ifd_find(&t, ifd0, 0x010E);
+  if (!e) return 0;
+
+  const size_t k = text && *text ? strlen(text) + 1 : 0;  // with its NUL
+  const size_t at = (n + 1) & ~(size_t)1;
+  if (k > 0xFFFFFFFFu || at + k > 0xFFFFFFFFu) return -1;
+  uint8_t *buf = (uint8_t *)malloc(k > 4 ? at + k : n);
+  if (!buf) return -1;
+  memcpy(buf, p, n);
+  size_t len = n;
+  const int le = t.le;
+  tiff_t nt = {buf, len, le};
+  spared_t spared;
+  spared_init(&nt, &spared);
+  zero_value(&nt, e, &spared);
+  if (!k) {
+    if (rewrite_ifd0(&buf, &len, le, 0x010E, NULL) != 0) {
+      free(buf);
+      return -1;
+    }
+  } else {
+    w16(&nt, e + 2, TIFF_ASCII);
+    w32(&nt, e + 4, (uint32_t)k);
+    if (k <= 4) {
+      memset(buf + e + 8, 0, 4);
+      memcpy(buf + e + 8, text, k);
+    } else {
+      memset(buf + n, 0, at - n);
+      memcpy(buf + at, text, k);
+      len = at + k;
+      w32(&nt, e + 8, (uint32_t)at);
+    }
+  }
+  *out = buf;
+  *out_len = len;
+  return 1;
+}

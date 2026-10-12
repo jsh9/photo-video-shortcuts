@@ -348,6 +348,30 @@ def test_date_from_photos_becomes_an_exif_item_when_the_file_has_none(
     assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
 
 
+def test_photos_metadata_adds_an_exif_and_an_xmp_item(
+        encoder, tmp_path, imageio
+):
+    # A file with neither gets both, each describing the picture (jxl_meta.txt:
+    # the location into the Exif item, the title into the XMP item); the gain
+    # map stays.
+    photo = without_exif_item(SINGLE, tmp_path / 'src')
+    assert not any(typ in {'Exif', 'mime'} for typ, _ in items(photo).values())
+    ph.stage(tmp_path, [photo])
+    (tmp_path / 'jxl_meta.txt').write_text(
+        '1|gps|48.8584,2.2945\n1|title|Tour'
+    )
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert 'HDR kept' in result.stdout
+    out = ph.read_done(tmp_path)[1][0]
+    types = [typ for typ, _ in items(out).values()]
+    assert types.count('Exif') == 1 and types.count('mime') == 1
+    assert ph.xmp_properties(out)['XMP-dc:Title'] == 'Tour'
+    props = imageio(out)[str(out)]
+    assert props['lat'].endswith('N') and props['title'] == 'Tour'
+    assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
+
+
 def test_date_from_photos_lands_in_the_xmp_too(encoder, tmp_path):
     # The picture's XMP capture dates get the date, as in the JPEG XL route.
     photo = with_xmp_date(OLDER, tmp_path / 'src')

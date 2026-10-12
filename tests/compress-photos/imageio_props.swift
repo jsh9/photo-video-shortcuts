@@ -20,6 +20,10 @@ for path in args {
   let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
   let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
   let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] ?? [:]
+  // ImageIO gives the XMP's dc:title, dc:description and dc:subject (or an
+  // EXIF ImageDescription, which it prefers) as IPTC fields: Photos' title,
+  // caption and keywords.
+  let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
   let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0
   let h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
   let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
@@ -44,6 +48,9 @@ for path in args {
     ("lat", gps[kCGImagePropertyGPSLatitude].map { "\($0)\(gps[kCGImagePropertyGPSLatitudeRef] ?? "")" }),
     ("lon", gps[kCGImagePropertyGPSLongitude].map { "\($0)\(gps[kCGImagePropertyGPSLongitudeRef] ?? "")" }),
     ("alt", gps[kCGImagePropertyGPSAltitude]),
+    ("title", iptc[kCGImagePropertyIPTCObjectName]),
+    ("caption", iptc[kCGImagePropertyIPTCCaptionAbstract]),
+    ("keywords", (iptc[kCGImagePropertyIPTCKeywords] as? [Any])?.map { "\($0)" }.joined(separator: "|")),
   ]
   for (k, v) in fields { if let v = v { r[k] = "\(v)" } }
   results.append(r)
@@ -56,7 +63,7 @@ if json {
   for r in results {
     print("\(r["path"]!):")
     for k in ["error", "type", "upright", "orientation", "color", "taken", "offset", "make", "model", "lens",
-      "fnumber", "exposure", "iso", "lat", "lon", "alt"]
+      "fnumber", "exposure", "iso", "lat", "lon", "alt", "title", "caption", "keywords"]
     {
       if let v = r[k] { print("  \(k.padding(toLength: 12, withPad: " ", startingAt: 0))\(v)") }
     }

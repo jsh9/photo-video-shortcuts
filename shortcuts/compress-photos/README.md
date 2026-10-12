@@ -36,6 +36,7 @@ ______________________________________________________________________
 - [3. What is and isn't kept](#3-what-is-and-isnt-kept)
   - [3.1. HDR photos](#31-hdr-photos)
   - [3.2. Dates](#32-dates)
+  - [3.3. Location](#33-location)
 - [4. Troubleshooting](#4-troubleshooting)
 
 ______________________________________________________________________
@@ -76,9 +77,10 @@ pace (nothing is added to it any more).
     - Deleted photos go to Recently Deleted for 30 days. Deleting also removes
       what the JXL doesn't have: depth/Portrait data, the SDR version of an HDR
       photo (see [HDR photos](#31-hdr-photos)), edit history, and Photos-only
-      information (favorites, captions, people). Albums are kept, because the
-      JXL is added to them. Live Photos are never converted, so they are never
-      collected.
+      information (favorites, titles, captions, keywords, people). Albums are
+      kept, because the JXL is added to them, and so is the location (see
+      [Location](#33-location)). Live Photos are never converted, so they are
+      never collected.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then stops at
@@ -126,6 +128,9 @@ pace (nothing is added to it any more).
     Favorites aren't handled.
 - When sharing from Photos, keep **Location** on under **Options**. Otherwise
   iOS removes GPS before the shortcut sees the photo.
+- The copies get the location Photos shows for their originals, also one you
+  changed in Photos; a location you hid is left out (see
+  [Location](#33-location)).
 
 ### 2.1. Quality presets
 
@@ -190,6 +195,8 @@ Kept:
   notes;
 - the date Photos shows, also one you changed in Photos (see
   [Dates](#32-dates));
+- the location Photos shows, also one you changed or hid in Photos (see
+  [Location](#33-location));
 - XMP;
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
@@ -359,6 +366,28 @@ time zone (iPhones before iOS 13, most cameras) but whose time is that moment
 somewhere keeps its time and gets that zone instead
 (`time zone from Photos: ...`). This needs the shortcuts and `photobatch.wasm`
 from version 0.7.0.
+
+### 3.3. Location
+
+Each copy gets the location Photos shows for its original, in the file itself
+(its GPS, which other apps read too):
+
+- **A location you changed or added in Photos** (in the photo's info) is kept.
+  Photos keeps such a change in its library, not in the original file, so a
+  plain copy of the file would have the camera's location again.
+- **A location you hid** (Hide Location) is left out: the copy has no GPS, as
+  Photos shows the original, and none of the original's position is left in the
+  file.
+- A photo whose GPS already is that place keeps it as it is, with its altitude
+  and direction. A changed location replaces them all.
+
+When a location is written or removed, a-Shell's output says so, for example
+`location from Photos: 40.758442, -73.829767 (the file had another)` or
+`location removed: Photos has none`. Shortcuts doesn't give a photo's title,
+caption, keywords or favorite on the iPhone, so the copies keep the file's own
+title, caption and keywords (Photos-only ones are lost with the original), and
+aren't favorites. This needs the shortcuts and `photobatch.wasm` from version
+0.8.0.
 
 ## 4. Troubleshooting
 

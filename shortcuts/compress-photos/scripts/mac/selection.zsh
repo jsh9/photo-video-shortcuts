@@ -1,10 +1,11 @@
 # The photos selected in Photos: Photos exported their original files into
 # $WORK/in (see export.applescript), and IDS has one "id|date|filename" line
-# per selected photo (or "ERROR: ..."); the date is the photo's in Photos,
-# "2024-01-01 17:00:00" on the Mac's clock. A Live Photo's original is a
-# photo plus a .mov with the same name: skipped, as on the iPhone, so its
-# video is never lost; a video alone is skipped too. Other files are left to
-# photobatch, which fails them with "unsupported format".
+# per selected photo (or "ERROR: ..."), then its "id<tab>field<tab>value"
+# lines; the date is the photo's in Photos, "2024-01-01 17:00:00" on the
+# Mac's clock. A Live Photo's original is a photo plus a .mov with the same
+# name: skipped, as on the iPhone, so its video is never lost; a video alone
+# is skipped too. Other files are left to photobatch, which fails them with
+# "unsupported format".
 setopt nullglob
 case $IDS in
   ERROR*) echo "$IDS" >> "$LOG";;
@@ -60,6 +61,21 @@ for f in "$WORK"/in/*(.N); do
       [ "$(date -r $((when - 3600)) '+%Y-%m-%d %H:%M:%S')" != "${dates[$name]}" ] &&
       printf '%d|%s\n' "$n" "$(date -r "$when" '+%Y-%m-%dT%H:%M:%S%z')" >> "$WORK/jxl_dates.txt"
   fi
+done
+# What else Photos has for each photo, from IDS' "id<tab>field<tab>value"
+# lines (location, title, caption, keywords; escaped): jxl_meta.txt, by job
+# index, values as they are, for photobatch to write into the copies. A name
+# two selected photos share has no id, so no lines.
+typeset -A jobs
+for (( i = 1; i <= n; i++ )); do
+  id=${ids[${origs[$i]}]}
+  [ -n "$id" ] && jobs[$id]=$i
+done
+for line in "${(@f)IDS}"; do
+  case $line in *$'\t'*$'\t'*) ;; *) continue;; esac
+  id=${line%%$'\t'*}
+  rest=${line#*$'\t'}
+  [ -n "${jobs[$id]}" ] && printf '%d|%s|%s\n' "${jobs[$id]}" "${rest%%$'\t'*}" "${rest#*$'\t'}" >> "$WORK/jxl_meta.txt"
 done
 skipped=''
 [ "$live" -gt 0 ] && skipped="$live Live Photo(s)"

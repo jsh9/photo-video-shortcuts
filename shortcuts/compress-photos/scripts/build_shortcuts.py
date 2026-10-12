@@ -54,6 +54,7 @@ from wf import (  # noqa: E402
     keep_still_photos,
     output_of,
     photo_date,
+    photo_location,
     plain_or_text,
     text,
     variable,
@@ -270,7 +271,7 @@ def save_results(b, originals=None, album=None):
     return b.count(lines)
 
 
-CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started'
+CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started'
 
 
 def build_compress(sample):
@@ -296,19 +297,22 @@ def build_compress(sample):
     # in Stills are the job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
     args = choose_args(b)
-    # A stale album or dates file from an unfinished run would put a photo
-    # into the wrong albums or give it a wrong date; jxl_in_* files are
-    # overwritten anyway.
+    # A stale album, dates or metadata file from an unfinished run would put a
+    # photo into the wrong albums or give it a wrong date or location;
+    # jxl_in_* files are overwritten anyway.
     b.ashell_execute(
-        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started',
+        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_meta.txt jxl_started',
         keep_going=True,
         open_app='close',
     )
 
     # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step. Each photo's date in
-    # Photos goes too (jxl_dates.txt; see wf.photo_date).
+    # PNG itself, so there is no Convert Image step. Each photo's date and
+    # location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
+    # wf.photo_date, wf.photo_location), the location read before Put File
+    # fetches the file.
     def per_photo():
+        photo_location(b, REPEAT_ITEM, REPEAT_INDEX)
         name = b.get_name(REPEAT_ITEM)
         b.ashell_put_file(
             b.set_name(REPEAT_ITEM, 'jxl_in_', REPEAT_INDEX, '.orig')
@@ -320,13 +324,17 @@ def build_compress(sample):
     b.ashell_put_file(
         b.set_name(b.combine(variable('Jobs'), '\n'), 'jxl_job.txt')
     )
-    b.if_has_value(
-        variable('Dates'),
-        lambda: b.ashell_put_file(
-            b.set_name(b.combine(variable('Dates'), '\n'), 'jxl_dates.txt')
-        ),
-        lambda: None,
-    )
+    for var, file_name in (
+        ('Dates', 'jxl_dates.txt'),
+        ('Meta', 'jxl_meta.txt'),
+    ):
+        b.if_has_value(
+            variable(var),
+            lambda var=var, file_name=file_name: b.ashell_put_file(
+                b.set_name(b.combine(variable(var), '\n'), file_name)
+            ),
+            lambda: None,
+        )
 
     def from_share_sheet():
         # A share-sheet shortcut can't resume after a-Shell: JXL-Import saves,

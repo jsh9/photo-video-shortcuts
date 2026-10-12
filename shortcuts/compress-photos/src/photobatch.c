@@ -12,7 +12,10 @@
 // that moment (Photos' date was changed, or the file has none) gets it in its
 // EXIF (see exif_set_capture_date), so Photos and other apps show that date;
 // a photo without a time zone whose clock time is that moment in some zone
-// keeps its time and gets the zone.
+// keeps its time and gets the zone. jxl_meta.txt, if there, gives the rest
+// Photos has for a photo, "i|field|value" (gps, title, caption, keywords; see
+// read_meta): written into its EXIF and XMP when the file's differs, removed
+// when Photos has none (see apply_photos_meta).
 //
 // Builds with threads (JXLBATCH_THREADS, the Mac) can convert several photos
 // at a time (-j), each with a share of the cores (-t); the output and
@@ -52,6 +55,7 @@
 #endif
 #define DONE_FILE "jxl_done.txt"
 #define DATES_FILE "jxl_dates.txt"
+#define META_FILE "jxl_meta.txt"
 // An HDR photo with at least this share of bright sky (grain_bright_sky), in
 // percent, gets a warning (--sky-warn): Photos shows faint pink patches in
 // such skies of HDR JPEG XLs. Calibrated on nine iPhone HDR photos: the one
@@ -623,10 +627,20 @@ static int encode_jxl(image_t *img, const encode_meta_t *em, const options_t *op
 // ---------------------------------------------------------------------------
 // Jobs
 
+// The fields of jxl_meta.txt (see read_meta).
+enum { META_GPS = 1, META_TITLE = 2, META_CAPTION = 4, META_KEYWORDS = 8 };
+
 typedef struct {
   unsigned index;
   char name[256];
   char date[64];  // from jxl_dates.txt (see read_dates); "" if none
+  // From jxl_meta.txt: what Photos has for the photo, each field only when
+  // `given` has its flag; an empty one means Photos has none.
+  unsigned given;
+  char gps[96];  // "lat,lon" or "lat,lon,alt"
+  char *title, *caption;
+  char **keywords;
+  size_t num_keywords;
 } job_t;
 
 static void clean_name(char *name, unsigned index) {
@@ -667,9 +681,8 @@ static int parse_jobs(const uint8_t *data, size_t len, job_t **jobs_out, size_t 
     unsigned idx = 0;
     while (a < b && data[a] >= '0' && data[a] <= '9' && idx < 100000000u) idx = idx * 10 + (data[a++] - '0');
     job_t job;
+    memset(&job, 0, sizeof job);
     job.index = idx;
-    job.name[0] = 0;
-    job.date[0] = 0;
     if (a < b && data[a] == '|') {
       a++;
       while (a < b && data[a] == ' ') a++;
@@ -732,6 +745,132 @@ static void read_dates(const char *dir, job_t *jobs, size_t count) {
   free(data);
 }
 
+static int hex_digit(char c) {
+  return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+// A copy of data[a, b) without surrounding spaces, its "%XX" sequences
+// decoded (jxl_meta.txt escapes %, |, tab, CR and LF, and a comma within a
+// keyword), or NULL if out of memory.
+static char *meta_text(const uint8_t *data, size_t a, size_t b) {
+  while (a < b && data[a] == ' ') a++;
+  while (b > a && data[b - 1] == ' ') b--;
+  char *text = (char *)malloc(b - a + 1);
+  if (!text) return NULL;
+  size_t n = 0;
+  for (size_t i = a; i < b; i++) {
+    const int hi = data[i] == '%' && i + 2 < b ? hex_digit((char)data[i + 1]) : -1;
+    const int lo = hi >= 0 ? hex_digit((char)data[i + 2]) : -1;
+    if (lo >= 0) {
+      text[n++] = (char)(hi * 16 + lo);
+      i += 2;
+    } else {
+      text[n++] = (char)data[i];
+    }
+  }
+  text[n] = 0;
+  return text;
+}
+
+// Gives each job the lines "i|field|value" of jxl_meta.txt, if that file is
+// there (the shortcuts write it from 0.8.0 on): what Photos has for the photo
+// besides its date. Fields: gps ("lat,lon" or "lat,lon,alt"), title, caption,
+// keywords (separated by commas); an empty value means Photos has none, and
+// a field without a line is left as the file has it. Checked when the photo
+// is converted (apply_photos_meta). A field that can't be stored (out of
+// memory) is left out.
+static void read_meta(const char *dir, job_t *jobs, size_t count) {
+  char *path = path_join(dir, META_FILE);
+  uint8_t *data = NULL;
+  size_t len = 0;
+  if (!path || read_file(path, &data, &len) != 0) {
+    free(path);
+    return;
+  }
+  free(path);
+  size_t pos = 0;
+  while (pos < len) {
+    size_t end = pos;
+    while (end < len && data[end] != '\n') end++;
+    size_t a = pos, b = end;
+    pos = end + 1;
+    while (b > a && data[b - 1] == '\r') b--;
+    unsigned idx = 0;
+    size_t digits = 0;
+    while (a < b && data[a] >= '0' && data[a] <= '9' && idx < 100000000u) {
+      idx = idx * 10 + (data[a++] - '0');
+      digits++;
+    }
+    if (!digits || a >= b || data[a] != '|') continue;
+    const size_t field = ++a;
+    while (a < b && data[a] != '|') a++;
+    if (a >= b) continue;
+    const size_t field_len = a - field;
+    a++;
+    job_t *job = NULL;
+    for (size_t i = 0; i < count && !job; i++) job = jobs[i].index == idx ? &jobs[i] : NULL;
+    if (!job) continue;
+    const char *f = (const char *)data + field;
+#define FIELD(name) (field_len == sizeof name - 1 && memcmp(f, name, field_len) == 0)
+    if (FIELD("gps")) {
+      while (a < b && data[a] == ' ') a++;
+      const size_t n = b - a < sizeof job->gps ? b - a : sizeof job->gps - 1;
+      memcpy(job->gps, data + a, n);
+      job->gps[n] = 0;
+      job->given |= META_GPS;
+    } else if (FIELD("title") || FIELD("caption")) {
+      char *text = meta_text(data, a, b);
+      if (!text) continue;
+      char **slot = FIELD("title") ? &job->title : &job->caption;
+      free(*slot);
+      *slot = text;
+      job->given |= FIELD("title") ? META_TITLE : META_CAPTION;
+    } else if (FIELD("keywords")) {
+      size_t n = 0;
+      for (size_t i = a; i < b; i++) n += data[i] == ',';
+      char **list = (char **)calloc(n + 1, sizeof *list);
+      if (!list) continue;
+      size_t k = 0;
+      int ok = 1;
+      for (size_t from = a; from <= b && ok;) {
+        size_t to = from;
+        while (to < b && data[to] != ',') to++;
+        char *keyword = meta_text(data, from, to);
+        if (!keyword) {
+          ok = 0;
+        } else if (keyword[0]) {
+          list[k++] = keyword;
+        } else {
+          free(keyword);
+        }
+        from = to + 1;
+      }
+      if (!ok) {
+        for (size_t i = 0; i < k; i++) free(list[i]);
+        free(list);
+        continue;
+      }
+      for (size_t i = 0; i < job->num_keywords; i++) free(job->keywords[i]);
+      free(job->keywords);
+      job->keywords = list;
+      job->num_keywords = k;
+      job->given |= META_KEYWORDS;
+    }
+#undef FIELD
+  }
+  free(data);
+}
+
+static void free_jobs(job_t *jobs, size_t count) {
+  for (size_t i = 0; i < count; i++) {
+    free(jobs[i].title);
+    free(jobs[i].caption);
+    for (size_t k = 0; k < jobs[i].num_keywords; k++) free(jobs[i].keywords[k]);
+    free(jobs[i].keywords);
+  }
+  free(jobs);
+}
+
 typedef struct {
   size_t done;
   size_t apple_jpegs;  // originals that Photos sent as JPEG (see run_batch)
@@ -787,6 +926,188 @@ static int apply_photo_date(const job_t *job, uint8_t **exif, size_t *exif_len, 
     say_wrap("  ", "date from Photos: %s (the file had %s)", text, was[0] ? was : "none");
   }
   return 1;
+}
+
+// 1 if two texts are the same but for surrounding whitespace (NULL is
+// empty).
+static int same_text(const char *a, const char *b) {
+  a = a ? a : "";
+  b = b ? b : "";
+  while (*a == ' ' || *a == '\t' || *a == '\n' || *a == '\r') a++;
+  while (*b == ' ' || *b == '\t' || *b == '\n' || *b == '\r') b++;
+  size_t na = strlen(a), nb = strlen(b);
+  while (na && (a[na - 1] == ' ' || a[na - 1] == '\t' || a[na - 1] == '\n' || a[na - 1] == '\r')) na--;
+  while (nb && (b[nb - 1] == ' ' || b[nb - 1] == '\t' || b[nb - 1] == '\n' || b[nb - 1] == '\r')) nb--;
+  return na == nb && memcmp(a, b, na) == 0;
+}
+
+static int text_order(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+// The distinct texts of a list, sorted, in a malloc'ed array of pointers
+// into it; NULL if out of memory (or empty).
+static char **distinct(char *const *list, size_t n, size_t *count) {
+  *count = 0;
+  char **sorted = (char **)malloc((n ? n : 1) * sizeof *sorted);
+  if (!sorted) return NULL;
+  memcpy(sorted, list, n * sizeof *sorted);
+  qsort(sorted, n, sizeof *sorted, text_order);
+  for (size_t i = 0; i < n; i++) {
+    if (!*count || strcmp(sorted[*count - 1], sorted[i]) != 0) sorted[(*count)++] = sorted[i];
+  }
+  return sorted;
+}
+
+// 1 if two keyword lists hold the same keywords, in any order; -1 if out of
+// memory.
+static int same_keywords(char *const *a, size_t na, char *const *b, size_t nb) {
+  size_t ka, kb;
+  char **sa = distinct(a, na, &ka), **sb = distinct(b, nb, &kb);
+  int same = -1;
+  if (sa && sb) {
+    same = ka == kb;
+    for (size_t i = 0; same && i < ka; i++) same = strcmp(sa[i], sb[i]) == 0;
+  }
+  free(sa);
+  free(sb);
+  return same;
+}
+
+// What the photo has in Photos besides its date, if the shortcut gave it
+// (jxl_meta.txt), written into `exif` and `xmp` (each replaced by a new,
+// malloc'ed one, or created; the caller frees either), as the date is: a
+// field the file already has the same stays as it is, another is written, and
+// one Photos doesn't have is removed. The location goes into the GPS IFD (and
+// a new or removed one takes the XMP's location along); the title, caption
+// and keywords into the XMP's dc:title, dc:description and dc:subject, the
+// caption also into an ImageDescription the file has (ImageIO prefers it to
+// the XMP's). Returns 1 when something was written, 0 when not, -1 if out of
+// memory.
+static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len, uint8_t **xmp, size_t *xmp_len) {
+  int changed = 0;
+  if (job->given & META_GPS) {
+    photo_location_t want, had;
+    const int none = !job->gps[0];
+    const int has = *exif && exif_gps(*exif, *exif_len, &had);
+    if (!none && !photo_location_parse(job->gps, &want)) {
+      say_wrap("  ", "! location not understood (%s); the file's is kept", job->gps);
+    } else if (none ? has : !(has && photo_location_same(&want, &had))) {
+      uint8_t *out = NULL;
+      size_t out_len = 0;
+      const int rc = exif_set_gps(*exif, *exif_len, none ? NULL : &want, &out, &out_len);
+      if (rc == -1) return -1;
+      if (rc == -2) {
+        say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");
+      } else {
+        free(*exif);
+        *exif = out;
+        *exif_len = out_len;
+        if (*xmp && xmp_remove_location(xmp, xmp_len) < 0) return -1;
+        changed = 1;
+        if (none) {
+          say_wrap("  ", "location removed: Photos has none");
+        } else {
+          say_wrap("  ", "location from Photos: %.6f, %.6f (the file had %s)", want.lat, want.lon,
+                   has ? "another" : "none");
+        }
+      }
+    } else if (none && *xmp) {
+      // Neither Photos nor the EXIF has one: nor should the XMP.
+      const int removed = xmp_remove_location(xmp, xmp_len);
+      if (removed < 0) return -1;
+      if (removed) {
+        changed = 1;
+        say_wrap("  ", "location removed: Photos has none");
+      }
+    }
+  }
+
+  if (!(job->given & (META_TITLE | META_CAPTION | META_KEYWORDS))) return changed;
+  char *had_title = NULL, *had_caption = NULL, *had_description = NULL, **had_keywords = NULL;
+  size_t had_num_keywords = 0;
+  int rc = 0;
+  if ((*xmp && (xmp_dc_text(*xmp, *xmp_len, "title", &had_title) != 0 ||
+                xmp_dc_text(*xmp, *xmp_len, "description", &had_caption) != 0 ||
+                xmp_dc_subject(*xmp, *xmp_len, &had_keywords, &had_num_keywords) != 0)) ||
+      (*exif && exif_description(*exif, *exif_len, &had_description) != 0)) {
+    rc = -1;
+    goto done;
+  }
+  unsigned which = 0;
+  if ((job->given & META_TITLE) && !same_text(had_title, job->title)) which |= XMP_DC_TITLE;
+  // The caption agrees when the ImageDescription, if any, and the XMP's, if
+  // any, are Photos' (or, with neither, Photos has none).
+  if ((job->given & META_CAPTION) &&
+      !(had_description ? same_text(had_description, job->caption) && (!had_caption || same_text(had_caption, job->caption))
+                        : same_text(had_caption, job->caption))) {
+    which |= XMP_DC_DESCRIPTION;
+  }
+  if (job->given & META_KEYWORDS) {
+    const int same = same_keywords(had_keywords, had_num_keywords, job->keywords, job->num_keywords);
+    if (same < 0) {
+      rc = -1;
+      goto done;
+    }
+    if (!same) which |= XMP_DC_SUBJECT;
+  }
+  if (!which) goto done;
+  // A file without XMP gets a packet when a value is to be added.
+  const int adds = ((which & XMP_DC_TITLE) && job->title && job->title[0]) ||
+                   ((which & XMP_DC_DESCRIPTION) && job->caption && job->caption[0]) ||
+                   ((which & XMP_DC_SUBJECT) && job->num_keywords);
+  if (!*xmp && adds && xmp_new_packet(xmp, xmp_len) != 0) {
+    rc = -1;
+    goto done;
+  }
+  if (*xmp) {
+    const int set = xmp_set_dc(xmp, xmp_len, which, job->title, job->caption, (const char *const *)job->keywords,
+                               job->num_keywords);
+    if (set == -1) {
+      rc = -1;
+      goto done;
+    }
+    if (set == -2) {
+      say_wrap("  ", "! title, caption and keywords not written: the XMP can't be read; the file's are kept");
+      goto done;
+    }
+  }
+  if ((which & XMP_DC_DESCRIPTION) && had_description) {
+    uint8_t *out = NULL;
+    size_t out_len = 0;
+    const int set = exif_set_description(*exif, *exif_len, job->caption, &out, &out_len);
+    if (set == -1) {
+      rc = -1;
+      goto done;
+    }
+    if (set == 1) {
+      free(*exif);
+      *exif = out;
+      *exif_len = out_len;
+    }
+  }
+  changed = 1;
+  {
+    static const struct {
+      unsigned flag;
+      const char *name;
+    } kFields[] = {{XMP_DC_TITLE, "title"}, {XMP_DC_DESCRIPTION, "caption"}, {XMP_DC_SUBJECT, "keywords"}};
+    const int had[] = {had_title != NULL, had_caption || had_description, had_num_keywords > 0};
+    const int has[] = {job->title && job->title[0], job->caption && job->caption[0], job->num_keywords > 0};
+    for (size_t i = 0; i < sizeof kFields / sizeof *kFields; i++) {
+      if (!(which & kFields[i].flag)) continue;
+      if (has[i]) {
+        say_wrap("  ", "%s from Photos (the file had %s)", kFields[i].name, had[i] ? "another" : "none");
+      } else {
+        say_wrap("  ", "%s removed: Photos has none", kFields[i].name);
+      }
+    }
+  }
+done:
+  free(had_title);
+  free(had_caption);
+  free(had_description);
+  for (size_t i = 0; i < had_num_keywords; i++) free(had_keywords[i]);
+  free(had_keywords);
+  return rc < 0 ? -1 : changed;
 }
 
 // Converts one photo to HEIC (--heic): jxl_in_N.orig to jxl_out_N.heic,
@@ -853,16 +1174,18 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
     xmp_len = mo.xmp.size;
   }
   const int dated = apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len);
-  if (dated < 0) {
+  const int described = dated < 0 ? -1 : apply_photos_meta(job, &exif, &exif_len, &xmp, &xmp_len);
+  if (described < 0) {
     snprintf(err, sizeof err, "out of memory");
     goto done;
   }
+  const int changed = dated || described;
   const heic_opts_t ho = {opt->rf, opt->sdr, t_threads > 0 ? t_threads : 1};
 
   if (format == FMT_HEIF) {
     // Its own container, with the tiles re-encoded.
-    const int rc = heic_transcode(orig, orig_len, &ho, dated ? exif : NULL, dated ? exif_len : 0, dated ? xmp : NULL,
-                                  dated ? xmp_len : 0, &heic, &heic_len, &info, err, sizeof err);
+    const int rc = heic_transcode(orig, orig_len, &ho, changed ? exif : NULL, changed ? exif_len : 0,
+                                  changed ? xmp : NULL, changed ? xmp_len : 0, &heic, &heic_len, &info, err, sizeof err);
     if (rc < 0) goto done;
     if (rc == 0) {
       transcoded = 1;
@@ -1163,8 +1486,9 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
   }
 
-  // The date the photo has in Photos, if the shortcut gave it.
-  if (apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len) < 0) {
+  // The date and the rest the photo has in Photos, if the shortcut gave them.
+  if (apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len) < 0 ||
+      apply_photos_meta(job, &exif, &exif_len, &xmp, &xmp_len) < 0) {
     snprintf(err, sizeof err, "out of memory");
     goto done;
   }
@@ -1501,6 +1825,7 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   }
   free(data);
   read_dates(dir_for_files, jobs, count);
+  read_meta(dir_for_files, jobs, count);
   char *started = path_join(dir_for_files, STARTED_FILE);
   if (started) write_file(started, (const uint8_t *)"", 0);
   free(started);
@@ -1586,7 +1911,7 @@ static int run_batch(const options_t *opt, const char *job_arg) {
              "there, or set Options > Send As > Current in the share sheet.",
              one ? "this" : "these", one ? "" : "s", one ? "that JPEG" : "those JPEGs");
   }
-  free(jobs);
+  free_jobs(jobs, count);
   free(job_path);
   free(dir);
   return batch.done > 0 ? 0 : 1;
@@ -1954,7 +2279,9 @@ static void usage(void) {
 #endif
       "  -C  folder holding JOBFILE and the jxl_in_* files (and jxl_dates.txt, if any:\n"
       "      \"i|2024-01-01T17:00:00-05:00\" per photo, its date in Photos, written to its EXIF\n"
-      "      when the file's capture date differs or is missing)\n"
+      "      when the file's capture date differs or is missing; and jxl_meta.txt, if any:\n"
+      "      \"i|gps|lat,lon\", \"i|title|...\", caption, keywords, what else Photos has, written\n"
+      "      to its EXIF and XMP, or removed when empty)\n"
       "  --retry  do nothing if a run already started this batch\n"
       "  --sdr    save HDR photos as SDR (their originals are marked to keep)\n"
       "  --sky-warn  warn about an HDR photo whose bright sky (smooth, colored, above SDR white)\n"

@@ -183,10 +183,11 @@ echo "== FFmpeg $FFMPEG_VERSION"
 # CoreVideo to the link, which nothing here uses: -dead_strip_dylibs drops them.
 ffdir="$bdir/ffmpeg-$FFMPEG_VERSION"
 mkdir -p "$ffdir"
-# configure runs again only when this script changes (it takes a minute); make
-# rebuilds what changed. The programs are relinked every time, in case a
-# library above was rebuilt.
-stamp=$(shasum -a 256 "$ROOT/scripts/build-macos.sh" | cut -d ' ' -f 1)
+# configure runs again only when this script or VERSION changes (it takes a
+# minute; VERSION is in the version line, --extra-version); make rebuilds what
+# changed. The programs are relinked every time, in case a library above was
+# rebuilt.
+stamp=$(cat "$ROOT/scripts/build-macos.sh" "$ROOT/VERSION" | shasum -a 256 | cut -d ' ' -f 1)
 if [ "$(cat "$ffdir/configured" 2>/dev/null || true)" != "$stamp" ]; then
   (
     cd "$ffdir"

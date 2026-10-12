@@ -16,6 +16,14 @@ DATES=$(cat <<'JXL_DATES'
 JXL_DATES
 )
 [ -n "$DATES" ] && print -r -- "$DATES" > "$WORK/jxl_dates.txt"
+# Their locations in Photos, "index|gps|lat,lon" each (the shortcut's Meta;
+# "index|gps|" for a photo Photos has no location for): photobatch writes a
+# location into the copy's EXIF, or removes the file's.
+META=$(cat <<'JXL_META'
+@META@
+JXL_META
+)
+[ -n "$META" ] && print -r -- "$META" > "$WORK/jxl_meta.txt"
 @RUN@
 # One line per converted photo, jxl_done.txt's "file|index|delete or keep|Name.jxl";
 # the shortcut reads each file from the work folder with Get File (the only

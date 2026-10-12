@@ -325,6 +325,53 @@ def photo_date(b, photo, index):
     )
 
 
+def photo_location(b, photo, index):
+    """
+    Appends "index|gps|lat,lon" to the variable Meta: ``photo``'s location in
+    Photos (Get Details of Images ▸ Location, then Get Details of Locations ▸
+    Latitude and Longitude), for photobatch's jxl_meta.txt. photobatch writes
+    it into the copy's EXIF when the original's GPS is another place or
+    missing. A library photo without a location in Photos (none, or hidden with
+    Hide Location) gets "index|gps|", and photobatch removes the file's.
+
+    For a library photo, Location is the asset's, what Photos shows (changes
+    included), only while no file of the photo has been fetched: ContentKit's
+    -[WFPhotoMediaContentItem location] (iOS 18.2) returns the file's GPS once
+    the item has a file representation. So this comes before anything reads the
+    photo's file (Put File, a script's input); were it after, the copy would
+    keep its file's location, never a wrong one. The coordinates are text,
+    independent of the device's region (``b.location_details``); the altitude,
+    a Number shown in the region's format and 0 when unknown, is left out. An
+    image from another app has no asset: its Location is its file's, the copy's
+    anyway, and nothing is written when it has none. Is Favorite tells a
+    library photo (Yes or No) from such an image (nothing), as in
+    collect_in_album.
+    """
+    location = b.photo_details(photo, 'Location')
+
+    def known():
+        b.append_variable(
+            'Meta',
+            b.text(
+                index,
+                '|gps|',
+                b.location_details(location, 'Latitude'),
+                ',',
+                b.location_details(location, 'Longitude'),
+            ),
+        )
+
+    def unknown():
+        in_library = b.match_text(b.photo_details(photo, 'Is Favorite'), '.')
+        b.if_has_value(
+            in_library,
+            lambda: b.append_variable('Meta', b.text(index, '|gps|')),
+            lambda: None,
+        )
+
+    b.if_has_value(location, known, unknown)
+
+
 # The album the converted originals are collected in, on both platforms. The
 # shortcuts never delete photos: the user reviews the album and deletes.
 ORIGINALS_ALBUM = 'Compressed originals'
