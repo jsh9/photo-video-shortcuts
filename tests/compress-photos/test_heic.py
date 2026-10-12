@@ -396,10 +396,11 @@ class Meta:
     """
     A HEIC's 'meta' box taken apart for editing: its child boxes' payloads in
     order (bytearrays), the 'iloc' entries ([id, construction method, data
-    reference, [(offset, length)]]) and the 'idat' payload. The fixtures'
-    'iloc' is version 1 with 4-byte offsets and lengths, no base offsets or
-    extent indices. write() puts the file together again, with the 'mdat'
-    offsets moved by what 'meta' grew.
+    reference, [(offset, length)]], offsets absolute in the file, or into
+    'idat') and the 'idat' payload. 'iloc' versions 0 and 1 are read (any
+    offset, length and base offset sizes); it is written as version 1 with
+    4-byte offsets and lengths and no base offsets. write() puts the file
+    together again, with the 'mdat' offsets moved by what 'meta' grew.
     """
 
     def __init__(self, path):
@@ -413,18 +414,35 @@ class Meta:
             for t, a, b in boxes(buf, self.meta[0] + 12, self.meta[1])
         ]
         iloc = self.child(b'iloc')
-        assert iloc[0] == 1 and iloc[4] == 0x44 and iloc[5] == 0
-        self.iloc_header = bytes(iloc[:6])
+        version = iloc[0]
+        assert version in (0, 1), version
+        osz, lsz = iloc[4] >> 4, iloc[4] & 15
+        bsz, isz = iloc[5] >> 4, iloc[5] & 15 if version else 0
         count = struct.unpack('>H', iloc[6:8])[0]
         self.entries, q = [], 8
         for _ in range(count):
-            iid, method, dref, n = struct.unpack('>HHHH', iloc[q : q + 8])
-            q += 8
-            exts = [
-                struct.unpack('>II', iloc[q + 8 * k : q + 8 * k + 8])
-                for k in range(n)
-            ]
-            q += 8 * n
+            iid = struct.unpack('>H', iloc[q : q + 2])[0]
+            q += 2
+            method = 0
+            if version:
+                method = struct.unpack('>H', iloc[q : q + 2])[0] & 15
+                q += 2
+
+            dref = struct.unpack('>H', iloc[q : q + 2])[0]
+            q += 2
+            base = int.from_bytes(iloc[q : q + bsz], 'big')
+            q += bsz
+            n = struct.unpack('>H', iloc[q : q + 2])[0]
+            q += 2
+            exts = []
+            for _ in range(n):
+                q += isz
+                off = int.from_bytes(iloc[q : q + osz], 'big')
+                q += osz
+                length = int.from_bytes(iloc[q : q + lsz], 'big')
+                q += lsz
+                exts.append((base + off, length))
+
             self.entries.append([iid, method, dref, exts])
 
         idat = self.child(b'idat')
@@ -438,7 +456,9 @@ class Meta:
         out = bytearray()
         for t, payload in self.children:
             if t == b'iloc':
-                ent = bytearray(self.iloc_header)
+                # version 1, no flags; 4-byte offsets and lengths, no base
+                # offsets or extent indices
+                ent = bytearray(b'\x01\x00\x00\x00\x44\x00')
                 ent += struct.pack('>H', len(self.entries))
                 for iid, method, dref, exts in self.entries:
                     ent += struct.pack('>HHHH', iid, method, dref, len(exts))
