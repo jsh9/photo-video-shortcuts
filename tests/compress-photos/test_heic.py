@@ -502,6 +502,28 @@ def with_mime_item(path, folder, content_type, data, before_id):
     return copy
 
 
+def with_icc_profile(path, folder, icc):
+    """
+    A copy of the HEIC whose 'colr' properties are each replaced by one
+    carrying the ICC profile `icc` (every other property, and so each one's
+    index in 'ipma', stays).
+    """
+    m = Meta(path)
+    iprp = m.child(b'iprp')
+    (ipco,) = [(a, b) for t, a, b in boxes(iprp, 0, len(iprp)) if t == b'ipco']
+    box = struct.pack('>I4s4s', 12 + len(icc), b'colr', b'prof') + icc
+    inner, replaced = bytearray(), 0
+    for t, a, b in boxes(iprp, ipco[0] + 8, ipco[1]):
+        inner += box if t == b'colr' else iprp[a:b]
+        replaced += t == b'colr'
+
+    assert replaced
+    iprp[ipco[0] : ipco[1]] = (
+        struct.pack('>I4s', 8 + len(inner), b'ipco') + inner
+    )
+    return m.write(folder / path.name)
+
+
 def test_date_lands_in_an_exif_item_stored_in_idat(encoder, tmp_path):
     # Replaced data goes to 'mdat' wherever the old data was; the new file
     # has every item the old one had.
@@ -654,6 +676,20 @@ def gray_icc(gamma):
     return header + table + body
 
 
+def assert_half_white_srgb(out, apple_sdr):
+    """
+    The HEIC is sRGB by an nclx, with no profile, and shows as half of white:
+    what a mid gray with a linear-light profile is.
+    """
+    buf = out.read_bytes()
+    (meta,) = [(a, b) for t, a, b in boxes(buf, 0, len(buf)) if t == b'meta']
+    colr = buf.find(b'colr', meta[0], meta[1])
+    assert buf[colr + 4 : colr + 8] == b'nclx'
+    assert b'prof' not in buf[meta[0] : meta[1]]
+    rendered = apple_sdr(out)
+    assert abs(float(rendered.mean()) - 128 / 255) < 0.02
+
+
 def test_gray_profile_is_applied_and_the_picture_written_as_srgb(
         encoder, tmp_path, apple_sdr
 ):
@@ -664,15 +700,24 @@ def test_gray_profile_is_applied_and_the_picture_written_as_srgb(
     Image.new('L', (300, 200), 128).save(png, 'PNG', icc_profile=gray_icc(1))
     out, _, log = convert(encoder, tmp_path, png)
     assert 'PNG 300x200, SDR HEIC' in log
-    buf = out.read_bytes()
-    (meta,) = [(a, b) for t, a, b in boxes(buf, 0, len(buf)) if t == b'meta']
-    colr = buf.find(b'colr', meta[0], meta[1])
-    assert (
-        buf[colr + 4 : colr + 8] == b'nclx'
-        and b'prof' not in buf[meta[0] : meta[1]]
-    )
-    rendered = apple_sdr(out)
-    assert abs(float(rendered.mean()) - 128 / 255) < 0.02
+    assert_half_white_srgb(out, apple_sdr)
+
+
+def test_gray_profile_on_a_heif_written_anew(
+        encoder, tmp_path, helpers, apple_sdr
+):
+    # The decoder gives a HEIF's pixels as RGB whatever the file holds, so the
+    # profile, not the channel count, decides. ImageIO writes no monochrome
+    # HEVC, so: a mid-gray 10-bit HEIC (not transcodable: written anew) whose
+    # color property is swapped for a linear-light gray profile.
+    png = tmp_path / 'gray.png'
+    Image.new('RGB', (300, 200), (128, 128, 128)).save(png, 'PNG')
+    heic = tmp_path / 'gray.heic'
+    ph.run([helpers['make_photo'], png, heic, '--depth16'], check=True)
+    photo = with_icc_profile(heic, tmp_path / 'src', gray_icc(1))
+    out, _, log = convert(encoder, tmp_path / 'job', photo)
+    assert 'written anew, as SDR' in log
+    assert_half_white_srgb(out, apple_sdr)
 
 
 def test_ten_bit_pixels_are_written_as_an_eight_bit_sdr_heic(

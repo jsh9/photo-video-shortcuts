@@ -570,27 +570,29 @@ int heic_from_pixels(const image_t *img, const color_t *color, const uint8_t *ex
   size_t hvcc_len = 0;
   if (!y || !u || !v || !cb || !cr) goto oom;
   const int ch_in = img->channels;
-  // A gray picture with a gray ICC profile: its samples go through the
-  // profile's curve to sRGB, and the picture is written as sRGB (the profile
-  // can't describe the RGB written). A profile whose curve can't be read is
-  // refused rather than attached.
+  // A picture with a gray ICC profile (a gray PNG or JPEG, decoded as one
+  // channel; a monochrome HEIF, which the decoder gives as RGB): its samples
+  // go through the profile's curve to sRGB, and the picture is written as
+  // sRGB (the profile can't describe the RGB written). A profile whose curve
+  // can't be read is refused rather than attached.
   uint8_t lut[256];
   const uint8_t *gray = NULL;
   int srgb_gray = 0;
-  if (ch_in < 3 && color->icc.size) {
-    if (gainmap_gray_icc_srgb_lut(&color->icc, lut)) {
-      gray = lut;
-      srgb_gray = 1;
-    } else if (color->icc.size >= 20 && memcmp(color->icc.data + 16, "GRAY", 4) == 0) {
+  if (color->icc.size >= 20 && memcmp(color->icc.data + 16, "GRAY", 4) == 0) {
+    if (!gainmap_gray_icc_srgb_lut(&color->icc, lut)) {
       snprintf(err, err_len, "a grayscale image whose color profile can't be read can't be saved as HEIC; choose JPEG XL for it");
       goto done;
     }
+    gray = lut;
+    srgb_gray = 1;
   }
   for (uint32_t yy = 0; yy < h2; yy++) {
     const uint8_t *row = img->data + (size_t)(yy < h ? yy : h - 1) * img->stride;
     for (uint32_t xx = 0; xx < w2; xx++) {
       const uint8_t *px = row + (size_t)(xx < w ? xx : w - 1) * ch_in;
-      const double r = gray ? gray[px[0]] : px[0], g = ch_in >= 3 ? px[1] : r, b = ch_in >= 3 ? px[2] : r;
+      const double r = gray ? gray[px[0]] : px[0];
+      const double g = ch_in < 3 ? r : gray ? gray[px[1]] : px[1];
+      const double b = ch_in < 3 ? r : gray ? gray[px[2]] : px[2];
       const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
       y[(size_t)yy * w2 + xx] = clamp8(luma);
       const size_t c = (size_t)(yy / 2) * cw + xx / 2;

@@ -708,7 +708,8 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   `idat`, `ispe`, `pixi`, `colr` with the source's ICC profile or an nclx, one
   shared `hvcC`, an Exif item and an XMP `mime` item, the orientation reset in
   both as the pixels are upright). 10-bit and 16-bit pixels are rounded to 8
-  bits first; a gray picture with a gray ICC profile goes through the profile's
+  bits first; a picture with a gray ICC profile (a gray PNG or JPEG, or a
+  monochrome HEIF, which libheif decodes to RGB) goes through the profile's
   curve (`gainmap_gray_icc_srgb_lut`) and is written as sRGB, since the profile
   can't describe the RGB written. Always SDR: a gain map isn't carried, and
   refused are a picture with transparency (no alpha image is written), an HDR
