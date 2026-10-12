@@ -235,6 +235,96 @@ def test_locations_in_photos_go_to_photobatch(gen, shortcuts):
     assert stale[0] < read < rename < min(runs)
 
 
+FAVORITE = 'com.apple.mobileslideshow.FavoriteAssetsIntent'
+
+
+def favorite_ifs(actions):
+    """
+    The Ifs on a Boolean (wfkit.if_true), as {index: the output UUID they
+    test}, each checked: "is" with the switch on.
+    """
+    found = {}
+    for i, a in enumerate(actions):
+        p = ph.params(a)
+        if (
+            ph.ident(a) == 'is.workflow.actions.conditional'
+            and p.get('WFCondition') == 4
+        ):
+            assert p['WFConditionalActionBoolean'] is True
+            assert p['WFControlFlowMode'] == 0
+            (uuid,) = {
+                r['OutputUUID']
+                for r in ph.references(p['WFInput'])
+                if 'OutputUUID' in r
+            }
+            found[i] = uuid
+
+    return found
+
+
+def test_copies_of_favorites_are_favorites(gen, shortcuts):
+    # From the picker, each saved copy is made a favorite (Photos' Favorite
+    # Photos) when its original's Is Favorite is true. From the share sheet,
+    # Compress Photos marks each favorite with jxl_favorite_<i>.txt in
+    # a-Shell, and JXL-Import makes the saved copy a favorite when that file
+    # is there; the cleanup removes the marks, and a stale one is removed
+    # before a run.
+    by_uuid = {
+        ph.params(a).get('UUID'): a
+        for name in (gen.NAME_A, gen.NAME_B)
+        for a in shortcuts[name]
+    }
+    compress = shortcuts[gen.NAME_A]
+    favorites = [
+        (i, a) for i, a in enumerate(compress) if ph.ident(a) == FAVORITE
+    ]
+    assert len(favorites) == 1
+    at, favorite = favorites[0]
+    descriptor = ph.params(favorite)['AppIntentDescriptor']
+    assert descriptor['AppIntentIdentifier'] == 'FavoriteAssetsIntent'
+    assert descriptor['BundleIdentifier'] == 'com.apple.mobileslideshow'
+    (assets,) = ph.references(ph.params(favorite)['assets'])
+    saved = by_uuid[assets['OutputUUID']]
+    assert ph.ident(saved) == 'is.workflow.actions.savetocameraroll'
+    ifs = favorite_ifs(compress)
+    tested = [
+        by_uuid[uuid]
+        for i, uuid in ifs.items()
+        if dict((id(x), yes) for x, yes in ph.inside_if_on(compress, uuid))[
+            id(favorite)
+        ]
+    ]
+    assert [ph.params(t)['WFContentItemPropertyName'] for t in tested] == [
+        'Is Favorite'
+    ]
+    # the share sheet's marks, inside an If on Is Favorite too
+    marks = [
+        i
+        for i, a in enumerate(compress)
+        if ph.ident(a) == 'is.workflow.actions.setitemname'
+        and 'jxl_favorite_' in repr(ph.params(a)['WFName'])
+    ]
+    assert len(marks) == 1
+    assert ph.ident(compress[marks[0] + 1]).endswith('PutFileIntent')
+    assert len(ifs) == 2
+    importer = shortcuts[gen.NAME_B]
+    (favorite,) = [a for a in importer if ph.ident(a) == FAVORITE]
+    reads = [
+        a
+        for a in importer
+        if ph.ident(a).endswith('GetFileIntent')
+        and 'jxl_favorite_' in repr(ph.params(a)['fileName'])
+    ]
+    assert len(reads) == 1
+    assert ph.params(reads[0])['errorIfNotFound'] is False
+    inside = dict(
+        (id(x), yes)
+        for x, yes in ph.inside_if_on(importer, ph.params(reads[0])['UUID'])
+    )
+    assert inside[id(favorite)]
+    assert 'jxl_favorite_*' in gen.CLEANUP.split()
+
+
 def test_share_sheet_settings(gen, shortcuts):
     sample = gen.Sample(gen.guessed_workflow())
     compress = gen.workflow(sample, gen.NAME_A, shortcuts[gen.NAME_A], True)
@@ -302,19 +392,27 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     assert checks[0] < saves[0] < checks[1] < saves[1]
     # only library photos: an image from another app answers nothing to
     # Is Favorite, and Save to Photo Album would import it as a new photo
-    # (after the staging: the one before it is wf.photo_location's)
+    # (those that Match Text reads, after the staging: the one before it is
+    # wf.photo_location's, and those an If reads make copies favorites)
     staged = min(
         i
         for i, a in enumerate(actions)
         if ph.ident(a) == 'is.workflow.actions.setitemname'
         and 'jxl_in_' in repr(ph.params(a)['WFName'])
     )
+    matched = {
+        r.get('OutputUUID')
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        for r in ph.references(ph.params(a)['text'])
+    }
     favorites = [
         i
         for i, a in enumerate(actions)
         if ph.ident(a) == 'is.workflow.actions.properties.images'
         and ph.params(a)['WFContentItemPropertyName'] == 'Is Favorite'
         and i > staged
+        and ph.params(a)['UUID'] in matched
     ]
     assert len(favorites) == 2
     assert favorites[0] < checks[0] and favorites[1] < checks[1]

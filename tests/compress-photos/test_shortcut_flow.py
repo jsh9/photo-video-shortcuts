@@ -374,6 +374,7 @@ def test_cleanup_leaves_nothing(actions, ashell, photos):
     locations_like_shortcut(actions, shell.shortcuts, {1: None})
     shell.run(batch_command(actions, 'shortcuts://'))
     (shell.shortcuts / 'jxl_albums_1.txt').write_text('Holidays')
+    (shell.shortcuts / 'jxl_favorite_1.txt').write_text('favorite')
     cleanup = next(
         c
         for c in ph.ashell_commands(actions['import'], {})

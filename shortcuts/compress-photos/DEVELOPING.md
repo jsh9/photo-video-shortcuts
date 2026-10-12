@@ -45,7 +45,8 @@ a-Shell ▸ photobatch → jxl_out_N.heic or .jxl + jxl_done.txt, with progress 
 then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
    under its original name, adds it to the albums listed in
-   jxl_albums_N.txt (written by Compress Photos), and cleans up
+   jxl_albums_N.txt (written by Compress Photos), makes it a favorite if
+   jxl_favorite_N.txt is there (likewise), and cleans up
    (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
@@ -774,10 +775,19 @@ apiece; the date too, as since 0.7.0) and sets what differs: the location
 (`{missing value, missing value}` removes one), title (`""` clears it),
 caption, keywords; and it makes the copy a favorite when the original is one.
 The log counts both, and the "Photos took ..." line has the time. Compress
-Videos' copies get this too. On the iPhone and the Mac's picker route the
-favorite isn't set yet: Photos' Favorite Photos action (the App Intent
-`FavoriteAssetsIntent`, in macOS 26's PhotosUICore) can do it, and its
-serialization is to come from a sample shortcut built on the iPhone.
+Videos' copies get this too.
+
+On the iPhone, a saved copy is made a favorite when its original is one
+(`wf.copy_favorite`): Get Details of Images ▸ Is Favorite, an If on it
+(`wfkit.if_true`: the condition "is", code 4, with `WFConditionalActionBoolean`
+on), and Photos' Favorite Photos (`wfkit.favorite_photos`: the App Intent
+`FavoriteAssetsIntent`, stored as
+`com.apple.mobileslideshow.FavoriteAssetsIntent` with its app's descriptor and
+the photos as `assets`; the format from a shortcut built on the iPhone, iOS
+26). From the share sheet, JXL-Import saves the copies without the originals,
+so Compress Photos marks each favorite with `jxl_favorite_<i>.txt` in a-Shell.
+The Mac's picker route doesn't set it yet: the same intent may be stored under
+Photos' Mac bundle identifier there.
 
 ### 1.6. HEIC output
 
@@ -969,24 +979,27 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
 2. **Get Text from Input**: File.
 3. **Split Text**: Text, by New Lines.
 4. **Repeat with Each** item in Split Text:
-   1. **Split Text**: Repeat Item, by Custom `|`.
-   2. **Get Item from List**: First Item of Split Text.
-   3. **Get Item from List**: Last Item of Split Text (the one from step 4.1).
-   4. a-Shell **Get File**: the First Item, Error If Not Found on.
-   5. **Set Name**: File to Last Item, with Don't Include File Extension on.
-   6. **Save to Photo Album**: Renamed Item, to Recents.
-   7. **Get Item from List**: Item At Index 2 of the `|` split (the photo's
-      position).
-   8. a-Shell **Get File**: `jxl_albums_<Item from List>.txt`, Error If Not
-      Found **off**.
-   9. **If** File has any value:
-      1. **Get Text from Input**: File, then **Split Text** by New Lines.
-      2. **Repeat with Each** item in Split Text: **Save to Photo Album**:
-         Saved Photo Media, to Repeat Item 2.
-      3. **End If** (Otherwise stays empty).
+   01. **Split Text**: Repeat Item, by Custom `|`.
+   02. **Get Item from List**: First Item of Split Text.
+   03. **Get Item from List**: Last Item of Split Text (the one from step 4.1).
+   04. a-Shell **Get File**: the First Item, Error If Not Found on.
+   05. **Set Name**: File to Last Item, with Don't Include File Extension on.
+   06. **Save to Photo Album**: Renamed Item, to Recents.
+   07. **Get Item from List**: Item At Index 2 of the `|` split (the photo's
+       position).
+   08. a-Shell **Get File**: `jxl_albums_<Item from List>.txt`, Error If Not
+       Found **off**.
+   09. **If** File has any value:
+       1. **Get Text from Input**: File, then **Split Text** by New Lines.
+       2. **Repeat with Each** item in Split Text: **Save to Photo Album**:
+          Saved Photo Media, to Repeat Item 2.
+       3. **End If** (Otherwise stays empty).
+   10. a-Shell **Get File**: `jxl_favorite_<Item from List>.txt`, Error If Not
+       Found **off**. **If** File has any value: Photos' **Favorite Photos**:
+       Saved Photo Media. **End If**.
 5. **Count**: Items in the Split Text from step 3.
 6. a-Shell **Execute Command**:
-   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started`,
+   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_favorite_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started`,
    Keep Going on.
 7. **Show Notification**: `Saved <Count> photo(s) to Photos.`
 
@@ -1052,7 +1065,7 @@ no input: Continue):
    6. **Match Text**: `\d+` in Name. Its Matches is the quality.
 
 4. a-Shell **Execute Command**:
-   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_meta.txt jxl_started`,
+   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started`,
    Keep Going on.
 
 5. **Repeat with Each** item in `Stills`:
@@ -1096,6 +1109,10 @@ no input: Continue):
       2. **If** Album has any value: **Combine Text** Album with New Lines,
          **Set Name** to `jxl_albums_<Repeat Index>.txt` (Don't Include File
          Extension on), a-Shell **Put File** (Overwrite on). **End If**.
+      3. **Get Details of Images**: Is Favorite of Repeat Item. **If** Is
+         Favorite is true: **Text** `favorite`, **Set Name** to
+         `jxl_favorite_<Repeat Index>.txt` (Don't Include File Extension on),
+         a-Shell **Put File** (Overwrite on). **End If**.
    2. a-Shell **Execute Command**, Keep Going off, with these commands:
       - `sleep 2`
       - `cd ~shortcuts`
@@ -1109,13 +1126,16 @@ no input: Continue):
      1. The same **Execute Command**, but with `open shortcuts://` as the last
         command.
      2. **Wait to Return**.
-     3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.9
+     3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.10
         with:
         1. **Get Item from List**: that item of `Stills` (the original).
         2. **Get Details of Images**: Album of that original.
         3. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
            Photo Media, to Repeat Item 2.
-        4. **Match Text** `(^|\n)Compressed originals($|\n)` in that Album
+        4. **Get Details of Images**: Is Favorite of the original. **If** Is
+           Favorite is true: Photos' **Favorite Photos**: Saved Photo Media.
+           **End If**.
+        5. **Match Text** `(^|\n)Compressed originals($|\n)` in that Album
            list. **If** Matches has any value: nothing. **Otherwise**: **Save
            to Photo Album**: the original, to a **Text**
            `Compressed originals`; **Add to Variable** `Collected` (the

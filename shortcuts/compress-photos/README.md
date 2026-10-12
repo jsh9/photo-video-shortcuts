@@ -77,10 +77,11 @@ pace (nothing is added to it any more).
     - Deleted photos go to Recently Deleted for 30 days. Deleting also removes
       what the JXL doesn't have: depth/Portrait data, the SDR version of an HDR
       photo (see [HDR photos](#31-hdr-photos)), edit history, and Photos-only
-      information (favorites, titles, captions, keywords, people). Albums are
-      kept, because the JXL is added to them, and so is the location (see
-      [Location](#33-location)). Live Photos are never converted, so they are
-      never collected.
+      information (titles, captions, keywords, people). Albums are kept,
+      because the JXL is added to them, and so are the location (see
+      [Location](#33-location)) and a favorite: a copy of a favorite is a
+      favorite too. Live Photos are never converted, so they are never
+      collected.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then stops at
@@ -383,11 +384,10 @@ Each copy gets the location Photos shows for its original, in the file itself
 
 When a location is written or removed, a-Shell's output says so, for example
 `location from Photos: 40.758442, -73.829767 (the file had another)` or
-`location removed: Photos has none`. Shortcuts doesn't give a photo's title,
-caption, keywords or favorite on the iPhone, so the copies keep the file's own
-title, caption and keywords (Photos-only ones are lost with the original), and
-aren't favorites. This needs the shortcuts and `photobatch.wasm` from version
-0.8.0.
+`location removed: Photos has none`. A copy of a favorite is a favorite too.
+Shortcuts doesn't give a photo's title, caption or keywords on the iPhone, so
+the copies keep the file's own (Photos-only ones are lost with the original).
+This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
 
 ## 4. Troubleshooting
 

@@ -235,8 +235,11 @@ reach, as are edits (the selection route converts the unedited original).
 - Favorite: when the original's Is Favorite is Yes, Photos' Favorite Photos
   action (Favorite) on the copy Save to Photo Album returned (spike 4). Is
   Favorite's text is localized ("Yes" in any language), so the test is If's
-  Boolean condition, not Match Text; the action's and the condition's
-  serialization come from a sample shortcut built on the iPhone (`--fetch`).
+  Boolean condition, not Match Text. The action's and the condition's format is
+  from a sample shortcut built on the iPhone (spike 4), written by the builder
+  (`wfkit.favorite_photos`, `wfkit.if_true`). From the share sheet, JXL-Import
+  has no originals: Compress Photos marks each favorite with
+  `jxl_favorite_<i>.txt` in a-Shell.
 
 ## 4. Spikes
 
@@ -301,14 +304,19 @@ reach, as are edits (the selection route converts the unedited original).
    and the file's after; Get Name and `keep_still_photos` don't fetch the file;
    Latitude and Longitude read with `.` under a German region format.
 
-4. **Favoriting from a shortcut.** macOS 26's Photos registers the App Intent
-   `FavoriteAssetsIntent` (PhotosUICore's
-   `Metadata.appintents/extract.actionsdata`, read 2026-10-12): "Favorite
-   Photos", "Favorites or unfavorites the specified photos", with Photos (a
-   list of `AssetEntity`, importable from `com.apple.Photos.PHAsset`) and an
-   action (Favorite, the default, or Unfavorite). To confirm on the iPhone (iOS
-   26), with a sample shortcut that the build copies the action from: it is in
-   the action list, and it takes the photo Save to Photo Album returns.
+4. **Favoriting from a shortcut (iPhone part done, 2026-10-12).** macOS 26's
+   Photos registers the App Intent `FavoriteAssetsIntent` (PhotosUICore's
+   `Metadata.appintents/extract.actionsdata`): "Favorite Photos", "Favorites or
+   unfavorites the specified photos", with Photos (a list of `AssetEntity`,
+   importable from `com.apple.Photos.PHAsset`) and an action (Favorite, the
+   default, or Unfavorite). The user built a sample on the iPhone (iOS 26): the
+   action is stored as `com.apple.mobileslideshow.FavoriteAssetsIntent` with an
+   `AppIntentDescriptor` (`FavoriteAssetsIntent`, `com.apple.mobileslideshow`,
+   "Photos", team `0000000000`) and `assets`; an If on a Boolean is
+   `WFCondition` 4 with the switch `WFConditionalActionBoolean` (left at its
+   default, so not stored). The iPhone shortcuts use it; still to confirm on
+   the device that it takes the photo Save to Photo Album returns. The Mac's
+   picker route waits for a Mac sample (Photos' bundle identifier differs).
 
 5. **No location outside the GPS IFD and the XMP (done, 2026-10-12).**
    `exiftool -a -u -G1 -ee` on the samples with GPS in `testdata` (iPhone 13
@@ -320,10 +328,12 @@ reach, as are edits (the selection route converts the unedited original).
 
 ## 5. Steps
 
-Steps 1 to 6 and 8 were done on 2026-10-12 (branch
-`2026-10-12-photos-metadata-in-file`); how it works now is in
+Steps 1 to 6 and 8, and the iPhone's favorite of step 7, were done on
+2026-10-12 (branch `2026-10-12-photos-metadata-in-file`); how it works now is
+in
 [DEVELOPING.md](../shortcuts/compress-photos/DEVELOPING.md#15-location-title-caption-keywords-and-favorite).
-Step 7 waits for the iPhone.
+The rest of step 7 (the device checks, and the favorite from the Mac's picker)
+waits for the devices.
 
 1. Spikes 1, 2 (ImageIO part) and 5: they settle the formats and the removal.
 2. `photobatch` GPS: `exif_gps`, `exif_set_gps`, `xmp_remove_location`,

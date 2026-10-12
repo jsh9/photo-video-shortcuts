@@ -359,6 +359,62 @@ class Builder:
         otherwise()
         mark(2, {'UUID': new_uuid()})
 
+    def if_true(self, ref, then, otherwise):
+        """
+        If/Otherwise on a Boolean (such as Get Details of Images ▸ Is
+        Favorite): the condition "is" (code 4) with the switch on
+        (WFConditionalActionBoolean). Format from a shortcut built on the
+        iPhone (iOS 26), which leaves the switch at its default; it is written
+        here, so the default doesn't matter. An input without a value (an image
+        that isn't in the library has no Is Favorite) is not true.
+        """
+        group = new_uuid()
+
+        def mark(mode, extra):
+            self.actions.append({
+                'WFWorkflowActionIdentifier': 'is.workflow.actions.conditional',
+                'WFWorkflowActionParameters': {
+                    'GroupingIdentifier': group,
+                    'WFControlFlowMode': mode,
+                    **extra,
+                },
+            })
+
+        mark(
+            0,
+            {
+                'WFCondition': 4,
+                'WFConditionalActionBoolean': True,
+                'WFInput': {'Type': 'Variable', 'Variable': attachment(ref)},
+            },
+        )
+        then()
+        mark(1, {})
+        otherwise()
+        mark(2, {'UUID': new_uuid()})
+
+    def favorite_photos(self, ref):
+        """
+        Photos' Favorite Photos: makes the photos ``ref`` favorites (its
+        action, Favorite or Unfavorite, left at Favorite). An App Intent
+        (FavoriteAssetsIntent, in PhotosUICore), stored as a shortcut built on
+        the iPhone (iOS 26) stores it: the app's descriptor and the photos,
+        which Shortcuts turns into the intent's AssetEntity from a library
+        photo (com.apple.Photos.PHAsset).
+        """
+        return self.add(
+            'com.apple.mobileslideshow.FavoriteAssetsIntent',
+            {
+                'AppIntentDescriptor': {
+                    'AppIntentIdentifier': 'FavoriteAssetsIntent',
+                    'BundleIdentifier': 'com.apple.mobileslideshow',
+                    'Name': 'Photos',
+                    'TeamIdentifier': '0000000000',
+                },
+                'assets': attachment(ref),
+            },
+        )
+
     def set_variable(self, name, ref):
         self.add(
             'is.workflow.actions.setvariable',

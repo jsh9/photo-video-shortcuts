@@ -28,7 +28,10 @@ encoder. Every release includes the current files of all shortcuts.
     `title`, `caption`, `keywords`); the log says what was written or removed.
     On the iPhone and from the Mac's picker, Shortcuts gives the location only
     (read before the photo's file is fetched, as Shortcuts then answers with
-    the file's GPS), and copies aren't made favorites yet.
+    the file's GPS).
+  - On the iPhone, a copy of a favorite is a favorite too (Photos' Favorite
+    Photos action; from the share sheet, JXL-Import does it). Not yet from the
+    Mac's picker.
   - Update both the shortcuts and the encoders (`photobatch.wasm`,
     `photobatch-macos`): an older `photobatch` ignores `jxl_meta.txt`, and an
     older shortcut gives none.

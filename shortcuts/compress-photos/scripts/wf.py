@@ -372,6 +372,20 @@ def photo_location(b, photo, index):
     b.if_has_value(location, known, unknown)
 
 
+def copy_favorite(b, original, copy):
+    """
+    Makes the saved ``copy`` a favorite when ``original`` is one (Get Details
+    of Images ▸ Is Favorite, If it is true, Photos' Favorite Photos): no file
+    holds a favorite, so photobatch can't carry it. An image from another app
+    answers nothing to Is Favorite, which If takes as false.
+    """
+    b.if_true(
+        b.photo_details(original, 'Is Favorite'),
+        lambda: b.favorite_photos(copy),
+        lambda: None,
+    )
+
+
 # The album the converted originals are collected in, on both platforms. The
 # shortcuts never delete photos: the user reviews the album and deletes.
 ORIGINALS_ALBUM = 'Compressed originals'
