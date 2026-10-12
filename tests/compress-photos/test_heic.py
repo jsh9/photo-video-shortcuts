@@ -505,7 +505,7 @@ def with_mime_item(path, folder, content_type, data, before_id):
 def with_icc_profile(path, folder, icc):
     """
     A copy of the HEIC whose 'colr' properties are each replaced by one
-    carrying the ICC profile `icc` (every other property, and so each one's
+    carrying the ICC profile ``icc`` (every other property, and so each one's
     index in 'ipma', stays).
     """
     m = Meta(path)
