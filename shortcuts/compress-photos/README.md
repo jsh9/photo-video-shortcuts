@@ -198,6 +198,7 @@ Kept:
   [Dates](#32-dates));
 - the location Photos shows, also one you changed or hid in Photos (see
   [Location](#33-location));
+- a favorite: the copy of a favorite is a favorite too;
 - XMP;
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
@@ -220,6 +221,13 @@ Not kept:
   the photo picker alike, so the JXL has neither the original nor the edit. If
   you want both, convert the photo before editing it, and edit the JXL (or keep
   the HEIC).
+- **A title, caption or keywords set in Photos.** Shortcuts on the iPhone can't
+  read them (nor can any app through Apple's photo library interface), so the
+  copy has only those the original file itself holds, if any; Photos' own are
+  lost when you delete the original. To keep them, compress those photos on the
+  Mac from the Photos selection, which writes them into the copy (see
+  [Compress Photos on the Mac](README-mac.md#4-what-is-and-isnt-kept)); with
+  iCloud Photos the copy then appears on the iPhone too.
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't
   normally have any.
 - **RAW/ProRAW (DNG) and other formats** aren't converted; only HEIF, JPEG and
