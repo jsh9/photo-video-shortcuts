@@ -732,17 +732,19 @@ Photos has none, the file's is removed.
   fix's direction, speed, positioning error and fix time go. Photos having none
   removes whatever GPS IFD the file has, also one without a readable position
   (a longitude, or an altitude, alone). The old GPS IFD and the values it
-  points to are zeroed (sparing IFD0's and the Exif IFD's entries, should a
-  malformed file share them), so the old position isn't left in the file, and
-  the XMP's location goes too (when Photos has none, whatever the EXIF's was;
-  for another place, only once the EXIF took it: a file whose EXIF can't be
-  read keeps its location, `! location not written`) (`xmp_remove_location`:
-  `exif:GPS*`, `photoshop:City`, `State` and `Country`, `Iptc4xmpCore:Location`
-  and `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In
-  iPhone 13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
-  location (their maker notes and XMP hold none).
-- **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_text`, `xmp_dc_subject`,
-  `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
+  points to are zeroed, so the old position isn't left in the file, sparing
+  whatever another entry that stays still refers to: the tables and values of
+  IFD0 (and the IFDs it chains to), the Exif and Interoperability IFDs (a valid
+  file may share one string between two tags; a malformed one may point its GPS
+  IFD into another), and the XMP's location goes too (when Photos has none,
+  whatever the EXIF's was; for another place, only once the EXIF took it: a
+  file whose EXIF can't be read keeps its location, `! location not written`)
+  (`xmp_remove_location`: `exif:GPS*`, `photoshop:City`, `State` and `Country`,
+  `Iptc4xmpCore:Location` and `CountryCode`, `Iptc4xmpExt:LocationCreated` and
+  `LocationShown`). In iPhone 13 mini, 15 Pro and 17 Pro photos the GPS IFD is
+  the only place of the location (their maker notes and XMP hold none).
+- **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_read`, one pass for the
+  three, and `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
   alternatives, `x-default`) and `dc:subject` (a bag), the only place a JPEG XL
   or HEIC has for them (IPTC IIM lives in a JPEG's APP13, which `photobatch`
   doesn't carry). Texts compare without surrounding whitespace and with
@@ -751,17 +753,20 @@ Photos has none, the file's is removed.
   (`<rdf:li rdf:parseType="Resource"><rdf:value>`,
   `<rdf:li rdf:value="..." q:confidence="..."/>`, or either in a nested
   `rdf:Description`). An item counts only when it can be read: it has text, or
-  it is plainly empty. Anything else (fields or a URI such as `rdf:resource`
-  without text, a blank `rdf:value` with qualifiers, elements but no
-  `rdf:value`) is a value the scanner can't read, which is never Photos' (the
-  property is rewritten, or removed when Photos has none). The file's own are
-  removed wherever they are (an element or an attribute, in any
-  `rdf:Description`, qualifiers and all), and Photos' are added in a new
-  `rdf:Description` at the end of `rdf:RDF` (an empty `rdf:RDF` written as one
-  tag gets an end tag, under its own prefix), with the packet's `rdf:about`;
-  every other byte of the packet stays. A file without XMP gets a minimal
-  packet (`xmp_new_packet`) when there is something to add: a JPEG XL `xml `
-  box, a HEIC `mime` item. A packet without `rdf:RDF` is kept
+  it is plainly empty; so is an empty array (`<rdf:Alt/>`). Anything else
+  (fields or a URI such as `rdf:resource` without text, a blank `rdf:value`
+  with qualifiers, elements but no `rdf:value`, a property holding a structure
+  or fields instead of an array) is a value the scanner can't read, which is
+  never Photos' (the property is rewritten, or removed when Photos has none).
+  An item's language is its effective `xml:lang`, inherited from the `rdf:Alt`
+  or the node element when it has none of its own. The file's own are removed
+  wherever they are (an element or an attribute, in any `rdf:Description`,
+  qualifiers and all), and Photos' are added in a new `rdf:Description` at the
+  end of `rdf:RDF` (an empty `rdf:RDF` written as one tag gets an end tag,
+  under its own prefix), with the packet's `rdf:about`; every other byte of the
+  packet stays. A file without XMP gets a minimal packet (`xmp_new_packet`)
+  when there is something to add: a JPEG XL `xml ` box, a HEIC `mime` item. A
+  packet without `rdf:RDF` is kept
   (`! title, caption and keywords not written`). The scanner is the one
   orientation and dates use (see [XMP](#12-xmp)), which now also reports
   structured properties, with the text items of their arrays, and where each
@@ -772,7 +777,9 @@ Photos has none, the file's is removed.
   with Photos' caption only when both, those it has (a blank `ImageDescription`
   too), are that caption; then an `ImageDescription` the file has is set to it,
   or removed (`exif_set_description`: the value at the end of the data and the
-  entry patched in place; a removal rewrites IFD0). None is added.
+  entry patched in place; a removal rewrites IFD0 and zeroes the old entry's
+  value, a shared value excepted). An `ImageDescription` stored as BYTE or
+  UNDEFINED (some writers' UTF-8) counts as ImageIO reads it. None is added.
 - **Favorite:** no field in a file holds one (Photos doesn't take `xmp:Rating`
   5 as one; checked on macOS 26).
 

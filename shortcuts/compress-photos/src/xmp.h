@@ -34,17 +34,24 @@ int xmp_reset_orientation(uint8_t **xmp, size_t *len);
 // of values replaced, or -1 if out of memory (the packet is unchanged).
 int xmp_set_dates(uint8_t **xmp, size_t *len, const char *date);
 
-// The packet's dc:title or dc:description (`local`: "title" or
-// "description"): its x-default item, else its first (a qualified item's
-// rdf:value), references decoded, without surrounding whitespace; malloc'ed
-// in *text, NULL when it is empty. Returns 1 when the packet has the property,
-// 0 when not, 2 when it has one whose value isn't readable as text (an item
-// holding elements but no rdf:value; *text NULL), -1 if out of memory.
-int xmp_dc_text(const uint8_t *xmp, size_t len, const char *local, char **text);
-// The packet's dc:subject items (keywords; a qualified item's rdf:value), the
-// empty ones left out: a malloc'ed array of malloc'ed strings in *items, *count
-// of them (NULL and 0 when none). Returns 1, 0, 2 or -1 as xmp_dc_text.
-int xmp_dc_subject(const uint8_t *xmp, size_t len, char ***items, size_t *count);
+// What the packet has for Photos' title, caption and keywords, read in one
+// pass: dc:title and dc:description (each its x-default item, else its first;
+// a qualified item's rdf:value), and dc:subject's items (keywords; the empty
+// ones left out). Each field's state: 0 the packet doesn't have the property,
+// 1 it has one (its text in title or description, NULL when empty; the
+// keywords in subject, num_subject of them), 2 it has one whose value isn't
+// readable as text (an array item holding elements but no rdf:value, a
+// structure of fields: never Photos' value). References are decoded,
+// surrounding whitespace left out. Returns 0, or -1 if out of memory (nothing
+// is held then); xmp_dc_free frees what it holds.
+typedef struct {
+  int title_state, description_state, subject_state;
+  char *title, *description;
+  char **subject;
+  size_t num_subject;
+} xmp_dc_t;
+int xmp_dc_read(const uint8_t *xmp, size_t len, xmp_dc_t *dc);
+void xmp_dc_free(xmp_dc_t *dc);
 // The properties xmp_set_dc replaces.
 enum { XMP_DC_TITLE = 1, XMP_DC_DESCRIPTION = 2, XMP_DC_SUBJECT = 4 };
 // Replaces dc:title, dc:description and dc:subject, each when its flag is in

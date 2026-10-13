@@ -777,8 +777,9 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   if (rw->num_add) {  // the next ids after the file's highest
     uint32_t top = 0;
     for (size_t i = 0; i < f->num_items; i++) top = f->items[i].id > top ? f->items[i].id : top;
-    // 'infe' version 2 and 'iref' version 0 hold 16-bit ids
-    if (top + rw->num_add > 0xffff) goto done;
+    // 'infe' version 2 and 'iref' version 0 hold 16-bit ids (the sum would
+    // wrap for a 32-bit id near the top, where size_t is 32 bits)
+    if (top > 0xffffu - (uint32_t)rw->num_add) goto done;
     for (size_t a = 0; a < rw->num_add; a++) r.add_ids[a] = top + 1 + (uint32_t)a;
   }
   for (size_t i = 0; i < f->num_items; i++) {

@@ -1207,6 +1207,31 @@ static int ifd_ok(const tiff_t *t, uint32_t ifd) {
   return ifd >= 8 && (size_t)ifd + 2 <= t->n && (size_t)ifd + 2 + (size_t)t16(t, ifd) * 12 + 4 <= t->n;
 }
 
+// Writes IFD0 anew at the end of the data in *buf, with its entries but
+// `tag`, plus `add` if not NULL, and points the header to it. Returns 0, or
+// -1 if out of memory.
+static int rewrite_ifd0(uint8_t **buf, size_t *len, int le, uint16_t tag, const entry_t *add) {
+  tiff_t t = {*buf, *len, le};
+  const uint32_t ifd0 = t32(&t, 4);
+  const size_t old = t16(&t, ifd0);
+  entry_t *entries = (entry_t *)calloc(old + 1, sizeof *entries);
+  if (!entries) return -1;
+  size_t count = 0;
+  for (size_t i = 0; i < old; i++) {
+    const size_t e = ifd0 + 2 + i * 12;
+    if (t16(&t, e) != tag) entry_copy(&entries[count++], &t, e);
+  }
+  if (add) entries[count++] = *add;
+  const uint32_t next = t32(&t, ifd0 + 2 + old * 12);
+  const uint32_t at = append_ifd(buf, len, le, entries, count, next);
+  free(entries);
+  if (!at) return -1;
+  t.p = *buf;
+  t.n = *len;
+  w32(&t, 4, at);
+  return 0;
+}
+
 // The Exif IFD's capture date tags, rewritten together: DateTimeOriginal,
 // CreateDate, OffsetTimeOriginal, OffsetTimeDigitized, SubSecTimeOriginal
 // and SubSecTimeDigitized. (DateTime, OffsetTime and SubSecTime, the file's
@@ -1330,28 +1355,12 @@ int exif_set_capture_date(const uint8_t *p, size_t n, photo_date_t *date, uint8_
     w32(&nt, e + 8, new_exif);
   } else {
     // A new IFD0 too, with its entries and the pointer.
-    const size_t old0 = t16(&nt, ifd0);
-    entry_t *entries0 = (entry_t *)calloc(old0 + 1, sizeof *entries0);
-    if (!entries0) {
+    entry_t pointer;
+    entry_long(&pointer, le, 0x8769, new_exif);
+    if (rewrite_ifd0(&buf, &len, le, 0x8769, &pointer) != 0) {
       free(buf);
       return -1;
     }
-    size_t count0 = 0;
-    for (size_t i = 0; i < old0; i++) {
-      const size_t e = ifd0 + 2 + i * 12;
-      if (t16(&nt, e) != 0x8769) entry_copy(&entries0[count0++], &nt, e);
-    }
-    entry_long(&entries0[count0++], le, 0x8769, new_exif);
-    const uint32_t next0 = t32(&nt, ifd0 + 2 + old0 * 12);
-    const uint32_t new_ifd0 = append_ifd(&buf, &len, le, entries0, count0, next0);
-    free(entries0);
-    if (!new_ifd0) {
-      free(buf);
-      return -1;
-    }
-    nt.p = buf;
-    nt.n = len;
-    w32(&nt, 4, new_ifd0);
   }
   *out = buf;
   *out_len = len;
@@ -1450,27 +1459,64 @@ static size_t type_size(uint16_t type) {
 // The bytes the IFD at `ifd` takes, entries and next-IFD offset.
 static size_t ifd_bytes(const tiff_t *t, uint32_t ifd) { return 2 + (size_t)t16(t, ifd) * 12 + 4; }
 
-// Ranges of the data a zeroing must spare: the header, IFD0's entries and
-// the Exif IFD's (a malformed file may point a value into them).
+// What a zeroing must spare: the header, and the IFDs that stay, their entry
+// tables and the values their entries hold outside them. An entry may share a
+// value with the one being removed (two tags with one string), and a
+// malformed file may point an IFD or a value into another IFD's table; what
+// another entry still refers to isn't obsolete. The IFDs: IFD0 and those it
+// chains to (the thumbnail's), the Exif and Interoperability IFDs, and the
+// GPS IFD when it stays (`gps`), but the entry at `skip` (whose value is the
+// one going; 0: none).
+#define SPARED_MAX_IFDS 8
 typedef struct {
-  size_t at[3], n[3];
+  uint32_t ifd[SPARED_MAX_IFDS];
+  size_t n;
+  size_t skip;
 } spared_t;
 
-static void spared_init(const tiff_t *t, spared_t *s) {
-  const uint32_t ifd0 = t32(t, 4), exif = exif_ifd_offset(t);
-  s->at[0] = 0;
-  s->n[0] = 8;
-  s->at[1] = ifd0;
-  s->n[1] = ifd_ok(t, ifd0) ? ifd_bytes(t, ifd0) : 0;
-  s->at[2] = exif;
-  s->n[2] = exif && ifd_ok(t, exif) ? ifd_bytes(t, exif) : 0;
+static void spared_add(const tiff_t *t, spared_t *s, uint32_t ifd) {
+  if (!ifd || !ifd_ok(t, ifd) || s->n == SPARED_MAX_IFDS) return;
+  for (size_t k = 0; k < s->n; k++) {
+    if (s->ifd[k] == ifd) return;
+  }
+  s->ifd[s->n++] = ifd;
+}
+
+static void spared_init(const tiff_t *t, spared_t *s, int gps, size_t skip) {
+  s->n = 0;
+  s->skip = skip;
+  uint32_t ifd = t32(t, 4);
+  for (int k = 0; k < 4 && ifd && ifd_ok(t, ifd); k++) {  // IFD0, IFD1, ...
+    spared_add(t, s, ifd);
+    ifd = t32(t, ifd + 2 + (size_t)t16(t, ifd) * 12);
+  }
+  const uint32_t exif = exif_ifd_offset(t);
+  uint32_t interop = 0;
+  spared_add(t, s, exif);
+  if (exif && ifd_ok(t, exif) && entry_uint(t, ifd_find(t, exif, 0xA005), &interop)) spared_add(t, s, interop);
+  if (gps) spared_add(t, s, gps_ifd_offset(t));
+}
+
+static int overlaps(uint64_t at, uint64_t n, uint64_t at2, uint64_t n2) { return at < at2 + n2 && at2 < at + n; }
+
+// 1 if [at, at + n) holds any of what is spared.
+static int spared_has(const tiff_t *t, const spared_t *s, uint64_t at, uint64_t n) {
+  if (at < 8) return 1;
+  for (size_t k = 0; k < s->n; k++) {
+    const uint32_t ifd = s->ifd[k];
+    const size_t count = t16(t, ifd);
+    if (overlaps(at, n, ifd, ifd_bytes(t, ifd))) return 1;
+    for (size_t i = 0; i < count; i++) {
+      const size_t e = ifd + 2 + i * 12;
+      const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
+      if (e != s->skip && size > 4 && overlaps(at, n, t32(t, e + 8), size)) return 1;
+    }
+  }
+  return 0;
 }
 
 static void zero_range(const tiff_t *t, uint64_t at, uint64_t n, const spared_t *s) {
-  if (at > t->n || n > t->n - at) return;
-  for (int k = 0; k < 3; k++) {
-    if (at < s->at[k] + s->n[k] && s->at[k] < at + n) return;
-  }
+  if (at > t->n || n > t->n - at || spared_has(t, s, at, n)) return;
   memset(t->p + at, 0, (size_t)n);
 }
 
@@ -1486,31 +1532,6 @@ static void zero_ifd(const tiff_t *t, uint32_t ifd, const spared_t *s) {
   const size_t count = t16(t, ifd);
   for (size_t i = 0; i < count; i++) zero_value(t, ifd + 2 + i * 12, s);
   zero_range(t, ifd, ifd_bytes(t, ifd), s);
-}
-
-// Writes IFD0 anew at the end of the data in *buf, with its entries but
-// `tag`, plus `add` if not NULL, and points the header to it. Returns 0, or
-// -1 if out of memory.
-static int rewrite_ifd0(uint8_t **buf, size_t *len, int le, uint16_t tag, const entry_t *add) {
-  tiff_t t = {*buf, *len, le};
-  const uint32_t ifd0 = t32(&t, 4);
-  const size_t old = t16(&t, ifd0);
-  entry_t *entries = (entry_t *)calloc(old + 1, sizeof *entries);
-  if (!entries) return -1;
-  size_t count = 0;
-  for (size_t i = 0; i < old; i++) {
-    const size_t e = ifd0 + 2 + i * 12;
-    if (t16(&t, e) != tag) entry_copy(&entries[count++], &t, e);
-  }
-  if (add) entries[count++] = *add;
-  const uint32_t next = t32(&t, ifd0 + 2 + old * 12);
-  const uint32_t at = append_ifd(buf, len, le, entries, count, next);
-  free(entries);
-  if (!at) return -1;
-  t.p = *buf;
-  t.n = *len;
-  w32(&t, 4, at);
-  return 0;
 }
 
 static void put_rational(uint8_t *v, int le, uint32_t num, uint32_t den) {
@@ -1555,7 +1576,7 @@ int exif_set_gps(const uint8_t *p, size_t n, const photo_location_t *loc, uint8_
   const uint32_t old = gps_ifd_offset(&nt);
   if (old) {
     spared_t spared;
-    spared_init(&nt, &spared);
+    spared_init(&nt, &spared, 0, 0);
     zero_ifd(&nt, old, &spared);
   }
   if (!loc) {
@@ -1621,11 +1642,13 @@ int exif_description(const uint8_t *p, size_t n, char **text) {
   const size_t e = ifd_find(&t, t32(&t, 4), 0x010E);
   if (!e) return 0;
   // Its text up to a NUL, without trailing spaces: "" when it is blank, or
-  // not ASCII as it should be.
+  // not stored in bytes (ASCII as it should be, or BYTE or UNDEFINED, as some
+  // writers store UTF-8; ImageIO reads those too).
   const uint32_t count = t32(&t, e + 4);
+  const uint16_t type = t16(&t, e + 2);
   const size_t src = count <= 4 ? e + 8 : t32(&t, e + 8);
   size_t k = 0;
-  if (t16(&t, e + 2) == TIFF_ASCII && count && src <= n && count <= n - src) {
+  if ((type == TIFF_ASCII || type == TIFF_BYTE || type == TIFF_UNDEFINED) && count && src <= n && count <= n - src) {
     const uint8_t *nul = (const uint8_t *)memchr(p + src, 0, count);
     k = nul ? (size_t)(nul - (p + src)) : count;
     while (k && p[src + k - 1] == ' ') k--;
@@ -1656,13 +1679,14 @@ int exif_set_description(const uint8_t *p, size_t n, const char *text, uint8_t *
   const int le = t.le;
   tiff_t nt = {buf, len, le};
   spared_t spared;
-  spared_init(&nt, &spared);
+  spared_init(&nt, &spared, 1, e);
   zero_value(&nt, e, &spared);
   if (!k) {
     if (rewrite_ifd0(&buf, &len, le, 0x010E, NULL) != 0) {
       free(buf);
       return -1;
     }
+    memset(buf + e + 8, 0, 4);  // a short value, held in the entry, goes too
   } else {
     w16(&nt, e + 2, TIFF_ASCII);
     w32(&nt, e + 4, (uint32_t)k);

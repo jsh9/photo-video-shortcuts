@@ -123,19 +123,23 @@ int photo_location_same(const photo_location_t *a, const photo_location_t *b);
 // IFD is written at the end of the data and IFD0's pointer moved to it (IFD0
 // is rewritten when it has no pointer, or without it for a removal), so no
 // other value moves. The old GPS IFD and the values it points to are zeroed,
-// so the old position isn't left in the data. Returns 1, or 0 when removing
+// so the old position isn't left in the data (but what another IFD's entry
+// still refers to, in a file that shares values or points IFDs into one
+// another). Returns 1, or 0 when removing
 // from an EXIF without a position; -1 if out of memory, -2 if the EXIF can't
 // be read (it is then kept as it is).
 int exif_set_gps(const uint8_t *tiff, size_t len, const photo_location_t *loc, uint8_t **out, size_t *out_len);
-// IFD0's ImageDescription (the caption EXIF readers show), without trailing
-// spaces and NULs, malloc'ed in *text: "" when it is blank (ImageIO still
-// takes it over the XMP's caption). Returns 1 when the EXIF has one, 0 when
-// not (*text NULL), -1 if out of memory.
+// IFD0's ImageDescription (the caption EXIF readers show; ASCII, or BYTE or
+// UNDEFINED as some writers store UTF-8), without trailing spaces and NULs,
+// malloc'ed in *text: "" when it is blank (ImageIO still takes it over the
+// XMP's caption). Returns 1 when the EXIF has one, 0 when not (*text NULL),
+// -1 if out of memory.
 int exif_description(const uint8_t *tiff, size_t len, char **text);
 // Sets IFD0's ImageDescription to `text` (UTF-8), or removes it when `text`
 // is NULL or empty; only an EXIF that has one is changed (0 is returned
 // otherwise). The new value is written at the end of the data, the old one
-// zeroed; a removal rewrites IFD0 at the end. Returns 1 when *out got a new,
+// zeroed (unless another entry shares it); a removal rewrites IFD0 at the end
+// and zeroes the old entry's value. Returns 1 when *out got a new,
 // malloc'ed TIFF structure, -1 if out of memory, -2 if the EXIF can't be read.
 int exif_set_description(const uint8_t *tiff, size_t len, const char *text, uint8_t **out, size_t *out_len);
 

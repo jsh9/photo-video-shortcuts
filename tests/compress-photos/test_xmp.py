@@ -808,6 +808,20 @@ KEYWORD_FIELDS_ONLY = (
     '<dc:subject><rdf:Bag><rdf:li c:word="kw" c:source="camera"/>'
     '</rdf:Bag></dc:subject>'
 )
+# a structure where an array or a value should be: not readable either
+STRUCTURE_TITLE = '<dc:title><rdf:Description c:word="private" c:source="camera"/></dc:title>'
+FIELDS_CAPTION = (
+    '<dc:description><c:word>private</c:word><c:source>camera</c:source>'
+    '</dc:description>'
+)
+QUALIFIERS_ONLY_CAPTION = (
+    '<dc:description rdf:parseType="Resource"><c:source>camera</c:source>'
+    '</dc:description>'
+)
+STRUCTURE_KEYWORDS = (
+    '<dc:subject><rdf:Description c:source="camera"><c:word>private</c:word>'
+    '</rdf:Description></dc:subject>'
+)
 
 
 @pytest.mark.parametrize(
@@ -831,6 +845,10 @@ KEYWORD_FIELDS_ONLY = (
         (NESTED_URI_VALUE_KEYWORD, '1|keywords|', None),
         (BLANK_VALUE_KEYWORD, '1|keywords|', None),
         (URI_CAPTION, '1|caption|', None),
+        (STRUCTURE_TITLE, '1|title|', None),
+        (FIELDS_CAPTION, '1|caption|', None),
+        (QUALIFIERS_ONLY_CAPTION, '1|caption|', None),
+        (STRUCTURE_KEYWORDS, '1|keywords|', None),
         # replaced when Photos has another
         (QUALIFIED_KEYWORD, '1|keywords|other', ['other']),
         (UNREADABLE_KEYWORD, '1|keywords|kw', ['kw']),
@@ -841,6 +859,9 @@ KEYWORD_FIELDS_ONLY = (
         (TITLE_ATTRIBUTES, '1|title|New', 'New'),
         (CAPTION_ATTRIBUTES, '1|caption|New', 'New'),
         (URI_VALUE_KEYWORD, '1|keywords|kw', ['kw']),
+        (STRUCTURE_TITLE, '1|title|private', 'private'),
+        (QUALIFIERS_ONLY_CAPTION, '1|caption|New', 'New'),
+        (STRUCTURE_KEYWORDS, '1|keywords|private', ['private']),
     ],
 )
 def test_qualified_values_removed_or_replaced(
@@ -888,3 +909,53 @@ def test_qualified_values_that_agree_stay(encoder, tmp_path, body, meta):
     plain = convert(encoder, tmp_path / 'plain', photo)
     assert xml_box(out) == xml_box(plain)
     assert 'from Photos' not in log and 'removed' not in log
+
+
+@pytest.mark.parametrize(
+    ('body', 'meta'),
+    [
+        # an empty array is plainly empty: Photos having none agrees
+        ('<dc:title><rdf:Alt/></dc:title>', '1|title|'),
+        ('<dc:subject><rdf:Bag></rdf:Bag></dc:subject>', '1|keywords|'),
+        # the default item inherits x-default from the rdf:Alt: "Old"
+        (
+            '<dc:title><rdf:Alt xml:lang="x-default">'
+            '<rdf:li xml:lang="fr">New</rdf:li><rdf:li>Old</rdf:li>'
+            '</rdf:Alt></dc:title>',
+            '1|title|Old',
+        ),
+        # xml:lang="" on the item undoes the inheritance: no default, so the
+        # first item is the title
+        (
+            '<dc:title><rdf:Alt xml:lang="x-default">'
+            '<rdf:li xml:lang="">First</rdf:li><rdf:li xml:lang="de">Zweiter</rdf:li>'
+            '</rdf:Alt></dc:title>',
+            '1|title|First',
+        ),
+    ],
+)
+def test_empty_arrays_and_inherited_language_agree(
+        encoder, tmp_path, body, meta
+):
+    photo = jpeg(tmp_path / 'q.jpg', packet(body))
+    out, log = convert_with_meta(encoder, tmp_path / 'meta', photo, [meta])
+    plain = convert(encoder, tmp_path / 'plain', photo)
+    assert xml_box(out) == xml_box(plain)
+    assert 'from Photos' not in log and 'removed' not in log
+
+
+def test_inherited_language_picks_the_default_item(encoder, tmp_path):
+    # Photos' title is the French item, not the default: the title is
+    # replaced (and the default is what the copy then has).
+    body = (
+        '<dc:title><rdf:Alt xml:lang="x-default">'
+        '<rdf:li xml:lang="fr">New</rdf:li><rdf:li>Old</rdf:li>'
+        '</rdf:Alt></dc:title>'
+    )
+    photo = jpeg(tmp_path / 'q.jpg', packet(body))
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'meta', photo, ['1|title|New']
+    )
+    assert ph.xmp_properties(out)['XMP-dc:Title'] == 'New'
+    assert b'>Old<' not in xml_box(out)
+    assert 'title from Photos (the file had another)' in ' '.join(log.split())

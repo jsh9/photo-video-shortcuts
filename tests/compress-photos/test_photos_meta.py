@@ -478,6 +478,94 @@ def test_a_file_that_agrees_stays_as_it_is(encoder, tmp_path):
     assert 'from Photos' not in out and 'removed' not in out
 
 
+@pytest.mark.parametrize('kind', [1, 7])  # BYTE, UNDEFINED
+@pytest.mark.parametrize('caption', ['', 'New caption'])
+def test_a_description_stored_in_bytes_counts(
+        encoder, tmp_path, kind, caption
+):
+    # Some writers store a UTF-8 ImageDescription as BYTE or UNDEFINED rather
+    # than ASCII; ImageIO reads it all the same, so it is the file's caption:
+    # removed when Photos has none, replaced when Photos has another.
+    exif = tiff({**IFD0, 0x010E: (kind, 8, b'Holiday\0')}, EXIF)
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif)
+    assert 'IFD0:ImageDescription' in ph.exif_tags(original)  # BYTE: numbers
+    out, done = convert(
+        encoder, tmp_path / 'run', [original], [f'1|caption|{caption}']
+    )
+    tags = ph.exif_tags(done[1])
+    assert tags.get('IFD0:ImageDescription') == (caption or None)
+    assert b'Holiday' not in box_exif(done[1])
+    validate(done[1])
+    log = said(out, 'IMG_0001')
+    if caption:
+        assert 'caption from Photos (the file had another)' in log
+    else:
+        assert 'caption removed: Photos has none' in log
+
+
+def test_a_short_caption_leaves_no_bytes_either(encoder, tmp_path):
+    # A caption of up to three characters lives in the entry itself; removing
+    # it rewrites IFD0, and the old entry's bytes must go too.
+    exif = tiff({**IFD0, 0x010E: ascii_value('NYC')}, EXIF)
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif)
+    _, done = convert(encoder, tmp_path / 'run', [original], ['1|caption|'])
+    assert 'IFD0:ImageDescription' not in ph.exif_tags(done[1])
+    assert b'NYC\0' not in box_exif(done[1])
+    validate(done[1])
+
+
+def shared_value_tiff():
+    """
+    Big-endian EXIF whose ImageDescription and Artist point to one string (TIFF
+    allows sharing a value): removing or replacing the caption must not zero
+    the Artist.
+    """
+    text, make = b'Shared text\0', b'TestMake\0'
+    entries = [(0x010E, len(text)), (0x010F, len(make)), (0x013B, len(text))]
+    values_at = 8 + 2 + 12 * len(entries) + 4
+    make_at, text_at = values_at, values_at + len(make) + len(make) % 2
+    out = b'MM\x00\x2a' + struct.pack('>IH', 8, len(entries))
+    for tag, count in entries:
+        at = make_at if tag == 0x010F else text_at
+        out += struct.pack('>HHII', tag, 2, count, at)
+
+    return out + struct.pack('>I', 0) + make + b'\0' * (len(make) % 2) + text
+
+
+@pytest.mark.parametrize('caption', ['', 'New caption'])
+def test_a_value_shared_with_another_tag_is_kept(encoder, tmp_path, caption):
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', shared_value_tiff())
+    assert ph.exif_tags(original)['IFD0:Artist'] == 'Shared text'
+    _, done = convert(
+        encoder, tmp_path / 'run', [original], [f'1|caption|{caption}']
+    )
+    tags = ph.exif_tags(done[1])
+    assert tags['IFD0:Artist'] == 'Shared text'
+    assert tags.get('IFD0:ImageDescription') == (caption or None)
+    validate(done[1])
+
+
+@pytest.mark.parametrize('location', ['', '48.8584,2.2945'])
+def test_a_gps_pointer_into_the_exif_ifd_zeroes_nothing(
+        encoder, tmp_path, location
+):
+    # A malformed file whose GPS pointer is the Exif IFD's offset: nothing of
+    # the Exif IFD (its table or its values) may be zeroed as the "old
+    # position"; the new position is written, or the pointer removed.
+    exif = tiff({**IFD0, 0x8825: (4, 1, 'exif')}, EXIF)
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif)
+    _, done = convert(
+        encoder, tmp_path / 'run', [original], [f'1|gps|{location}']
+    )
+    tags = ph.exif_tags(done[1])
+    assert tags['IFD0:Make'] == 'TestMake'
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    if location:
+        assert tags['GPS:GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
+    else:
+        assert not [k for k in tags if k.startswith('GPS:')]
+
+
 def test_caption_follows_into_an_image_description(encoder, imageio, tmp_path):
     # ImageIO (and so Photos) takes the EXIF's ImageDescription over the
     # XMP's caption: one the file has gets Photos' caption too, even when only

@@ -353,7 +353,7 @@ struct Run {
 // An item of an array (rdf:li holding text), with its xml:lang.
 struct Item {
   std::vector<Run> runs;
-  std::string lang;
+  std::string lang;  // its effective xml:lang (its own, else inherited)
 };
 
 struct Property {
@@ -481,6 +481,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
     Run value_attr;  // its rdf:value attribute, if has_value_attr
     bool has_value_attr;
     bool fields;  // it has attributes that are fields or qualifiers (not rdf:, xml:lang)
+    size_t num_children;   // the elements directly inside it
+    bool empty_container;  // one of them is an rdf:Alt, rdf:Bag or rdf:Seq holding no element
   };
   struct Attribute {
     std::string qualified;
@@ -533,17 +535,26 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   // attribute) adds its text as an item when it can be read: it has text, or
   // it is plainly empty. One that can't (fields or a URI without text, or
   // elements but no rdf:value read) makes the property opaque, so that it is
-  // never taken for absent or for Photos' value. rdf:RDF's end tag goes to
-  // `layout`.
+  // never taken for absent or for Photos' value; so does a property holding
+  // elements but no item at all, unless they are one empty array (an empty
+  // rdf:Alt or rdf:Bag is plainly empty). rdf:RDF's end tag goes to `layout`.
   auto close_element = [&](size_t k, size_t end, size_t at) {
     Element &e = open[k];
+    if (k >= 1) {
+      Element &parent = open[k - 1];
+      parent.num_children++;
+      if (!e.children && !e.fields &&
+          (is(e.name, RDF, "rdf", "Alt") || is(e.name, RDF, "rdf", "Bag") || is(e.name, RDF, "rdf", "Seq")))
+        parent.empty_container = true;
+    }
     std::vector<Run> value = e.children ? std::vector<Run>() : e.text;
     if (e.has_value_attr) value = std::vector<Run>(1, e.value_attr);
     // fields or qualifiers (rdf:resource among them), but no text
     const bool unreadable = e.fields && blank(value);
     if (k >= 1 && in_rdf(k - 1)) {
+      const bool no_items = e.children && e.items.empty() && !(e.num_children == 1 && e.empty_container);
       found.push_back(property(e.name, e.children ? std::vector<Run>() : value, e.start, end, e.children, e.items,
-                               e.opaque || (unreadable && !e.children)));
+                               e.opaque || (unreadable && !e.children) || no_items));
     } else if (is(e.name, RDF, "rdf", "li")) {
       if (const size_t p = property_of(k)) {
         if (e.children && !e.has_value_attr) {
@@ -558,8 +569,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         }
       }
     } else if (is(e.name, RDF, "rdf", "value") || e.has_value_attr) {
-      // the item of the rdf:li it is in (or of the property itself), with
-      // that rdf:li's language
+      // the item of the rdf:li it is in (or of the property itself); its
+      // language is that rdf:li's unless it has its own
       if (const size_t p = property_of(k)) {
         size_t li = 0;
         for (size_t q = k; q-- > p + 1;)
@@ -572,7 +583,7 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         } else {
           Item item;
           item.runs = value;
-          item.lang = !e.lang.empty() || !li ? e.lang : open[li].lang;
+          item.lang = e.lang;
           open[p].items.push_back(item);
           if (li) open[li].has_value = true;
         }
@@ -623,7 +634,7 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       size_t j = i + 1;
       while (j < len && !whitespace(s[j]) && s[j] != '/' && s[j] != '>') ++j;
       Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}, false, false, Run(), false,
-                         false};
+                         false, 0, false};
       std::vector<Attribute> attributes;
       bool empty = false;
       for (;;) {
@@ -659,9 +670,13 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       }
       open.push_back(std::move(element));
       open.back().name = resolve(open.back().qualified, false);
+      // xml:lang is inherited (an rdf:Alt may carry its items'), unless the
+      // element has its own, "" included.
+      if (open.size() >= 2) open.back().lang = open[open.size() - 2].lang;
       for (const Attribute &a : attributes) {
         const Name name = resolve(a.qualified, true);
         if (is(name, XML, "xml", "lang")) {
+          open.back().lang.clear();
           for (const Character &c : characters(s, {a.value})) open.back().lang += c.c;
         } else if (is(name, RDF, "rdf", "value")) {
           open.back().value_attr = a.value;
@@ -929,52 +944,56 @@ extern "C" int xmp_set_dates(uint8_t **x, size_t *len, const char *date) {
   return replace_spans(x, len, s, values, date);
 }
 
-extern "C" int xmp_dc_text(const uint8_t *x, size_t len, const char *local, char **text) {
-  *text = nullptr;
-  const std::string s(reinterpret_cast<const char *>(x), len);
-  for (const Property &p : scan(s)) {
-    if (!is(p.name, DC, "dc", local)) continue;
-    if (p.opaque) return 2;
-    const std::string v = alt_text(s, p);
-    if (v.empty()) return 1;
-    *text = c_string(v);
-    return *text ? 1 : -1;
-  }
-  return 0;
+extern "C" void xmp_dc_free(xmp_dc_t *dc) {
+  std::free(dc->title);
+  std::free(dc->description);
+  for (size_t k = 0; k < dc->num_subject; ++k) std::free(dc->subject[k]);
+  std::free(dc->subject);
+  std::memset(dc, 0, sizeof *dc);
 }
 
-extern "C" int xmp_dc_subject(const uint8_t *x, size_t len, char ***items, size_t *count) {
-  *items = nullptr;
-  *count = 0;
+extern "C" int xmp_dc_read(const uint8_t *x, size_t len, xmp_dc_t *dc) {
+  std::memset(dc, 0, sizeof *dc);
   const std::string s(reinterpret_cast<const char *>(x), len);
-  std::vector<std::string> found;
-  int present = 0;
+  std::vector<std::string> subject;
   for (const Property &p : scan(s)) {
-    if (!is(p.name, DC, "dc", "subject")) continue;
-    if (p.opaque) return 2;
-    present = 1;
-    if (!p.structured) {
-      found.push_back(text_of(s, p.runs));
+    const bool title = is(p.name, DC, "dc", "title"), description = is(p.name, DC, "dc", "description");
+    if (!title && !description && !is(p.name, DC, "dc", "subject")) continue;
+    int &state = title ? dc->title_state : description ? dc->description_state : dc->subject_state;
+    if (state) continue;  // the packet's first of each
+    state = p.opaque ? 2 : 1;
+    if (p.opaque) continue;
+    if (title || description) {
+      const std::string v = alt_text(s, p);
+      if (v.empty()) continue;
+      char **text = title ? &dc->title : &dc->description;
+      *text = c_string(v);
+      if (!*text) {
+        xmp_dc_free(dc);
+        return -1;
+      }
+    } else if (!p.structured) {
+      subject.push_back(text_of(s, p.runs));
     } else {
-      for (const Item &item : p.items) found.push_back(text_of(s, item.runs));
+      for (const Item &item : p.items) subject.push_back(text_of(s, item.runs));
     }
-    break;
   }
-  found.erase(std::remove(found.begin(), found.end(), std::string()), found.end());
-  if (found.empty()) return present;
-  char **list = static_cast<char **>(std::calloc(found.size(), sizeof *list));
-  if (!list) return -1;
-  for (size_t k = 0; k < found.size(); ++k) {
-    list[k] = c_string(found[k]);
-    if (!list[k]) {
-      for (size_t j = 0; j < k; ++j) std::free(list[j]);
-      std::free(list);
+  subject.erase(std::remove(subject.begin(), subject.end(), std::string()), subject.end());
+  if (subject.empty()) return 0;
+  dc->subject = static_cast<char **>(std::calloc(subject.size(), sizeof *dc->subject));
+  if (!dc->subject) {
+    xmp_dc_free(dc);
+    return -1;
+  }
+  for (size_t k = 0; k < subject.size(); ++k) {
+    dc->subject[k] = c_string(subject[k]);
+    if (!dc->subject[k]) {
+      xmp_dc_free(dc);
       return -1;
     }
+    dc->num_subject = k + 1;
   }
-  *items = list;
-  *count = found.size();
-  return 1;
+  return 0;
 }
 
 extern "C" int xmp_set_dc(uint8_t **x, size_t *len, unsigned which, const char *title, const char *description,
@@ -1006,15 +1025,15 @@ extern "C" int xmp_set_dc(uint8_t **x, size_t *len, unsigned which, const char *
     // The same rdf:about as the packet's other descriptions, as XMP requires.
     std::string about;
     for (const char c : layout.about) about += c == '"' ? std::string("&quot;") : std::string(1, c);
-    const std::string description = "<rdf:Description rdf:about=\"" + about + "\" xmlns:rdf=\"" + RDF +
-                                    "\"\n   xmlns:dc=\"" + DC + "\">\n" + body + " </rdf:Description>\n";
+    const std::string node = "<rdf:Description rdf:about=\"" + about + "\" xmlns:rdf=\"" + RDF +
+                             "\"\n   xmlns:dc=\"" + DC + "\">\n" + body + " </rdf:Description>\n";
     if (layout.rdf_end != std::string::npos) {
-      Edit add = {layout.rdf_end, layout.rdf_end, description};
+      Edit add = {layout.rdf_end, layout.rdf_end, node};
       edits.push_back(add);
     } else {
-      // An empty rdf:RDF in one tag: its "/>" becomes ">", the description
+      // An empty rdf:RDF in one tag: its "/>" becomes ">", the node element
       // and its end tag, under the name it is written with.
-      Edit add = {layout.rdf_empty, layout.rdf_empty + 2, ">" + description + "</" + layout.rdf_qualified + ">"};
+      Edit add = {layout.rdf_empty, layout.rdf_empty + 2, ">" + node + "</" + layout.rdf_qualified + ">"};
       edits.push_back(add);
     }
   }

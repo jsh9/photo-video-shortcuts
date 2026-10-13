@@ -167,8 +167,8 @@ reach, as are edits (the selection route converts the unedited original).
 - `xmp.cpp`:
   - The scanner gives each top-level property's whole span (element, or
     attribute in shorthand form), so that it can be removed.
-  - `xmp_dc_text` / `xmp_dc_bag`: read the file's `dc:title`, `dc:description`
-    (the `x-default` item, else the first) and `dc:subject`.
+  - `xmp_dc_read`: reads the file's `dc:title`, `dc:description` (the
+    `x-default` item, else the first) and `dc:subject`.
   - `xmp_set_dc`: removes the given properties wherever they are, and adds one
     `rdf:Description` (with the packet's `rdf:about`, and `xmlns:dc`) before
     `</rdf:RDF>` with the ones that have a value.

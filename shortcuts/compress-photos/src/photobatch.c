@@ -1020,37 +1020,36 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
   }
 
   if (!(job->given & (META_TITLE | META_CAPTION | META_KEYWORDS))) return changed;
-  char *had_title = NULL, *had_caption = NULL, *had_description = NULL, **had_keywords = NULL;
-  size_t had_num_keywords = 0;
+  char *had_description = NULL;
+  xmp_dc_t dc;  // the XMP's title, caption and keywords
+  memset(&dc, 0, sizeof dc);
   int rc = 0;
   // What the file has: 0 nothing, 1 a value (its text, NULL if empty), 2 a
   // value that can't be read as text (never Photos'). The ImageDescription
   // counts even when blank: ImageIO takes it over the XMP's caption.
-  int title_state = 0, caption_state = 0, keywords_state = 0;
-  if (*xmp) {
-    title_state = xmp_dc_text(*xmp, *xmp_len, "title", &had_title);
-    caption_state = title_state < 0 ? -1 : xmp_dc_text(*xmp, *xmp_len, "description", &had_caption);
-    keywords_state = caption_state < 0 ? -1 : xmp_dc_subject(*xmp, *xmp_len, &had_keywords, &had_num_keywords);
+  if (*xmp && xmp_dc_read(*xmp, *xmp_len, &dc) != 0) {
+    rc = -1;
+    goto done;
   }
-  const int description_state = *exif && keywords_state >= 0 ? exif_description(*exif, *exif_len, &had_description) : 0;
-  if (title_state < 0 || caption_state < 0 || keywords_state < 0 || description_state < 0) {
+  const int description_state = *exif ? exif_description(*exif, *exif_len, &had_description) : 0;
+  if (description_state < 0) {
     rc = -1;
     goto done;
   }
   unsigned which = 0;
-  if ((job->given & META_TITLE) && !(title_state != 2 && same_text(had_title, job->title))) which |= XMP_DC_TITLE;
+  if ((job->given & META_TITLE) && !(dc.title_state != 2 && same_text(dc.title, job->title))) which |= XMP_DC_TITLE;
   // The caption agrees when every caption the file has (an ImageDescription,
   // the XMP's) is Photos', and, when it has none, Photos has none.
   if (job->given & META_CAPTION) {
-    int agree = caption_state != 2;
+    int agree = dc.description_state != 2;
     if (description_state) agree = agree && same_text(had_description, job->caption);
-    if (caption_state == 1) agree = agree && same_text(had_caption, job->caption);
-    if (!description_state && !caption_state) agree = same_text(NULL, job->caption);
+    if (dc.description_state == 1) agree = agree && same_text(dc.description, job->caption);
+    if (!description_state && !dc.description_state) agree = same_text(NULL, job->caption);
     if (!agree) which |= XMP_DC_DESCRIPTION;
   }
   if (job->given & META_KEYWORDS) {
     const int same =
-        keywords_state != 2 ? same_keywords(had_keywords, had_num_keywords, job->keywords, job->num_keywords) : 0;
+        dc.subject_state != 2 ? same_keywords(dc.subject, dc.num_subject, job->keywords, job->num_keywords) : 0;
     if (same < 0) {
       rc = -1;
       goto done;
@@ -1098,7 +1097,7 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
       unsigned flag;
       const char *name;
     } kFields[] = {{XMP_DC_TITLE, "title"}, {XMP_DC_DESCRIPTION, "caption"}, {XMP_DC_SUBJECT, "keywords"}};
-    const int had[] = {title_state != 0, caption_state != 0 || description_state != 0, keywords_state != 0};
+    const int had[] = {dc.title_state != 0, dc.description_state != 0 || description_state != 0, dc.subject_state != 0};
     const int has[] = {job->title && job->title[0], job->caption && job->caption[0], job->num_keywords > 0};
     for (size_t i = 0; i < sizeof kFields / sizeof *kFields; i++) {
       if (!(which & kFields[i].flag)) continue;
@@ -1110,11 +1109,8 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
     }
   }
 done:
-  free(had_title);
-  free(had_caption);
   free(had_description);
-  for (size_t i = 0; i < had_num_keywords; i++) free(had_keywords[i]);
-  free(had_keywords);
+  xmp_dc_free(&dc);
   return rc < 0 ? -1 : changed;
 }
 
