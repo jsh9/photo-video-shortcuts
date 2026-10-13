@@ -1102,3 +1102,68 @@ def test_keywords_repeated_are_rewritten_as_one(encoder, tmp_path):
     assert ph.xmp_properties(out)['XMP-dc:Subject'] == ['a', 'b']
     assert xml_box(out).count(b'<dc:subject>') == 1
     assert 'keywords from Photos' in log
+
+
+# the compact form of a qualifier, its value an attribute: not the item's
+COMPACT_QUALIFIER_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:parseType="Resource">'
+    '<rdf:value>kw</rdf:value><c:source rdf:value="camera"/>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
+COMPACT_QUALIFIER_CAPTION = (
+    '<dc:description rdf:parseType="Resource"><rdf:value>C</rdf:value>'
+    '<c:source rdf:value="camera"/></dc:description>'
+)
+
+
+@pytest.mark.parametrize(
+    ('body', 'same', 'other', 'tag', 'expected'),
+    [
+        (
+            COMPACT_QUALIFIER_KEYWORD,
+            '1|keywords|kw',
+            '1|keywords|kw,camera',
+            'XMP-dc:Subject',
+            ['kw', 'camera'],
+        ),
+        (
+            COMPACT_QUALIFIER_CAPTION,
+            '1|caption|C',
+            '1|caption|camera',
+            'XMP-dc:Description',
+            'camera',
+        ),
+    ],
+)
+def test_a_compact_qualifier_is_not_the_value(
+        encoder, tmp_path, body, same, other, tag, expected
+):
+    # <c:source rdf:value="camera"/> is the qualifier's value, not the item's:
+    # Photos having the item's value agrees, having the qualifier's doesn't.
+    photo = jpeg(tmp_path / 'q.jpg', packet(body))
+    out, log = convert_with_meta(encoder, tmp_path / 'same', photo, [same])
+    plain = convert(encoder, tmp_path / 'plain', photo)
+    assert xml_box(out) == xml_box(plain)
+    assert 'from Photos' not in log
+    out, log = convert_with_meta(encoder, tmp_path / 'other', photo, [other])
+    assert ph.xmp_properties(out)[tag] == expected
+    assert b'c:source' not in xml_box(out)
+    assert 'from Photos (the file had another)' in ' '.join(log.split())
+
+
+def test_a_zero_padded_reference_is_read(encoder, tmp_path):
+    # &#000000233; is a valid reference to "é" (leading zeros allowed): the
+    # title agrees with Photos', so the packet stays as it is.
+    photo = jpeg(
+        tmp_path / 'ref.jpg',
+        packet(
+            '<dc:title><rdf:Alt><rdf:li xml:lang="x-default">'
+            'Caf&#000000233;</rdf:li></rdf:Alt></dc:title>'
+        ),
+    )
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'meta', photo, ['1|title|Café']
+    )
+    plain = convert(encoder, tmp_path / 'plain', photo)
+    assert xml_box(out) == xml_box(plain)
+    assert 'from Photos' not in log

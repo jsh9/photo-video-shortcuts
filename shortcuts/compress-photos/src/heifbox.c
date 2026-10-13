@@ -512,7 +512,9 @@ typedef struct {
   uint32_t add_ids[HB_MAX_ADD];      // the added items' ids (rw->add)
   uint64_t add_offsets[HB_MAX_ADD];  // where their data goes in the output
   // 'idat' written anew (idat_anew), with only the kept items' data, each in
-  // one piece: offsets and lengths then hold where in it (method 1).
+  // one piece: offsets and lengths then hold where in it (method 1). Or, when
+  // a kept item there can't be read, the old payload with the replaced and
+  // dropped items' bytes zeroed (idat set, idat_anew not): the layout stays.
   int idat_anew;
   uint8_t *idat;
   size_t idat_len;
@@ -748,7 +750,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         bb_end(b, start);
       }
       free(groups.data);
-    } else if (ct == FOURCC('i', 'd', 'a', 't') && r->idat_anew) {
+    } else if (ct == FOURCC('i', 'd', 'a', 't') && (r->idat_anew || r->idat)) {
       if (r->idat_len) {  // none: no item is left in it
         const size_t start = bb_begin(b, ct);
         bb_put(b, r->idat, r->idat_len);
@@ -777,6 +779,7 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   int rc = -1;
   bb_t b = {NULL, 0, 0, 0};
   bb_t idat = {NULL, 0, 0, 0};
+  uint8_t *scrubbed = NULL;  // the old 'idat' with the replaced and dropped items' bytes zeroed
   if (!r.kept || !r.offsets || !r.lengths || !order) goto done;
   if (rw->num_add > HB_MAX_ADD) goto done;
   if (rw->num_add) {  // the next ids after the file's highest
@@ -797,11 +800,14 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   // piece, so that no replaced or dropped data stays in the file (an old
   // Exif's GPS, say); the other items in it (a 'grid', a 'tmap') keep their
   // bytes. Should one of those not be readable (a malformed file), 'idat'
-  // stays as it was after all, rather than the file not being written.
+  // keeps its layout instead, with the replaced and dropped items' bytes
+  // zeroed in place, rather than the file not being written.
+  int idat_touched = 0;
   for (size_t i = 0; i < f->num_items; i++) {
     const hb_item_t *item = &f->items[i];
-    if (item->located && item->method == 1 && (!r.kept[i] || replacement(&r, item->id))) r.idat_anew = 1;
+    if (item->located && item->method == 1 && (!r.kept[i] || replacement(&r, item->id))) idat_touched = 1;
   }
+  r.idat_anew = idat_touched;
   for (size_t i = 0; r.idat_anew && i < f->num_items; i++) {
     const hb_item_t *item = &f->items[i];
     if (!r.kept[i] || !item->located || item->method != 1 || replacement(&r, item->id)) continue;
@@ -813,6 +819,22 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   if (r.idat_anew) {
     r.idat = idat.data;
     r.idat_len = idat.len;
+  } else if (idat_touched && f->idat.p) {
+    scrubbed = (uint8_t *)malloc(f->idat.n ? f->idat.n : 1);
+    if (!scrubbed) goto done;
+    memcpy(scrubbed, f->idat.p, f->idat.n);
+    for (size_t i = 0; i < f->num_items; i++) {
+      const hb_item_t *item = &f->items[i];
+      if (!item->located || item->method != 1 || (r.kept[i] && !replacement(&r, item->id))) continue;
+      for (size_t e = 0; e < item->num_extents; e++) {
+        const hb_extent_t *ext = &f->extents[item->first_extent + e];
+        if (ext->offset >= f->idat.n) continue;
+        const uint64_t room = f->idat.n - ext->offset;
+        memset(scrubbed + ext->offset, 0, (size_t)(ext->length && ext->length < room ? ext->length : room));
+      }
+    }
+    r.idat = scrubbed;
+    r.idat_len = f->idat.n;
   }
   // The data's order in the new 'mdat': the kept items with file data, by
   // where their data was (replaced data in the place of the old), and the
@@ -883,6 +905,7 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
 done:
   free(b.data);
   free(idat.data);
+  free(scrubbed);
   free(r.kept);
   free(r.offsets);
   free(r.lengths);

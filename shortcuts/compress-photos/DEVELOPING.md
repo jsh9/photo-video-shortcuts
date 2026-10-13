@@ -863,7 +863,9 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   (construction method 1, where some writers put the Exif) is replaced or
   dropped, `idat` is written anew with only the kept items' data, each in one
   piece (their `iloc` offsets moved), so that no old Exif (a hidden location's
-  GPS) stays in the file; otherwise it stays byte for byte. A single `hvc1`
+  GPS) stays in the file (a kept item there that can't be read, in a malformed
+  file, keeps `idat`'s layout instead, with the replaced and dropped items'
+  bytes zeroed in place); otherwise it stays byte for byte. A single `hvc1`
   picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N gives
   the same size as x265 on the whole picture at CRF N (within 0.3%), and for a
   still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers run

@@ -89,11 +89,19 @@ unsigned long code_of(const std::string &name) {
   if (name.size() < 2 || name[0] != '#') return 0;
   const bool hex = name[1] == 'x';
   const std::string digits = name.substr(hex ? 2 : 1);
-  // at most 8 digits: the same on 32-bit and 64-bit builds (no overflow)
-  if (digits.empty() || digits.size() > 8 ||
-      digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos)
-    return 0;
-  const unsigned long code = std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10);
+  if (digits.empty()) return 0;
+  // Digit by digit, stopping once past the last code point: leading zeros
+  // are fine, and 32-bit and 64-bit builds read the same (no overflow).
+  unsigned long code = 0;
+  for (const char c : digits) {
+    const int digit = c >= '0' && c <= '9'   ? c - '0'
+                      : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                      : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                             : 16;
+    if (digit >= (hex ? 16 : 10)) return 0;
+    code = code * (hex ? 16 : 10) + static_cast<unsigned long>(digit);
+    if (code > 0x10FFFF) return 0;
+  }
   return xml_character(code) ? code : 0;
 }
 
@@ -557,21 +565,24 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
                                e.opaque || (unreadable && !e.children) || no_items});
     } else if (li || rdf_value) {
       // On the value path, p being the property: an item at p + 2 under the
-      // array at p + 1; a value at p + 1, at p + 2 under a nested
-      // rdf:Description, or at p + 3 under an item (p + 4 under its nested
-      // rdf:Description). The value's language is its own, else inherited.
+      // array at p + 1; an rdf:value element at p + 1, at p + 2 under a
+      // nested rdf:Description, or at p + 3 under an item (p + 4 under its
+      // nested rdf:Description); an rdf:value attribute only on such a nested
+      // rdf:Description (p + 1, or p + 3 under an item): on any other
+      // element it is a qualifier's own value (<q:source rdf:value="..."/>).
+      // The value's language is its own, else inherited.
       const size_t p = property_of(k);
       size_t item = 0;  // the rdf:li an rdf:value belongs to
       bool allowed = false;
+      const bool in_item = p && k >= p + 3 && container(p + 1) && is(open[p + 2].name, RDF, "rdf", "li");
+      if (in_item) item = p + 2;
       if (p && li) {
         allowed = k == p + 2 && container(p + 1);
+      } else if (p && is(e.name, RDF, "rdf", "value")) {
+        allowed = k == p + 1 || (k == p + 2 && description(p + 1)) ||
+                  (in_item && (k == p + 3 || (k == p + 4 && description(p + 3))));
       } else if (p) {
-        if (k == p + 1 || (k == p + 2 && description(p + 1))) {
-          allowed = true;
-        } else if (k >= p + 3 && container(p + 1) && is(open[p + 2].name, RDF, "rdf", "li")) {
-          item = p + 2;
-          allowed = k == p + 3 || (k == p + 4 && description(p + 3));
-        }
+        allowed = description(k) && (k == p + 1 || (in_item && k == p + 3));
       }
       if (allowed) {
         if (e.children && !e.has_value_attr) {

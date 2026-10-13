@@ -1263,6 +1263,21 @@ static void spared_init(const tiff_t *t, spared_t *s, int gps, size_t skip) {
   if (gps) spared_add(t, s, gps_ifd_offset(t));
 }
 
+// The i-th value of entry `e`, a SHORT or LONG array (in the entry when it
+// fits, else where the entry points). Returns 1 if read.
+static int entry_uint_at(const tiff_t *t, size_t e, uint32_t i, uint32_t *v) {
+  if (!e) return 0;
+  const uint16_t type = t16(t, e + 2);
+  const uint32_t count = t32(t, e + 4);
+  const size_t size = type == TIFF_SHORT ? 2 : type == TIFF_LONG || type == TIFF_IFD ? 4 : 0;
+  if (!size || i >= count) return 0;
+  const uint64_t total = (uint64_t)size * count;
+  const uint64_t at = (total <= 4 ? (uint64_t)e + 8 : t32(t, e + 8)) + (uint64_t)size * i;
+  if (at + size > t->n) return 0;
+  *v = size == 2 ? t16(t, (size_t)at) : t32(t, (size_t)at);
+  return 1;
+}
+
 // Notes the spared range [at, at + n) against `pos`: the end of a range that
 // holds `pos` goes to *held (the farthest), the start of the nearest range
 // after `pos` to *next.
@@ -1292,10 +1307,12 @@ static void spared_around(const tiff_t *t, const spared_t *s, uint64_t pos, uint
       const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
       if (e != s->skip && size > 4) spared_range(t32(t, e + 8), size, pos, held, next);
     }
+    // the thumbnail: JPEGInterchangeFormat and -Length, or the strips
     static const uint16_t kData[2][2] = {{0x0201, 0x0202}, {0x0111, 0x0117}};
     for (size_t d = 0; d < 2; d++) {
+      const size_t where = ifd_find(t, ifd, kData[d][0]), length = ifd_find(t, ifd, kData[d][1]);
       uint32_t at = 0, n = 0;
-      if (entry_uint(t, ifd_find(t, ifd, kData[d][0]), &at) && entry_uint(t, ifd_find(t, ifd, kData[d][1]), &n)) {
+      for (uint32_t i = 0; i < 4096 && entry_uint_at(t, where, i, &at) && entry_uint_at(t, length, i, &n); i++) {
         spared_range(at, n, pos, held, next);
       }
     }

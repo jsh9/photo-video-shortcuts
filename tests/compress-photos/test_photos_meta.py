@@ -880,3 +880,42 @@ def test_a_caption_that_already_agrees_in_one_place_stays_there(
     assert 'caption from Photos (the file had another)' in said(
         out, 'IMG_0001'
     )
+
+
+def test_a_caption_shared_with_a_strip_thumbnail_keeps_the_strips(
+        encoder, tmp_path
+):
+    # IFD1's thumbnail is two strips pointing into the ImageDescription's
+    # string (TIFF allows sharing; two strips, not one): removing the caption
+    # zeroes the bytes between and after the strips, not the strips.
+    text, make = b'Shared caption!\0', b'TestMake\0'
+    ifd0_at, ifd1_at = 8, 8 + 2 + 2 * 12 + 4
+    values_at = ifd1_at + 2 + 2 * 12 + 4
+    text_at = values_at
+    make_at = text_at + len(text)
+    strips_at = make_at + len(make) + len(make) % 2
+    counts_at = strips_at + 8
+    exif = b'MM\x00\x2a' + struct.pack('>I', ifd0_at)
+    exif += struct.pack('>H', 2)
+    exif += struct.pack('>HHII', 0x010E, 2, len(text), text_at)
+    exif += struct.pack('>HHII', 0x010F, 2, len(make), make_at)
+    exif += struct.pack('>I', ifd1_at)
+    exif += struct.pack('>H', 2)
+    exif += struct.pack('>HHII', 0x0111, 4, 2, strips_at)
+    exif += struct.pack('>HHII', 0x0117, 4, 2, counts_at)
+    exif += struct.pack('>I', 0)
+    exif += text + make + b'\0' * (len(make) % 2)
+    exif += struct.pack('>II', text_at, text_at + 8) + struct.pack('>II', 4, 4)
+    original = photo(tmp_path / 'src', 'IMG_0001.PNG', exif)
+    before = ph.exif_tags(original)
+    assert before['IFD0:ImageDescription'] == 'Shared caption!'
+    _, done = convert(encoder, tmp_path / 'run', [original], ['1|caption|'])
+    tags = ph.exif_tags(done[1])
+    assert 'IFD0:ImageDescription' not in tags
+    assert tags['IFD0:Make'] == 'TestMake'
+    out = ph.exif_box(done[1])
+    # the strip offsets and counts as written (exiftool reports them relative
+    # to the container, differently for a PNG and a JPEG XL)
+    assert struct.pack('>IIII', text_at, text_at + 8, 4, 4) in out
+    assert b'Shar' in out and b'apti' in out  # the strips
+    assert b'ed c' not in out and b'on!\0' not in out
