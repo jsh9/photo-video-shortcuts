@@ -41,9 +41,11 @@ int xmp_set_dates(uint8_t **xmp, size_t *len, const char *date);
 // 1 it has one (its text in title or description, NULL when empty; the
 // keywords in subject, num_subject of them), 2 it has one whose value isn't
 // readable as text (an array item holding elements but no rdf:value, a
-// structure of fields: never Photos' value). References are decoded,
-// surrounding whitespace left out. Returns 0, or -1 if out of memory (nothing
-// is held then); xmp_dc_free frees what it holds.
+// structure of fields: never Photos' value), or more than one that don't
+// agree (a title or caption repeated with the same text counts as one; a
+// repeated dc:subject never does). References are decoded, surrounding
+// whitespace left out. Returns 0, or -1 if out of memory (nothing is held
+// then); xmp_dc_free frees what it holds.
 typedef struct {
   int title_state, description_state, subject_state;
   char *title, *description;

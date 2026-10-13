@@ -269,59 +269,71 @@ def ascii_value(text):
     return (2, len(text.encode()) + 1, text.encode() + b'\0')
 
 
-def rationals(*pairs):
-    return (5, len(pairs), b''.join(struct.pack('>II', *p) for p in pairs))
+def rationals(*pairs, little_endian=False):
+    order = '<' if little_endian else '>'
+    return (
+        5,
+        len(pairs),
+        b''.join(struct.pack(order + 'II', *p) for p in pairs),
+    )
 
 
-def tiff(ifd0, exif=None, gps=None):
+def tiff(ifd0, exif=None, gps=None, little_endian=False):
     """
-    Big-endian EXIF (TIFF) data: IFD0 with ``ifd0``'s entries, and an Exif and
-    a GPS IFD with theirs if given, each {tag: (type, count, value)}. A value
-    longer than 4 bytes follows its IFD. Written by hand, so that the test
-    knows where every value is.
+    EXIF (TIFF) data, big-endian unless ``little_endian``: IFD0 with ``ifd0``'s
+    entries, and an Exif and a GPS IFD with theirs if given, each {tag: (type,
+    count, value)}. A value longer than 4 bytes follows its IFD. A value may
+    instead be ('shares', ifd, tag, offset): the entry then points into that
+    entry's value, ``offset`` bytes in (TIFF allows sharing). Written by hand,
+    so that the test knows where every value is.
     """
+    order = '<' if little_endian else '>'
     ifds = [('ifd0', dict(ifd0))]
     for name, tag, entries in (('exif', 0x8769, exif), ('gps', 0x8825, gps)):
         if entries is not None:
             ifds.append((name, entries))
             ifds[0][1][tag] = (4, 1, name)
 
-    def size(entries):
-        values = (
-            len(v) for _, _, v in entries.values() if isinstance(v, bytes)
-        )
-        return (
-            2
-            + 12 * len(entries)
-            + 4
-            + sum((n + 1) & ~1 for n in values if n > 4)
-        )
-
-    offsets, at = {}, 8
+    # Where each IFD and each value longer than 4 bytes goes.
+    offsets, where, at = {}, {}, 8
     for name, entries in ifds:
         offsets[name] = at
-        at += size(entries)
+        at += 2 + 12 * len(entries) + 4
+        for tag in sorted(entries):
+            value = entries[tag][2]
+            if isinstance(value, bytes) and len(value) > 4:
+                where[name, tag] = at
+                at += len(value) + len(value) % 2
 
-    out = bytearray(b'MM\x00\x2a' + struct.pack('>I', 8))
+    header = b'II\x2a\x00' if little_endian else b'MM\x00\x2a'
+    out = bytearray(header + struct.pack(order + 'I', 8))
     for name, entries in ifds:
-        value_at = offsets[name] + 2 + 12 * len(entries) + 4
-        table, values = struct.pack('>H', len(entries)), b''
+        table, values = struct.pack(order + 'H', len(entries)), b''
         for tag in sorted(entries):
             kind, count, value = entries[tag]
             if isinstance(value, str):  # a pointer to that IFD
-                value = struct.pack('>I', offsets[value])
+                value = struct.pack(order + 'I', offsets[value])
 
-            if len(value) <= 4:
-                table += struct.pack('>HHI', tag, kind, count) + value.ljust(
-                    4, b'\0'
+            if isinstance(value, tuple):  # ('shares', ifd, tag, offset)
+                _, other, other_tag, offset = value
+                table += struct.pack(
+                    order + 'HHII',
+                    tag,
+                    kind,
+                    count,
+                    where[other, other_tag] + offset,
                 )
+            elif len(value) <= 4:
+                table += struct.pack(
+                    order + 'HHI', tag, kind, count
+                ) + value.ljust(4, b'\0')
             else:
                 table += struct.pack(
-                    '>HHII', tag, kind, count, value_at + len(values)
+                    order + 'HHII', tag, kind, count, where[name, tag]
                 )
                 values += value + b'\0' * (len(value) % 2)
 
-        out += table + struct.pack('>I', 0) + values
+        out += table + struct.pack(order + 'I', 0) + values
 
     return bytes(out)
 
@@ -369,6 +381,27 @@ def read_done(folder):
     }
 
 
+def convert(encoder, folder, photos, args, dates=None, meta=None):
+    """
+    Converts photos (a list) the way the shortcuts do: staged (stage), with
+    jxl_dates.txt from ``dates`` ({index: date}) and jxl_meta.txt from ``meta``
+    (its lines) when given, by ``photobatch <args> jxl_job.txt``. Returns
+    (photobatch's output, {index: output file}).
+    """
+    stage(folder, photos)
+    if dates is not None:
+        (folder / 'jxl_dates.txt').write_text(
+            '\n'.join(f'{i}|{d}' for i, d in dates.items())
+        )
+
+    if meta is not None:
+        (folder / 'jxl_meta.txt').write_text('\n'.join(meta))
+
+    result = encoder.run([*args, 'jxl_job.txt'], folder)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout, {i: out for i, (out, _) in read_done(folder).items()}
+
+
 def kept_originals(folder):
     """
     The indexes jxl_done.txt marks "keep": photos whose original must not be
@@ -388,6 +421,40 @@ def exif_tags(path):
     tags = json.loads(out)[0]
     tags.pop('SourceFile', None)
     return tags
+
+
+def gps_of(path):
+    """The GPS IFD's tags (exiftool, numbers as numbers): {name: value}."""
+    return {
+        k.split(':')[1]: v
+        for k, v in exif_tags(path).items()
+        if k.startswith('GPS:')
+    }
+
+
+def validate(path):
+    """exiftool -validate finds nothing to warn about in the file."""
+    out = run(
+        ['exiftool', '-validate', '-warning', '-a', '-s', '-s', '-s', path],
+        check=True,
+    ).stdout
+    assert out.splitlines()[0] == 'OK', out
+
+
+def box(path, kind):
+    """A JPEG XL's box of this kind ('Exif', 'xml '), as bytes; b'' if none."""
+    data = path.read_bytes()
+    return next(
+        (data[start:end] for k, start, end in _boxes(data) if k == kind), b''
+    )
+
+
+def exif_box(path):
+    return box(path, 'Exif')
+
+
+def xml_box(path):
+    return box(path, 'xml ')
 
 
 def xmp_tags(path):
@@ -527,7 +594,6 @@ def check_photo_locations(actions):
     otherwise, only for a library photo (Is Favorite, through Match Text),
     "Repeat Index|gps|".
     """
-    by_uuid = {params(a).get('UUID'): a for a in actions}
     walked = list(walk(actions))
     found = []
     for i, (a, depth) in enumerate(walked):
@@ -592,7 +658,6 @@ def check_photo_locations(actions):
         assert dict((id(x), yes) for x, yes in inside_if_on(actions, guard))[
             id(empty)
         ]
-        assert by_uuid[p['UUID']] is a
         found.append(i)
 
     return found

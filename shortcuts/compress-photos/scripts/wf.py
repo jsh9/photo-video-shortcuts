@@ -339,13 +339,14 @@ def photo_location(b, photo, index):
     -[WFPhotoMediaContentItem location] (iOS 18.2) returns the file's GPS once
     the item has a file representation. So this comes before anything reads the
     photo's file (Put File, a script's input); were it after, the copy would
-    keep its file's location, never a wrong one. The coordinates are text,
+    keep its file's location, never a wrong one. From the share sheet, the file
+    iOS hands over already has the location Photos shows (a hidden one left
+    out, a changed one written in; checked on iOS 26, 2026-10-13), so the copy
+    is right on that route whichever the two give. The coordinates are text,
     independent of the device's region (``b.location_details``); the altitude,
     a Number shown in the region's format and 0 when unknown, is left out. An
     image from another app has no asset: its Location is its file's, the copy's
-    anyway, and nothing is written when it has none. Is Favorite tells a
-    library photo (Yes or No) from such an image (nothing), as in
-    collect_in_album.
+    anyway, and nothing is written when it has none (in_library tells).
     """
     location = b.photo_details(photo, 'Location')
 
@@ -362,9 +363,8 @@ def photo_location(b, photo, index):
         )
 
     def unknown():
-        in_library = b.match_text(b.photo_details(photo, 'Is Favorite'), '.')
         b.if_has_value(
-            in_library,
+            in_library(b, photo),
             lambda: b.append_variable('Meta', b.text(index, '|gps|')),
             lambda: None,
         )
@@ -372,18 +372,32 @@ def photo_location(b, photo, index):
     b.if_has_value(location, known, unknown)
 
 
-def copy_favorite(b, original, copy):
+def in_library(b, photo, favorite=None):
     """
-    Makes the saved ``copy`` a favorite when ``original`` is one (Get Details
-    of Images ▸ Is Favorite, If it is true, Photos' Favorite Photos): no file
-    holds a favorite, so photobatch can't carry it. An image from another app
-    answers nothing to Is Favorite, which If takes as false.
+    Matches (some text) when ``photo`` is in the photo library, nothing when it
+    is an image from another app (Files, say): Get Details of Images ▸ Is
+    Favorite answers Yes or No for a library photo and nothing for such an
+    image (checked on iOS 26, 2026-10-06, with a diagnostic shortcut). Is
+    Favorite is a Boolean, for which If offers no "has any value" ("Please
+    choose a value for each parameter in this action"), so it goes through
+    Match Text, which turns it into matches (any text at all, "Yes" or "No" in
+    any language) or none. ``favorite``: its Is Favorite, if already read.
     """
-    b.if_true(
-        b.photo_details(original, 'Is Favorite'),
-        lambda: b.favorite_photos(copy),
-        lambda: None,
-    )
+    if favorite is None:
+        favorite = b.photo_details(photo, 'Is Favorite')
+
+    return b.match_text(favorite, '.')
+
+
+def copy_favorite(b, favorite, copy):
+    """
+    Makes the saved ``copy`` a favorite when its original is one: ``favorite``
+    is the original's Is Favorite (Get Details of Images), tested with If (is
+    true), then Photos' Favorite Photos; no file holds a favorite, so
+    photobatch can't carry it. An image from another app answers nothing to Is
+    Favorite, which If takes as false.
+    """
+    b.if_true(favorite, lambda: b.favorite_photos(copy), lambda: None)
 
 
 # The album the converted originals are collected in, on both platforms. The
@@ -416,19 +430,17 @@ def copy_to_albums(b, copy, albums):
     b.repeat_each(albums, per_album)
 
 
-def collect_in_album(b, photo, album, albums=None):
+def collect_in_album(b, photo, album, albums=None, favorite=None):
     """
     Adds the library photo ``photo`` to ``album`` (a text ref holding
     ORIGINALS_ALBUM) unless it is already in it, and appends it to the variable
     Collected. ``albums``: the photo's album names if already read (Get Details
-    of Images ▸ Album), else they are read here.
+    of Images ▸ Album), else they are read here; ``favorite``: its Is Favorite,
+    likewise.
 
-    Only a photo from the library is collected: an image shared from another
-    app (Files) isn't in the library, and Save to Photo Album would import it
-    as a new photo. Get Details of Images ▸ Is Favorite tells them apart: a
-    library photo answers Yes or No, a file answers nothing (checked on iOS 26,
-    2026-10-06, with a diagnostic shortcut); the Boolean goes through Match
-    Text, since If can't test it for a value.
+    Only a photo from the library is collected (in_library): an image shared
+    from another app (Files) isn't in the library, and Save to Photo Album
+    would import it as a new photo.
 
     Save to Photo Album adds a photo that is already in the library to the
     album as it is (no copy) when it isn't in that album yet; one that is would
@@ -451,9 +463,4 @@ def collect_in_album(b, photo, album, albums=None):
 
         b.if_has_value(already, lambda: None, add)
 
-    # Is Favorite is a Boolean, for which If offers no "has any value"
-    # ("Please choose a value for each parameter in this action"): Match Text
-    # turns it into matches (any text at all, "Yes" or "No" in any language)
-    # or none.
-    in_library = b.match_text(b.photo_details(photo, 'Is Favorite'), '.')
-    b.if_has_value(in_library, collect, lambda: None)
+    b.if_has_value(in_library(b, photo, favorite), collect, lambda: None)

@@ -696,11 +696,13 @@ def test_first_nonempty_packet_kept(encoder, tmp_path, packets, kept):
 
 
 def convert_with_meta(encoder, folder, photo, meta):
-    ph.stage(folder, [photo])
-    (folder / 'jxl_meta.txt').write_text('\n'.join(meta))
-    result = encoder.run(['-q', '100', '-e', '1', 'jxl_job.txt'], folder)
-    assert result.returncode == 0, result.stdout + result.stderr
-    return ph.read_done(folder)[1][0], result.stdout
+    """
+    Converts photo with jxl_meta.txt from meta: (output, photobatch's log).
+    """
+    log, done = ph.convert(
+        encoder, folder, [photo], ['-q', '100', '-e', '1'], meta=meta
+    )
+    return done[1], log
 
 
 @pytest.mark.parametrize('prefix', ['rdf', 'R'])
@@ -822,6 +824,21 @@ STRUCTURE_KEYWORDS = (
     '<dc:subject><rdf:Description c:source="camera"><c:word>private</c:word>'
     '</rdf:Description></dc:subject>'
 )
+# references to a value held elsewhere: not readable either
+NODEID_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:nodeID="n1"/></rdf:Bag></dc:subject>'
+)
+ID_TITLE = (
+    '<dc:title><rdf:Alt><rdf:li xml:lang="x-default" rdf:ID="t1"/></rdf:Alt>'
+    '</dc:title>'
+)
+# a qualifier holding an array of its own: its items aren't keywords
+QUALIFIER_ARRAY_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:parseType="Resource">'
+    '<rdf:value>kw</rdf:value>'
+    '<c:source><rdf:Bag><rdf:li>camera</rdf:li></rdf:Bag></c:source>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
 
 
 @pytest.mark.parametrize(
@@ -862,6 +879,38 @@ STRUCTURE_KEYWORDS = (
         (STRUCTURE_TITLE, '1|title|private', 'private'),
         (QUALIFIERS_ONLY_CAPTION, '1|caption|New', 'New'),
         (STRUCTURE_KEYWORDS, '1|keywords|private', ['private']),
+        (NODEID_KEYWORD, '1|keywords|', None),
+        (NODEID_KEYWORD, '1|keywords|kw', ['kw']),
+        (ID_TITLE, '1|title|', None),
+        (ID_TITLE, '1|title|New', 'New'),
+        # a container holding text, not items: an unsupported value, removed
+        # or replaced, never "empty"
+        ('<dc:title><rdf:Alt>private</rdf:Alt></dc:title>', '1|title|', None),
+        (
+            '<dc:title><rdf:Alt><![CDATA[private]]></rdf:Alt></dc:title>',
+            '1|title|',
+            None,
+        ),
+        (
+            '<dc:title><rdf:Alt>private</rdf:Alt></dc:title>',
+            '1|title|New',
+            'New',
+        ),
+        (
+            '<dc:description><rdf:Alt>private</rdf:Alt></dc:description>',
+            '1|caption|',
+            None,
+        ),
+        (
+            '<dc:subject><rdf:Bag>private</rdf:Bag></dc:subject>',
+            '1|keywords|',
+            None,
+        ),
+        (
+            '<dc:subject><rdf:Seq>private</rdf:Seq></dc:subject>',
+            '1|keywords|kw',
+            ['kw'],
+        ),
     ],
 )
 def test_qualified_values_removed_or_replaced(
@@ -895,6 +944,7 @@ def test_qualified_values_removed_or_replaced(
         (KEYWORD_NESTED_ATTRIBUTES, '1|keywords|kw'),
         (TITLE_ATTRIBUTES, '1|title|T'),
         (CAPTION_ATTRIBUTES, '1|caption|C'),
+        (QUALIFIER_ARRAY_KEYWORD, '1|keywords|kw'),
         # an ordinary value
         (
             '<dc:subject><rdf:Bag><rdf:li>kw</rdf:li></rdf:Bag></dc:subject>',
@@ -917,6 +967,9 @@ def test_qualified_values_that_agree_stay(encoder, tmp_path, body, meta):
         # an empty array is plainly empty: Photos having none agrees
         ('<dc:title><rdf:Alt/></dc:title>', '1|title|'),
         ('<dc:subject><rdf:Bag></rdf:Bag></dc:subject>', '1|keywords|'),
+        # whitespace in it, written out or as a reference, is still nothing
+        ('<dc:title><rdf:Alt>\n  </rdf:Alt></dc:title>', '1|title|'),
+        ('<dc:title><rdf:Alt>&#x20;&#10;</rdf:Alt></dc:title>', '1|title|'),
         # the default item inherits x-default from the rdf:Alt: "Old"
         (
             '<dc:title><rdf:Alt xml:lang="x-default">'
@@ -959,3 +1012,93 @@ def test_inherited_language_picks_the_default_item(encoder, tmp_path):
     assert ph.xmp_properties(out)['XMP-dc:Title'] == 'New'
     assert b'>Old<' not in xml_box(out)
     assert 'title from Photos (the file had another)' in ' '.join(log.split())
+
+
+def test_a_qualifiers_array_is_not_the_keywords(encoder, tmp_path):
+    # The item's value is "kw"; "camera" is in its qualifier's own array.
+    # Photos having "kw" agrees (above); having both writes both; having none
+    # removes the property, qualifier and all.
+    photo = jpeg(tmp_path / 'q.jpg', packet(QUALIFIER_ARRAY_KEYWORD))
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'both', photo, ['1|keywords|kw,camera']
+    )
+    assert ph.xmp_properties(out)['XMP-dc:Subject'] == ['kw', 'camera']
+    assert b'c:source' not in xml_box(out)
+    assert 'keywords from Photos (the file had another)' in ' '.join(
+        log.split()
+    )
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'none', photo, ['1|keywords|']
+    )
+    assert 'XMP-dc:Subject' not in ph.xmp_properties(out)
+    assert b'camera' not in xml_box(out)
+    assert 'keywords removed' in log
+
+
+def description_pair(first, second):
+    """A packet with two rdf:Descriptions, holding ``first`` and ``second``."""
+    return (
+        f'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{RDF}" '
+        f'xmlns:dc="{DC}"><rdf:Description rdf:about="" {first[0]}>{first[1]}'
+        f'</rdf:Description><rdf:Description rdf:about="">{second}'
+        '</rdf:Description></rdf:RDF></x:xmpmeta>'
+    ).encode()
+
+
+def alt_title(text):
+    return (
+        f'<dc:title><rdf:Alt><rdf:li xml:lang="x-default">{text}</rdf:li>'
+        '</rdf:Alt></dc:title>'
+    )
+
+
+@pytest.mark.parametrize(
+    'first',
+    [('', alt_title('Same')), ('dc:title="Same"', '')],
+    ids=['element', 'attribute'],
+)
+def test_a_property_repeated_with_another_value_is_rewritten(
+        encoder, tmp_path, first
+):
+    # The first dc:title is Photos', the second isn't: readers take the last,
+    # so the packet is rewritten with one, Photos'.
+    photo = jpeg(
+        tmp_path / 'two.jpg', description_pair(first, alt_title('Other'))
+    )
+    assert ph.xmp_properties(photo)['XMP-dc:Title'] == 'Other'
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'run', photo, ['1|title|Same']
+    )
+    assert ph.xmp_properties(out)['XMP-dc:Title'] == 'Same'
+    assert b'Other' not in xml_box(out)
+    assert xml_box(out).count(b'dc:title') == 2  # one element's two tags
+    assert 'title from Photos (the file had another)' in ' '.join(log.split())
+
+
+def test_a_property_repeated_with_the_same_value_agrees(encoder, tmp_path):
+    photo = jpeg(
+        tmp_path / 'two.jpg',
+        description_pair(('', alt_title('Same')), alt_title('Same')),
+    )
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'meta', photo, ['1|title|Same']
+    )
+    plain = convert(encoder, tmp_path / 'plain', photo)
+    assert xml_box(out) == xml_box(plain)
+    assert 'from Photos' not in log
+
+
+def test_keywords_repeated_are_rewritten_as_one(encoder, tmp_path):
+    # Two dc:subject bags never agree with Photos: one bag with Photos'
+    # keywords replaces them.
+    bag = '<dc:subject><rdf:Bag><rdf:li>{}</rdf:li></rdf:Bag></dc:subject>'
+    photo = jpeg(
+        tmp_path / 'two.jpg',
+        description_pair(('', bag.format('a')), bag.format('b')),
+    )
+    out, log = convert_with_meta(
+        encoder, tmp_path / 'run', photo, ['1|keywords|a,b']
+    )
+    assert ph.xmp_properties(out)['XMP-dc:Subject'] == ['a', 'b']
+    assert xml_box(out).count(b'<dc:subject>') == 1
+    assert 'keywords from Photos' in log

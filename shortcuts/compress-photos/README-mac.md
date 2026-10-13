@@ -148,7 +148,9 @@ iPhone's need a-Shell, these need Run Shell Script.
   says how many were saved.
 - Each JPEG XL copy is saved to Photos with its original's name, into every
   album its original is in (one photo, not a copy per album). Shared albums and
-  built-in ones such as Favorites aren't handled.
+  other built-in ones aren't handled (Favorites follows the favorite, which the
+  copy gets from Photos' selection; see
+  [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - After the format and quality come **Cores to use** and **HDR**: *Keep HDR*
   keeps an HDR photo's HDR, as the camera's gain map in a HEIC or as an HDR
   JPEG XL (see [HDR photos](README.md#31-hdr-photos)); *Drop HDR* saves every

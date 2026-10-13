@@ -78,6 +78,25 @@ bool xml_character(unsigned long c) {
          (c >= 0xE000 && c <= 0xFFFD) || (c >= 0x10000 && c <= 0x10FFFF);
 }
 
+// The character a reference stands for, by the text between "&" and ";"
+// ("amp", "#54" or "#x36"); 0 for any other reference, and for a character
+// XML 1.0 can't hold.
+unsigned long code_of(const std::string &name) {
+  static const std::map<std::string, unsigned long> entities = {
+      {"amp", '&'}, {"lt", '<'}, {"gt", '>'}, {"quot", '"'}, {"apos", '\''}};
+  const auto entity = entities.find(name);
+  if (entity != entities.end()) return entity->second;
+  if (name.size() < 2 || name[0] != '#') return 0;
+  const bool hex = name[1] == 'x';
+  const std::string digits = name.substr(hex ? 2 : 1);
+  // at most 8 digits: the same on 32-bit and 64-bit builds (no overflow)
+  if (digits.empty() || digits.size() > 8 ||
+      digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos)
+    return 0;
+  const unsigned long code = std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10);
+  return xml_character(code) ? code : 0;
+}
+
 bool valid_utf8(const uint8_t *data, size_t len) {
   for (size_t i = 0; i < len;) {
     const unsigned char first = data[i++];
@@ -131,14 +150,7 @@ bool parsing_copy(const uint8_t *data, size_t len, std::string &out) {
     if (input[i] == '&') {
       const size_t end = input.find(';', i + 1);
       if (end == std::string::npos) return false;
-      const std::string entity = input.substr(i + 1, end - i - 1);
-      if (entity != "amp" && entity != "lt" && entity != "gt" && entity != "quot" && entity != "apos") {
-        if (entity.size() < 2 || entity[0] != '#') return false;
-        const bool hex = entity[1] == 'x';
-        const std::string digits = entity.substr(hex ? 2 : 1);
-        if (digits.empty() || digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos) return false;
-        if (!xml_character(std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10))) return false;
-      }
+      if (!code_of(input.substr(i + 1, end - i - 1))) return false;
       out.append(input, i, end + 1 - i);
       i = end + 1;
       continue;
@@ -350,6 +362,8 @@ struct Run {
   bool literal;
 };
 
+std::string text_of(const std::string &s, const std::vector<Run> &runs);
+
 // An item of an array (rdf:li holding text), with its xml:lang.
 struct Item {
   std::vector<Run> runs;
@@ -368,19 +382,6 @@ struct Property {
   // elements but no rdf:value): present, but never equal to a text.
   bool opaque;
 };
-
-Property property(const Name &name, const std::vector<Run> &runs, size_t begin, size_t end, bool structured,
-                  const std::vector<Item> &items, bool opaque) {
-  Property p;
-  p.name = name;
-  p.runs = runs;
-  p.begin = begin;
-  p.end = end;
-  p.structured = structured;
-  p.items = items;
-  p.opaque = opaque;
-  return p;
-}
 
 // What edits need besides the properties: where rdf:RDF ends (its end tag;
 // npos if none was found) or, for an empty rdf:RDF written as one tag
@@ -402,20 +403,10 @@ bool is(const Name &n, const char *uri, const char *prefix, const char *local) {
 
 bool whitespace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 
-// The ASCII character a reference stands for, by the text between "&" and ";"
-// ("amp", "#54" or "#x36"); 0 for any other reference.
+// The ASCII character a reference stands for (code_of); 0 for any other.
 char referenced(const std::string &name) {
-  static const std::map<std::string, char> entities = {
-      {"amp", '&'}, {"lt", '<'}, {"gt", '>'}, {"quot", '"'}, {"apos", '\''}};
-  const auto entity = entities.find(name);
-  if (entity != entities.end()) return entity->second;
-  if (name.size() < 2 || name[0] != '#') return 0;
-  const bool hex = name[1] == 'x';
-  const std::string digits = name.substr(hex ? 2 : 1);
-  if (digits.empty() || digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos)
-    return 0;
-  const unsigned long code = std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10);
-  return code < 0x80 ? static_cast<char>(code) : 0;
+  const unsigned long code = code_of(name);
+  return code && code < 0x80 ? static_cast<char>(code) : 0;
 }
 
 // One character of a value and the raw bytes it came from. References to
@@ -528,64 +519,71 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         if (!whitespace(s[c])) return false;
     return true;
   };
+  auto container = [&](size_t i) {
+    return is(open[i].name, RDF, "rdf", "Alt") || is(open[i].name, RDF, "rdf", "Bag") ||
+           is(open[i].name, RDF, "rdf", "Seq");
+  };
+  auto description = [&](size_t i) { return is(open[i].name, RDF, "rdf", "Description"); };
   // Closes open[k], which ends at `end` (its end tag starts at `at`, npos
   // for an empty-element tag). A top-level property is found, its value its
-  // text or an rdf:value attribute. Inside one, an array item (rdf:li) or a
-  // qualified value (an rdf:value element, or an element with an rdf:value
-  // attribute) adds its text as an item when it can be read: it has text, or
-  // it is plainly empty. One that can't (fields or a URI without text, or
-  // elements but no rdf:value read) makes the property opaque, so that it is
-  // never taken for absent or for Photos' value; so does a property holding
-  // elements but no item at all, unless they are one empty array (an empty
-  // rdf:Alt or rdf:Bag is plainly empty). rdf:RDF's end tag goes to `layout`.
+  // text or an rdf:value attribute. Inside one, only the value path counts:
+  // an array item (an rdf:li of the property's rdf:Alt, rdf:Bag or rdf:Seq),
+  // or a qualified value (an rdf:value element, or an element with an
+  // rdf:value attribute, directly in the property, in such an item, or in
+  // the nested rdf:Description of either). Its text is an item when it can be
+  // read: it has text, or it is plainly empty. One that can't (fields or a
+  // reference without text, or elements but no rdf:value read) makes the
+  // property opaque, so that it is never taken for absent or for Photos'
+  // value; so does a property holding elements but no item at all, unless
+  // they are one empty array (an rdf:Alt or rdf:Bag holding nothing, not
+  // even text, is plainly empty). Anything deeper (a qualifier's own array,
+  // a structure's fields) is passed over. rdf:RDF's end tag goes to `layout`.
   auto close_element = [&](size_t k, size_t end, size_t at) {
     Element &e = open[k];
     if (k >= 1) {
       Element &parent = open[k - 1];
       parent.num_children++;
-      if (!e.children && !e.fields &&
-          (is(e.name, RDF, "rdf", "Alt") || is(e.name, RDF, "rdf", "Bag") || is(e.name, RDF, "rdf", "Seq")))
-        parent.empty_container = true;
+      if (!e.children && !e.fields && container(k) && text_of(s, e.text).empty()) parent.empty_container = true;
     }
     std::vector<Run> value = e.children ? std::vector<Run>() : e.text;
     if (e.has_value_attr) value = std::vector<Run>(1, e.value_attr);
     // fields or qualifiers (rdf:resource among them), but no text
     const bool unreadable = e.fields && blank(value);
+    const bool li = is(e.name, RDF, "rdf", "li");
+    const bool rdf_value = is(e.name, RDF, "rdf", "value") || e.has_value_attr;
     if (k >= 1 && in_rdf(k - 1)) {
       const bool no_items = e.children && e.items.empty() && !(e.num_children == 1 && e.empty_container);
-      found.push_back(property(e.name, e.children ? std::vector<Run>() : value, e.start, end, e.children, e.items,
-                               e.opaque || (unreadable && !e.children) || no_items));
-    } else if (is(e.name, RDF, "rdf", "li")) {
-      if (const size_t p = property_of(k)) {
+      found.push_back(Property{e.name, e.children ? std::vector<Run>() : value, e.start, end, e.children, e.items,
+                               e.opaque || (unreadable && !e.children) || no_items});
+    } else if (li || rdf_value) {
+      // On the value path, p being the property: an item at p + 2 under the
+      // array at p + 1; a value at p + 1, at p + 2 under a nested
+      // rdf:Description, or at p + 3 under an item (p + 4 under its nested
+      // rdf:Description). The value's language is its own, else inherited.
+      const size_t p = property_of(k);
+      size_t item = 0;  // the rdf:li an rdf:value belongs to
+      bool allowed = false;
+      if (p && li) {
+        allowed = k == p + 2 && container(p + 1);
+      } else if (p) {
+        if (k == p + 1 || (k == p + 2 && description(p + 1))) {
+          allowed = true;
+        } else if (k >= p + 3 && container(p + 1) && is(open[p + 2].name, RDF, "rdf", "li")) {
+          item = p + 2;
+          allowed = k == p + 3 || (k == p + 4 && description(p + 3));
+        }
+      }
+      if (allowed) {
         if (e.children && !e.has_value_attr) {
-          if (!e.has_value) open[p].opaque = true;  // no rdf:value read inside
+          if (!(li && e.has_value)) open[p].opaque = true;  // elements, but no rdf:value read
         } else if (unreadable) {
           open[p].opaque = true;
         } else {
-          Item item;
-          item.runs = value;
-          item.lang = e.lang;
-          open[p].items.push_back(item);
-        }
-      }
-    } else if (is(e.name, RDF, "rdf", "value") || e.has_value_attr) {
-      // the item of the rdf:li it is in (or of the property itself); its
-      // language is that rdf:li's unless it has its own
-      if (const size_t p = property_of(k)) {
-        size_t li = 0;
-        for (size_t q = k; q-- > p + 1;)
-          if (is(open[q].name, RDF, "rdf", "li")) {
-            li = q;
-            break;
-          }
-        if ((e.children && !e.has_value_attr) || unreadable) {
-          open[p].opaque = true;
-        } else {
-          Item item;
-          item.runs = value;
-          item.lang = e.lang;
-          open[p].items.push_back(item);
-          if (li) open[li].has_value = true;
+          Item read;
+          read.runs = value;
+          read.lang = e.lang;
+          open[p].items.push_back(read);
+          if (item) open[item].has_value = true;
         }
       }
     } else if (layout && at != std::string::npos && layout->rdf_end == std::string::npos &&
@@ -633,8 +631,9 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
       // A start tag: its name, then name="value" attributes.
       size_t j = i + 1;
       while (j < len && !whitespace(s[j]) && s[j] != '/' && s[j] != '>') ++j;
-      Element element = {s.substr(i + 1, j - i - 1), Name(), {}, {}, false, i, "", {}, false, false, Run(), false,
-                         false, 0, false};
+      Element element = {};
+      element.qualified = s.substr(i + 1, j - i - 1);
+      element.start = i;
       std::vector<Attribute> attributes;
       bool empty = false;
       for (;;) {
@@ -681,9 +680,9 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
         } else if (is(name, RDF, "rdf", "value")) {
           open.back().value_attr = a.value;
           open.back().has_value_attr = true;
-        } else if (!(name.uri == RDF || (name.uri.empty() && name.prefix == "rdf")) ||
-                   is(name, RDF, "rdf", "resource")) {
-          // a field or qualifier (rdf:resource: a value that isn't text)
+        } else if (!is(name, RDF, "rdf", "parseType") && !is(name, RDF, "rdf", "datatype")) {
+          // a field or qualifier, or a reference to a value held elsewhere
+          // (rdf:resource, rdf:nodeID, rdf:ID): not text
           open.back().fields = true;
         }
         if (!in_rdf(open.size() - 1)) continue;
@@ -693,7 +692,8 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
           layout->about = s.substr(a.value.begin, a.value.end - a.value.begin);
           layout->has_about = true;
         }
-        found.push_back(property(name, {a.value}, a.start, a.value.end + 1, false, {}, false));
+        found.push_back(
+            Property{name, std::vector<Run>(1, a.value), a.start, a.value.end + 1, false, std::vector<Item>(), false});
       }
       if (empty) {
         // An empty-element tag closes at once (<dc:title/>, <rdf:li
@@ -723,29 +723,6 @@ int orientation(const std::string &s, const Property &p, std::pair<size_t, size_
   return v[0].c - '0';
 }
 
-// Replaces each span of the packet `s` (in order, not overlapping) with
-// `text`, in the malloc-owned copy *x. Returns the number of spans, or -1 if
-// out of memory (*x unchanged).
-int replace_spans(uint8_t **x, size_t *len, const std::string &s,
-                  const std::vector<std::pair<size_t, size_t>> &spans, const std::string &text) {
-  if (spans.empty()) return 0;
-  std::string out;
-  size_t from = 0;
-  for (const auto &d : spans) {
-    out.append(s, from, d.first - from);
-    out += text;
-    from = d.second;
-  }
-  out.append(s, from, std::string::npos);
-  uint8_t *copy = static_cast<uint8_t *>(std::malloc(out.size()));
-  if (!copy) return -1;
-  std::memcpy(copy, out.data(), out.size());
-  std::free(*x);
-  *x = copy;
-  *len = out.size();
-  return static_cast<int>(spans.size());
-}
-
 void append_utf8(std::string &out, unsigned long c) {
   if (c < 0x80) {
     out += static_cast<char>(c);
@@ -767,8 +744,6 @@ void append_utf8(std::string &out, unsigned long c) {
 // A value's text: every reference decoded ("&#233;" too, unlike characters()),
 // CDATA as it is, without surrounding whitespace.
 std::string text_of(const std::string &s, const std::vector<Run> &runs) {
-  static const std::map<std::string, char> entities = {
-      {"amp", '&'}, {"lt", '<'}, {"gt", '>'}, {"quot", '"'}, {"apos", '\''}};
   std::string out;
   for (const Run &r : runs) {
     if (r.literal) {
@@ -776,24 +751,16 @@ std::string text_of(const std::string &s, const std::vector<Run> &runs) {
       continue;
     }
     for (size_t i = r.begin; i < r.end;) {
-      const size_t semicolon = s[i] == '&' ? s.find(';', i + 1) : std::string::npos;
-      if (semicolon != std::string::npos && semicolon < r.end && semicolon - i <= 12) {
-        const std::string name = s.substr(i + 1, semicolon - i - 1);
-        const auto entity = entities.find(name);
-        if (entity != entities.end()) {
-          out += entity->second;
+      if (s[i] == '&') {
+        // The references decoded here are short, which bounds the search.
+        const size_t limit = std::min(r.end, i + 16);
+        size_t semicolon = i + 1;
+        while (semicolon < limit && s[semicolon] != ';') ++semicolon;
+        const unsigned long code = semicolon < limit ? code_of(s.substr(i + 1, semicolon - i - 1)) : 0;
+        if (code) {
+          append_utf8(out, code);
           i = semicolon + 1;
           continue;
-        }
-        const bool hex = name.size() > 1 && (name[1] == 'x' || name[1] == 'X');
-        const std::string digits = name.size() > 1 && name[0] == '#' ? name.substr(hex ? 2 : 1) : "";
-        if (!digits.empty() && digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") == std::string::npos) {
-          const unsigned long code = std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10);
-          if (xml_character(code)) {
-            append_utf8(out, code);
-            i = semicolon + 1;
-            continue;
-          }
         }
       }
       out += s[i++];
@@ -920,17 +887,20 @@ extern "C" int xmp_has_extended_reference(const uint8_t *x, size_t len) {
 extern "C" int xmp_reset_orientation(uint8_t **x, size_t *len) {
   const std::string s(reinterpret_cast<const char *>(*x), *len);
   // The digit of each orientation other than 1, in document order.
-  std::vector<std::pair<size_t, size_t>> digits;
+  std::vector<Edit> edits;
   for (const Property &p : scan(s)) {
     std::pair<size_t, size_t> at;
-    if (orientation(s, p, &at) > 1) digits.push_back(at);
+    if (orientation(s, p, &at) > 1) {
+      const Edit e = {at.first, at.second, "1"};
+      edits.push_back(e);
+    }
   }
-  return replace_spans(x, len, s, digits, "1");
+  return apply_edits(x, len, s, edits);
 }
 
 extern "C" int xmp_set_dates(uint8_t **x, size_t *len, const char *date) {
   const std::string s(reinterpret_cast<const char *>(*x), *len);
-  std::vector<std::pair<size_t, size_t>> values;
+  std::vector<Edit> edits;
   for (const Property &p : scan(s)) {
     if (!is(p.name, XAP, "xmp", "CreateDate") && !is(p.name, PHOTOSHOP, "photoshop", "DateCreated") &&
         !is(p.name, EXIF, "exif", "DateTimeOriginal") && !is(p.name, EXIF, "exif", "DateTimeDigitized"))
@@ -938,10 +908,12 @@ extern "C" int xmp_set_dates(uint8_t **x, size_t *len, const char *date) {
     const std::vector<Character> v = trimmed(s, p);
     if (v.empty()) continue;
     for (const Run &r : p.runs)
-      if (v.front().begin >= r.begin && v.back().end <= r.end) values.emplace_back(v.front().begin, v.back().end);
+      if (v.front().begin >= r.begin && v.back().end <= r.end) {
+        const Edit e = {v.front().begin, v.back().end, date};
+        edits.push_back(e);
+      }
   }
-  std::sort(values.begin(), values.end());
-  return replace_spans(x, len, s, values, date);
+  return apply_edits(x, len, s, edits);
 }
 
 extern "C" void xmp_dc_free(xmp_dc_t *dc) {
@@ -960,7 +932,16 @@ extern "C" int xmp_dc_read(const uint8_t *x, size_t len, xmp_dc_t *dc) {
     const bool title = is(p.name, DC, "dc", "title"), description = is(p.name, DC, "dc", "description");
     if (!title && !description && !is(p.name, DC, "dc", "subject")) continue;
     int &state = title ? dc->title_state : description ? dc->description_state : dc->subject_state;
-    if (state) continue;  // the packet's first of each
+    if (state) {
+      // A later occurrence: a title or caption with the same text agrees;
+      // anything else is never Photos' (xmp_set_dc removes every occurrence).
+      if (state == 1 && (title || description) && !p.opaque) {
+        const char *had = title ? dc->title : dc->description;
+        if (alt_text(s, p) == (had ? had : "")) continue;
+      }
+      state = 2;
+      continue;
+    }
     state = p.opaque ? 2 : 1;
     if (p.opaque) continue;
     if (title || description) {

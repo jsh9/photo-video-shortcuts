@@ -360,10 +360,10 @@ def test_locations_reach_photobatch(actions, ashell, photos, launched):
     )
     shell.run(batch_command(actions, 'shortcuts://'))
     (first, _, _), (second, _, _) = import_results(shell.shortcuts)
-    assert not [k for k in ph.exif_tags(first) if k.startswith('GPS:')]
-    gps = ph.exif_tags(second)
-    assert gps['GPS:GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-7)
-    assert gps['GPS:GPSLongitudeRef'] == 'W'
+    assert not ph.gps_of(first)
+    gps = ph.gps_of(second)
+    assert gps['GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-7)
+    assert gps['GPSLongitudeRef'] == 'W'
     assert 'location from Photos' in shell.output
 
 

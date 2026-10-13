@@ -511,13 +511,11 @@ typedef struct {
   size_t *lengths;
   uint32_t add_ids[HB_MAX_ADD];      // the added items' ids (rw->add)
   uint64_t add_offsets[HB_MAX_ADD];  // where their data goes in the output
-  // 'idat' written anew (idat_anew), with only the kept items' data:
-  // idat_offsets and idat_lengths per item (f->items order).
+  // 'idat' written anew (idat_anew), with only the kept items' data, each in
+  // one piece: offsets and lengths then hold where in it (method 1).
   int idat_anew;
   uint8_t *idat;
   size_t idat_len;
-  uint64_t *idat_offsets;
-  size_t *idat_lengths;
 } rewrite_t;
 
 static void put_infe(bb_t *b, uint32_t id, uint32_t flags, uint32_t type);
@@ -540,6 +538,15 @@ static void put_added_refs(bb_t *b, const rewrite_t *r) {
     }
     bb_end(b, rs);
   }
+}
+
+// Appends the item's data (its extents, one after the other) to b. Returns 0,
+// or -1 when an extent lies outside the data (or there are more than 1024).
+static int put_item_data(bb_t *b, const hb_file_t *f, const hb_item_t *item) {
+  span_t spans[1024];
+  if (item->num_extents > 1024 || item_extents(f, item, spans, 1024) == (size_t)-1) return -1;
+  for (size_t e = 0; e < item->num_extents; e++) bb_put(b, spans[e].p, spans[e].n);
+  return 0;
 }
 
 static int is_kept(const rewrite_t *r, uint32_t id) {
@@ -694,8 +701,8 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
           bb_u32(b, (uint32_t)r->lengths[i]);
         } else if (r->idat_anew) {  // its data, in one piece, in the new 'idat'
           bb_u16(b, 1);
-          bb_u32(b, (uint32_t)r->idat_offsets[i]);
-          bb_u32(b, (uint32_t)r->idat_lengths[i]);
+          bb_u32(b, (uint32_t)r->offsets[i]);
+          bb_u32(b, (uint32_t)r->lengths[i]);
         } else {
           bb_u16(b, (unsigned)item->num_extents);
           for (size_t e = 0; e < item->num_extents; e++) {
@@ -767,12 +774,10 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   r.idat_anew = 0;
   r.idat = NULL;
   r.idat_len = 0;
-  r.idat_offsets = (uint64_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.idat_offsets);
-  r.idat_lengths = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.idat_lengths);
   int rc = -1;
   bb_t b = {NULL, 0, 0, 0};
   bb_t idat = {NULL, 0, 0, 0};
-  if (!r.kept || !r.offsets || !r.lengths || !order || !r.idat_offsets || !r.idat_lengths) goto done;
+  if (!r.kept || !r.offsets || !r.lengths || !order) goto done;
   if (rw->num_add > HB_MAX_ADD) goto done;
   if (rw->num_add) {  // the next ids after the file's highest
     uint32_t top = 0;
@@ -791,24 +796,21 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   // it is written anew with the data of the kept items only, each in one
   // piece, so that no replaced or dropped data stays in the file (an old
   // Exif's GPS, say); the other items in it (a 'grid', a 'tmap') keep their
-  // bytes.
+  // bytes. Should one of those not be readable (a malformed file), 'idat'
+  // stays as it was after all, rather than the file not being written.
   for (size_t i = 0; i < f->num_items; i++) {
     const hb_item_t *item = &f->items[i];
     if (item->located && item->method == 1 && (!r.kept[i] || replacement(&r, item->id))) r.idat_anew = 1;
   }
+  for (size_t i = 0; r.idat_anew && i < f->num_items; i++) {
+    const hb_item_t *item = &f->items[i];
+    if (!r.kept[i] || !item->located || item->method != 1 || replacement(&r, item->id)) continue;
+    r.offsets[i] = idat.len;
+    if (put_item_data(&idat, f, item) != 0) r.idat_anew = 0;
+    r.lengths[i] = idat.len - (size_t)r.offsets[i];
+  }
+  if (idat.oom || idat.len > 0xFFFFFFFFu) goto done;
   if (r.idat_anew) {
-    for (size_t i = 0; i < f->num_items; i++) {
-      const hb_item_t *item = &f->items[i];
-      if (!r.kept[i] || !item->located || item->method != 1 || replacement(&r, item->id)) continue;
-      span_t spans[1024];
-      if (item->num_extents > 1024) goto done;
-      const size_t len = item_extents(f, item, spans, 1024);
-      if (len == (size_t)-1) goto done;
-      r.idat_offsets[i] = idat.len;
-      r.idat_lengths[i] = len;
-      for (size_t e = 0; e < item->num_extents; e++) bb_put(&idat, spans[e].p, spans[e].n);
-    }
-    if (idat.oom || idat.len > 0xFFFFFFFFu) goto done;
     r.idat = idat.data;
     r.idat_len = idat.len;
   }
@@ -867,11 +869,8 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     const hb_replace_t *rep = replacement(&r, f->items[i].id);
     if (rep) {
       bb_put(&b, rep->data, rep->len);
-    } else {
-      span_t spans[1024];
-      if (f->items[i].num_extents > 1024) goto done;
-      item_extents(f, &f->items[i], spans, 1024);
-      for (size_t e = 0; e < f->items[i].num_extents; e++) bb_put(&b, spans[e].p, spans[e].n);
+    } else if (put_item_data(&b, f, &f->items[i]) != 0) {
+      goto done;
     }
   }
   for (size_t a = 0; a < rw->num_add; a++) bb_put(&b, rw->add[a].data, rw->add[a].len);
@@ -887,8 +886,6 @@ done:
   free(r.kept);
   free(r.offsets);
   free(r.lengths);
-  free(r.idat_offsets);
-  free(r.idat_lengths);
   free(order);
   return rc;
 }

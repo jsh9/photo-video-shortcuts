@@ -125,8 +125,9 @@ pace (nothing is added to it any more).
   one photo, not a copy per album.
   - From the share sheet, the albums are passed to JXL-Import by name. If two
     of your albums have the same name, the JXL may land in only one of them.
-  - This is meant for your own albums. Shared albums and built-in ones such as
-    Favorites aren't handled.
+  - This is meant for your own albums. Shared albums and other built-in ones
+    aren't handled (Favorites follows the favorite: a copy of a favorite is a
+    favorite too).
 - When sharing from Photos, keep **Location** on under **Options**. Otherwise
   iOS removes GPS before the shortcut sees the photo.
 - The copies get the location Photos shows for their originals, also one you

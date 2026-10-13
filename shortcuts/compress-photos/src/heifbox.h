@@ -128,7 +128,8 @@ typedef struct {
 // ('iinf', 'iref', 'ipma', 'grpl' filtered, 'iloc' regenerated, the property
 // replaced, the added items in 'iinf', 'iref' and 'iloc', 'idat' written anew
 // with the kept items' data only when one of its items is replaced or
-// dropped, everything else byte for byte); 'mdat' with the kept items' data in
+// dropped (unless a kept item there can't be read: then it stays as it was),
+// everything else byte for byte); 'mdat' with the kept items' data in
 // the original order, replaced data where given (also for an item that was in
 // 'idat'), the added items' data last. No replaced or dropped item's data is
 // left in the file. malloc'ed. Returns 0, or -1 if out of memory (or an added

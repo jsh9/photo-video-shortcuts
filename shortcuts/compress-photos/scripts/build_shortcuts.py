@@ -255,8 +255,9 @@ def save_results(b, originals=None, album=None):
             original = b.item_at_index(originals, index)
             albums = b.photo_albums(original)
             add_to_albums(albums)
-            copy_favorite(b, original, saved)
-            collect_in_album(b, original, album, albums)
+            favorite = b.photo_details(original, 'Is Favorite')
+            copy_favorite(b, favorite, saved)
+            collect_in_album(b, original, album, albums, favorite)
         else:
             albums_file = b.ashell_get_file(
                 'jxl_albums_', index, '.txt', error_if_missing=False

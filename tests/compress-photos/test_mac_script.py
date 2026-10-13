@@ -267,8 +267,8 @@ def test_photos_locations_go_to_photobatch(mac):
     first, second = (
         mac.work / line.split('|')[0] for line in out.splitlines()
     )
-    assert not [k for k in ph.exif_tags(first) if k.startswith('GPS:')]
-    assert ph.exif_tags(second)['GPS:GPSLatitude'] == pytest.approx(48.8584)
+    assert not ph.gps_of(first)
+    assert ph.gps_of(second)['GPSLatitude'] == pytest.approx(48.8584)
     # none at all: no file
     shutil.rmtree(mac.work)
     mac.batch('photos', a)

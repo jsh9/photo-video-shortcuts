@@ -356,14 +356,15 @@ def test_photos_metadata_adds_an_exif_and_an_xmp_item(
     # map stays.
     photo = without_exif_item(SINGLE, tmp_path / 'src')
     assert not any(typ in {'Exif', 'mime'} for typ, _ in items(photo).values())
-    ph.stage(tmp_path, [photo])
-    (tmp_path / 'jxl_meta.txt').write_text(
-        '1|gps|48.8584,2.2945\n1|title|Tour'
+    log, done = ph.convert(
+        encoder,
+        tmp_path,
+        [photo],
+        ['--heic'],
+        meta=['1|gps|48.8584,2.2945', '1|title|Tour'],
     )
-    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
-    assert result.returncode == 0, result.stdout
-    assert 'HDR kept' in result.stdout
-    out = ph.read_done(tmp_path)[1][0]
+    assert 'HDR kept' in log
+    out = done[1]
     types = [typ for typ, _ in items(out).values()]
     assert types.count('Exif') == 1 and types.count('mime') == 1
     assert ph.xmp_properties(out)['XMP-dc:Title'] == 'Tour'
@@ -621,15 +622,14 @@ def test_location_in_an_exif_item_in_idat_leaves_no_trace(
     tiff = ph.tiff(ph.TIFF_IFD0, ph.TIFF_EXIF, ph.OLD_GPS)
     photo = with_exif_in_idat(fixture, tmp_path / 'src', tiff)
     assert [b for b in ph.OLD_BYTES if b in photo.read_bytes()]
-    ph.stage(tmp_path, [photo])
-    (tmp_path / 'jxl_meta.txt').write_text(f'1|gps|{location}')
-    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path)
-    assert result.returncode == 0, result.stdout
-    out = ph.read_done(tmp_path)[1][0]
+    _, done = ph.convert(
+        encoder, tmp_path, [photo], ['--heic'], meta=[f'1|gps|{location}']
+    )
+    out = done[1]
     assert not [b for b in ph.OLD_BYTES if b in out.read_bytes()]
-    gps = {k: v for k, v in ph.exif_tags(out).items() if k.startswith('GPS:')}
+    gps = ph.gps_of(out)
     if location:
-        assert gps['GPS:GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
+        assert gps['GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
     else:
         assert gps == {}
 

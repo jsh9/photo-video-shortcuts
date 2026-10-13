@@ -41,7 +41,11 @@ on run {input, parameters}
 						set dateText to my wallTime(«class idat» of p)
 					end try
 					set idText to idText & itemId & "|" & dateText & "|" & («class filn» of p) & linefeed
-					set metaText to metaText & my metaLines(itemId, p)
+					-- An item whose record can't be read gets no lines (the
+					-- file's values stay) rather than failing the export.
+					try
+						set metaText to metaText & my metaLines(itemId, p)
+					end try
 				end repeat
 				export sel to dest with using originals
 			end tell
@@ -74,8 +78,12 @@ on metaLines(itemId, p)
 			try
 				set alti to «class alti» of p
 			end try
-			-- 0: no altitude (a place typed in Photos' Info window gets 0.0)
-			if alti is not missing value and alti is not 0 then set gps to gps & "," & my decimalText(alti, 2)
+			-- 0: no altitude (a place typed in Photos' Info window gets 0.0); nor
+			-- one of 100 km or more (a corrupt GPSAltitude; photobatch takes
+			-- none either), which would overflow decimalText's whole number
+			if alti is not missing value and alti is not 0 and alti > -100000 and alti < 100000 then
+				set gps to gps & "," & my decimalText(alti, 2)
+			end if
 		end if
 	end if
 	set keywordText to ""

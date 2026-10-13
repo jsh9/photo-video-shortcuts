@@ -801,9 +801,14 @@ def test_export_lines_of_what_else_photos_has(gen):
         '{«class ID  »:"C", «class IPlo»:{-0.00005, 25.7708431},'
         ' «class alti»:0.0, «class pnam»:"", «class IPde»:"",'
         ' «class IPkw»:{}}',
+        # an altitude of 100 km or more (a corrupt GPSAltitude) is left out:
+        # it would overflow decimalText's whole number ("6000000.0.0")
+        '{«class ID  »:"D", «class IPlo»:{40.758441666667, -73.829766666667},'
+        ' «class alti»:6.0E+6, «class pnam»:missing value,'
+        ' «class IPde»:missing value, «class IPkw»:missing value}',
     )
     call = 'return ' + ' & '.join(
-        f'metaLines("{i}", {r})' for i, r in zip('ABC', records)
+        f'metaLines("{i}", {r})' for i, r in zip('ABCD', records)
     )
     lines = run_handlers(gen, 'export', '-- "2024-01-01 17:00:00"', call)
     assert lines.split('\n') == [
@@ -819,7 +824,22 @@ def test_export_lines_of_what_else_photos_has(gen):
         'C\ttitle\t',
         'C\tcaption\t',
         'C\tkeywords\t',
+        'D\tgps\t40.758442,-73.829767',
+        'D\ttitle\t',
+        'D\tcaption\t',
+        'D\tkeywords\t',
     ]
+
+
+def test_export_and_import_guard_each_item_and_field(gen):
+    # One item whose record can't be read doesn't fail the export (no lines
+    # for it: the file's values stay); after the import, each field of a copy
+    # is set in a try of its own, a failure logged as a "!" line.
+    export = gen.applescript_text('export')
+    assert 'try\n\t\t\t\t\t\tset metaText to metaText & my metaLines' in export
+    importer = gen.applescript_text('import')
+    assert importer.count('my notSet(got, ') == 6
+    assert importer.count('on error e number errNum') >= 7
 
 
 def test_import_compares_what_photos_has(gen):

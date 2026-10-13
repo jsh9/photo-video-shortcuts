@@ -111,51 +111,86 @@ on run {input, parameters}
 	-- import. Should Photos have read something else, the copy gets the
 	-- original's; and the favorite, which no file holds, is set here. One call
 	-- reads all of an item ("properties of", its fields named by their codes:
-	-- see export.applescript), and one sets each field that differs.
+	-- see export.applescript), and one sets each field that differs. A field
+	-- Photos won't set is a "!" line, and the next field is still tried.
 	if (count of pairs) > 0 then
 		set t0 to current date
 		set redated to 0
-		set corrected to 0
+		set relocated to 0
+		set retitled to 0
+		set recaptioned to 0
+		set rekeyworded to 0
 		set favorited to 0
 		tell application "Photos"
 			repeat with pair in pairs
+				set want to missing value
+				set got to missing value
 				try
 					set want to properties of media item id ((item 1 of pair) as text)
-					set copyItem to item 2 of pair
-					set got to properties of copyItem
-					if («class idat» of got) is not («class idat» of want) then
-						set date of copyItem to «class idat» of want
-						set redated to redated + 1
-					end if
-					set differs to false
-					if not my sameLocation(«class IPlo» of got, «class IPlo» of want) then
-						-- {missing value, missing value} removes it
-						set location of copyItem to «class IPlo» of want
-						set differs to true
-					end if
-					if not my sameText(«class pnam» of got, «class pnam» of want) then
-						set name of copyItem to my textOf(«class pnam» of want)
-						set differs to true
-					end if
-					if not my sameText(«class IPde» of got, «class IPde» of want) then
-						set description of copyItem to my textOf(«class IPde» of want)
-						set differs to true
-					end if
-					if not my sameKeywords(«class IPkw» of got, «class IPkw» of want) then
-						set keywords of copyItem to my listOf(«class IPkw» of want)
-						set differs to true
-					end if
-					if differs then set corrected to corrected + 1
-					if («class IPfv» of want) and not («class IPfv» of got) then
-						set favorite of copyItem to true
-						set favorited to favorited + 1
-					end if
+					set got to properties of (item 2 of pair)
+				on error e number errNum
+					set problems to problems & "! " & (item 1 of pair) & ": could not read the copy or its original in Photos (" & errNum & ": " & e & ")" & linefeed
 				end try
+				if want is not missing value and got is not missing value then
+					set copyItem to item 2 of pair
+					try
+						if («class idat» of got) is not («class idat» of want) then
+							set date of copyItem to «class idat» of want
+							set redated to redated + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "date", errNum, e))
+					end try
+					try
+						if not my sameLocation(«class IPlo» of got, «class IPlo» of want) then
+							-- {missing value, missing value} removes it
+							set location of copyItem to «class IPlo» of want
+							set relocated to relocated + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "location", errNum, e))
+					end try
+					try
+						if not my sameText(«class pnam» of got, «class pnam» of want) then
+							set name of copyItem to my textOf(«class pnam» of want)
+							set retitled to retitled + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "title", errNum, e))
+					end try
+					try
+						if not my sameText(«class IPde» of got, «class IPde» of want) then
+							set description of copyItem to my textOf(«class IPde» of want)
+							set recaptioned to recaptioned + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "caption", errNum, e))
+					end try
+					try
+						if not my sameKeywords(«class IPkw» of got, «class IPkw» of want) then
+							set keywords of copyItem to my listOf(«class IPkw» of want)
+							set rekeyworded to rekeyworded + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "keywords", errNum, e))
+					end try
+					try
+						if («class IPfv» of want) and not («class IPfv» of got) then
+							set favorite of copyItem to true
+							set favorited to favorited + 1
+						end if
+					on error e number errNum
+						set problems to problems & (my notSet(got, "favorite", errNum, e))
+					end try
+				end if
 			end repeat
 		end tell
 		set tCheck to (current date) - t0
 		if redated > 0 then set problems to problems & "Photos dated " & redated & " copy(ies) differently from the original; they now have the original's date." & linefeed
-		if corrected > 0 then set problems to problems & "Photos read the location, title, caption or keywords of " & corrected & " copy(ies) differently from the original; they now have the original's." & linefeed
+		if relocated > 0 then set problems to problems & relocated & " copy(ies) got their original's location in Photos (Photos showed another)." & linefeed
+		if retitled > 0 then set problems to problems & retitled & " copy(ies) got their original's title in Photos (Photos showed another)." & linefeed
+		if recaptioned > 0 then set problems to problems & recaptioned & " copy(ies) got their original's caption in Photos (Photos showed another)." & linefeed
+		if rekeyworded > 0 then set problems to problems & rekeyworded & " copy(ies) got their original's keywords in Photos (Photos showed others)." & linefeed
 		if favorited > 0 then set problems to problems & favorited & " copy(ies) marked as favorites, as their originals are." & linefeed
 	end if
 	-- Albums: each new item joins every album its original is in. The albums'
@@ -236,6 +271,12 @@ on addToAlbums(albumList, albumIds, folderList, pairs)
 	end repeat
 	return problems
 end addToAlbums
+
+-- The "!" line for a field of a copy (its properties record `got`) Photos
+-- wouldn't set.
+on notSet(got, field, errNum, e)
+	return "! " & («class filn» of got) & ": could not set its " & field & " (" & errNum & ": " & e & ")" & linefeed
+end notSet
 
 -- Locations as Photos gives them ({latitude, longitude}, or two missing
 -- values): the same place within 0.00001 degree (about 1 m), as photobatch

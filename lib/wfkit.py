@@ -332,9 +332,12 @@ class Builder:
         self.actions.append(end)
         return output_of(end, 'Repeat Results')
 
-    # If/Otherwise with the "has any value" condition (code 100). Format as
-    # written by Cherri (github.com/electrikmilk/cherri, shortcutgen.go).
-    def if_has_value(self, ref, then, otherwise):
+    def _conditional(self, condition, ref, then, otherwise):
+        """
+        If/Otherwise on ``ref`` with ``condition`` (the If's parameters besides
+        its input: WFCondition and what the condition needs). Format as written
+        by Cherri (github.com/electrikmilk/cherri, shortcutgen.go).
+        """
         group = new_uuid()
 
         def mark(mode, extra):
@@ -350,7 +353,7 @@ class Builder:
         mark(
             0,
             {
-                'WFCondition': 100,
+                **condition,
                 'WFInput': {'Type': 'Variable', 'Variable': attachment(ref)},
             },
         )
@@ -358,6 +361,10 @@ class Builder:
         mark(1, {})
         otherwise()
         mark(2, {'UUID': new_uuid()})
+
+    def if_has_value(self, ref, then, otherwise):
+        """If/Otherwise with the "has any value" condition (code 100)."""
+        self._conditional({'WFCondition': 100}, ref, then, otherwise)
 
     def if_true(self, ref, then, otherwise):
         """
@@ -368,30 +375,12 @@ class Builder:
         here, so the default doesn't matter. An input without a value (an image
         that isn't in the library has no Is Favorite) is not true.
         """
-        group = new_uuid()
-
-        def mark(mode, extra):
-            self.actions.append({
-                'WFWorkflowActionIdentifier': 'is.workflow.actions.conditional',
-                'WFWorkflowActionParameters': {
-                    'GroupingIdentifier': group,
-                    'WFControlFlowMode': mode,
-                    **extra,
-                },
-            })
-
-        mark(
-            0,
-            {
-                'WFCondition': 4,
-                'WFConditionalActionBoolean': True,
-                'WFInput': {'Type': 'Variable', 'Variable': attachment(ref)},
-            },
+        self._conditional(
+            {'WFCondition': 4, 'WFConditionalActionBoolean': True},
+            ref,
+            then,
+            otherwise,
         )
-        then()
-        mark(1, {})
-        otherwise()
-        mark(2, {'UUID': new_uuid()})
 
     def favorite_photos(self, ref):
         """

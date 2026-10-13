@@ -637,7 +637,7 @@ typedef struct {
   // From jxl_meta.txt: what Photos has for the photo, each field only when
   // `given` has its flag; an empty one means Photos has none.
   unsigned given;
-  char gps[96];  // "lat,lon" or "lat,lon,alt"
+  char *gps;  // "lat,lon" or "lat,lon,alt"
   char *title, *caption;
   char **keywords;
   size_t num_keywords;
@@ -710,6 +710,41 @@ static int parse_jobs(const uint8_t *data, size_t len, job_t **jobs_out, size_t 
 
 // Gives each job its line "i|date" of jxl_dates.txt, if that file is there
 // (the shortcuts write it from 0.7.0 on; checked when the photo is converted).
+// The next line of jxl_dates.txt or jxl_meta.txt from *pos: the index a line
+// starts with in *idx, and what follows the "|" after it in [*a, *b)
+// (surrounding spaces, tabs and CR left out; empty when nothing follows).
+// Lines without them (blank, a comment, other text) are passed over. Returns
+// 1 when a line was found, 0 at the end.
+static int next_indexed_line(const uint8_t *data, size_t len, size_t *pos, unsigned *idx, size_t *a, size_t *b) {
+  while (*pos < len) {
+    size_t end = *pos;
+    while (end < len && data[end] != '\n') end++;
+    size_t from = *pos, to = end;
+    *pos = end + 1;
+    while (from < to && (data[from] == ' ' || data[from] == '\t' || data[from] == '\r')) from++;
+    while (to > from && (data[to - 1] == ' ' || data[to - 1] == '\t' || data[to - 1] == '\r')) to--;
+    unsigned n = 0;
+    size_t digits = 0;
+    while (from < to && data[from] >= '0' && data[from] <= '9' && n < 100000000u) {
+      n = n * 10 + (data[from++] - '0');
+      digits++;
+    }
+    if (!digits || from >= to || data[from] != '|') continue;
+    *idx = n;
+    *a = from + 1;
+    *b = to;
+    return 1;
+  }
+  return 0;
+}
+
+static job_t *job_by_index(job_t *jobs, size_t count, unsigned idx) {
+  for (size_t i = 0; i < count; i++) {
+    if (jobs[i].index == idx) return &jobs[i];
+  }
+  return NULL;
+}
+
 static void read_dates(const char *dir, job_t *jobs, size_t count) {
   char *path = path_join(dir, DATES_FILE);
   uint8_t *data = NULL;
@@ -719,28 +754,14 @@ static void read_dates(const char *dir, job_t *jobs, size_t count) {
     return;
   }
   free(path);
-  size_t pos = 0;
-  while (pos < len) {
-    size_t end = pos;
-    while (end < len && data[end] != '\n') end++;
-    size_t a = pos, b = end;
-    pos = end + 1;
-    while (a < b && (data[a] == ' ' || data[a] == '\t' || data[a] == '\r')) a++;
-    while (b > a && (data[b - 1] == ' ' || data[b - 1] == '\t' || data[b - 1] == '\r')) b--;
-    unsigned idx = 0;
-    size_t digits = 0;
-    while (a < b && data[a] >= '0' && data[a] <= '9' && idx < 100000000u) {
-      idx = idx * 10 + (data[a++] - '0');
-      digits++;
-    }
-    if (!digits || a >= b || data[a] != '|') continue;
-    a++;
-    for (size_t i = 0; i < count; i++) {
-      if (jobs[i].index != idx) continue;
-      const size_t n = b - a < sizeof jobs[i].date ? b - a : sizeof jobs[i].date - 1;
-      memcpy(jobs[i].date, data + a, n);
-      jobs[i].date[n] = 0;
-    }
+  size_t pos = 0, a, b;
+  unsigned idx;
+  while (next_indexed_line(data, len, &pos, &idx, &a, &b)) {
+    job_t *job = job_by_index(jobs, count, idx);
+    if (!job) continue;
+    const size_t n = b - a < sizeof job->date ? b - a : sizeof job->date - 1;
+    memcpy(job->date, data + a, n);
+    job->date[n] = 0;
   }
   free(data);
 }
@@ -788,43 +809,26 @@ static void read_meta(const char *dir, job_t *jobs, size_t count) {
     return;
   }
   free(path);
-  size_t pos = 0;
-  while (pos < len) {
-    size_t end = pos;
-    while (end < len && data[end] != '\n') end++;
-    size_t a = pos, b = end;
-    pos = end + 1;
-    while (b > a && data[b - 1] == '\r') b--;
-    unsigned idx = 0;
-    size_t digits = 0;
-    while (a < b && data[a] >= '0' && data[a] <= '9' && idx < 100000000u) {
-      idx = idx * 10 + (data[a++] - '0');
-      digits++;
-    }
-    if (!digits || a >= b || data[a] != '|') continue;
-    const size_t field = ++a;
+  size_t pos = 0, a, b;
+  unsigned idx;
+  while (next_indexed_line(data, len, &pos, &idx, &a, &b)) {
+    const size_t field = a;
     while (a < b && data[a] != '|') a++;
     if (a >= b) continue;
     const size_t field_len = a - field;
     a++;
-    job_t *job = NULL;
-    for (size_t i = 0; i < count && !job; i++) job = jobs[i].index == idx ? &jobs[i] : NULL;
+    job_t *job = job_by_index(jobs, count, idx);
     if (!job) continue;
     const char *f = (const char *)data + field;
 #define FIELD(name) (field_len == sizeof name - 1 && memcmp(f, name, field_len) == 0)
-    if (FIELD("gps")) {
-      while (a < b && data[a] == ' ') a++;
-      const size_t n = b - a < sizeof job->gps ? b - a : sizeof job->gps - 1;
-      memcpy(job->gps, data + a, n);
-      job->gps[n] = 0;
-      job->given |= META_GPS;
-    } else if (FIELD("title") || FIELD("caption")) {
+    const int gps = FIELD("gps"), title = FIELD("title"), caption = FIELD("caption");
+    if (gps || title || caption) {
       char *text = meta_text(data, a, b);
       if (!text) continue;
-      char **slot = FIELD("title") ? &job->title : &job->caption;
+      char **slot = gps ? &job->gps : title ? &job->title : &job->caption;
       free(*slot);
       *slot = text;
-      job->given |= FIELD("title") ? META_TITLE : META_CAPTION;
+      job->given |= gps ? META_GPS : title ? META_TITLE : META_CAPTION;
     } else if (FIELD("keywords")) {
       size_t n = 0;
       for (size_t i = a; i < b; i++) n += data[i] == ',';
@@ -863,6 +867,7 @@ static void read_meta(const char *dir, job_t *jobs, size_t count) {
 
 static void free_jobs(job_t *jobs, size_t count) {
   for (size_t i = 0; i < count; i++) {
+    free(jobs[i].gps);
     free(jobs[i].title);
     free(jobs[i].caption);
     for (size_t k = 0; k < jobs[i].num_keywords; k++) free(jobs[i].keywords[k]);
@@ -949,7 +954,7 @@ static char **distinct(char *const *list, size_t n, size_t *count) {
   *count = 0;
   char **sorted = (char **)malloc((n ? n : 1) * sizeof *sorted);
   if (!sorted) return NULL;
-  memcpy(sorted, list, n * sizeof *sorted);
+  if (n) memcpy(sorted, list, n * sizeof *sorted);
   qsort(sorted, n, sizeof *sorted, text_order);
   for (size_t i = 0; i < n; i++) {
     if (!*count || strcmp(sorted[*count - 1], sorted[i]) != 0) sorted[(*count)++] = sorted[i];
@@ -970,6 +975,16 @@ static int same_keywords(char *const *a, size_t na, char *const *b, size_t nb) {
   free(sa);
   free(sb);
   return same;
+}
+
+// The log line for a title, caption or keywords written (`has`: Photos has a
+// value; `had`: the file had one) or removed.
+static void say_field(const char *name, int has, int had) {
+  if (has) {
+    say_wrap("  ", "%s from Photos (the file had %s)", name, had ? "another" : "none");
+  } else {
+    say_wrap("  ", "%s removed: Photos has none", name);
+  }
 }
 
 // What the photo has in Photos besides its date, if the shortcut gave it
@@ -1009,8 +1024,11 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
       const int removed = *xmp && (none || rc == 1) ? xmp_remove_location(xmp, xmp_len) : 0;
       if (removed < 0) return -1;
       if (rc == 1 || removed) changed = 1;
-      if (rc == -2) say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");
-      if (none && (rc == 1 || removed)) {
+      if (rc == -2 && !none) say_wrap("  ", "! location not written: the EXIF can't be read; the file's is kept");
+      if (rc == -2 && none) {
+        say_wrap("  ", "! location not removed from the EXIF: it can't be read%s",
+                 removed ? " (removed from the XMP)" : "");
+      } else if (none && (rc == 1 || removed)) {
         say_wrap("  ", "location removed: Photos has none");
       } else if (!none && rc == 1) {
         say_wrap("  ", "location from Photos: %.6f, %.6f (the file had %s)", want.lat, want.lon,
@@ -1038,14 +1056,18 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
   }
   unsigned which = 0;
   if ((job->given & META_TITLE) && !(dc.title_state != 2 && same_text(dc.title, job->title))) which |= XMP_DC_TITLE;
-  // The caption agrees when every caption the file has (an ImageDescription,
-  // the XMP's) is Photos', and, when it has none, Photos has none.
+  // The caption, in each place on its own: the XMP's is written when it isn't
+  // Photos' (an ImageDescription that is Photos' stands in for a missing
+  // one, as ImageIO reads it first), the ImageDescription when the file has
+  // one that isn't Photos'.
+  int exif_caption = 0;
   if (job->given & META_CAPTION) {
-    int agree = dc.description_state != 2;
-    if (description_state) agree = agree && same_text(had_description, job->caption);
-    if (dc.description_state == 1) agree = agree && same_text(dc.description, job->caption);
-    if (!description_state && !dc.description_state) agree = same_text(NULL, job->caption);
-    if (!agree) which |= XMP_DC_DESCRIPTION;
+    const int exif_same = description_state && same_text(had_description, job->caption);
+    const int xmp_same = dc.description_state == 2   ? 0
+                         : dc.description_state == 1 ? same_text(dc.description, job->caption)
+                                                     : exif_same || same_text(NULL, job->caption);
+    if (!xmp_same) which |= XMP_DC_DESCRIPTION;
+    exif_caption = description_state && !exif_same;
   }
   if (job->given & META_KEYWORDS) {
     const int same =
@@ -1056,16 +1078,17 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
     }
     if (!same) which |= XMP_DC_SUBJECT;
   }
-  if (!which) goto done;
+  if (!which && !exif_caption) goto done;
+  const int has_title = job->title && job->title[0], has_caption = job->caption && job->caption[0],
+            has_keywords = job->num_keywords > 0;
   // A file without XMP gets a packet when a value is to be added.
-  const int adds = ((which & XMP_DC_TITLE) && job->title && job->title[0]) ||
-                   ((which & XMP_DC_DESCRIPTION) && job->caption && job->caption[0]) ||
-                   ((which & XMP_DC_SUBJECT) && job->num_keywords);
+  const int adds = ((which & XMP_DC_TITLE) && has_title) || ((which & XMP_DC_DESCRIPTION) && has_caption) ||
+                   ((which & XMP_DC_SUBJECT) && has_keywords);
   if (!*xmp && adds && xmp_new_packet(xmp, xmp_len) != 0) {
     rc = -1;
     goto done;
   }
-  if (*xmp) {
+  if (*xmp && which) {
     const int set = xmp_set_dc(xmp, xmp_len, which, job->title, job->caption, (const char *const *)job->keywords,
                                job->num_keywords);
     if (set == -1) {
@@ -1077,7 +1100,8 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
       goto done;
     }
   }
-  if ((which & XMP_DC_DESCRIPTION) && had_description) {
+  int description_kept = 0;  // the EXIF's, which couldn't be written
+  if (exif_caption) {
     uint8_t *out = NULL;
     size_t out_len = 0;
     const int set = exif_set_description(*exif, *exif_len, job->caption, &out, &out_len);
@@ -1090,23 +1114,16 @@ static int apply_photos_meta(const job_t *job, uint8_t **exif, size_t *exif_len,
       *exif = out;
       *exif_len = out_len;
     }
+    description_kept = set == -2;
   }
   changed = 1;
-  {
-    static const struct {
-      unsigned flag;
-      const char *name;
-    } kFields[] = {{XMP_DC_TITLE, "title"}, {XMP_DC_DESCRIPTION, "caption"}, {XMP_DC_SUBJECT, "keywords"}};
-    const int had[] = {dc.title_state != 0, dc.description_state != 0 || description_state != 0, dc.subject_state != 0};
-    const int has[] = {job->title && job->title[0], job->caption && job->caption[0], job->num_keywords > 0};
-    for (size_t i = 0; i < sizeof kFields / sizeof *kFields; i++) {
-      if (!(which & kFields[i].flag)) continue;
-      if (has[i]) {
-        say_wrap("  ", "%s from Photos (the file had %s)", kFields[i].name, had[i] ? "another" : "none");
-      } else {
-        say_wrap("  ", "%s removed: Photos has none", kFields[i].name);
-      }
-    }
+  if (which & XMP_DC_TITLE) say_field("title", has_title, dc.title_state != 0);
+  if ((which & XMP_DC_DESCRIPTION) || exif_caption) {
+    say_field("caption", has_caption, dc.description_state != 0 || description_state != 0);
+  }
+  if (which & XMP_DC_SUBJECT) say_field("keywords", has_keywords, dc.subject_state != 0);
+  if (description_kept) {
+    say_wrap("  ", "! the EXIF's caption is kept: the EXIF can't be read, and Photos shows that one");
   }
 done:
   free(had_description);

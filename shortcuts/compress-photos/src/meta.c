@@ -854,11 +854,16 @@ static int tiff_open(tiff_t *t, const uint8_t *p, size_t n) {
   return 1;
 }
 
-static uint32_t exif_ifd_offset(const tiff_t *t) {
+// The offset of the sub-IFD that entry `tag` of the IFD at `ifd` points to (a
+// SHORT, LONG or IFD entry with one value), 0 if there is none.
+static uint32_t sub_ifd(const tiff_t *t, uint32_t ifd, uint16_t tag) {
   uint32_t off = 0;
-  if (!entry_uint(t, ifd_find(t, t32(t, 4), 0x8769), &off)) return 0;
+  if (!entry_uint(t, ifd_find(t, ifd, tag), &off)) return 0;
   return off;
 }
+
+static uint32_t exif_ifd_offset(const tiff_t *t) { return sub_ifd(t, t32(t, 4), 0x8769); }
+static uint32_t gps_ifd_offset(const tiff_t *t) { return sub_ifd(t, t32(t, 4), 0x8825); }
 
 int exif_orientation(const uint8_t *p, size_t n) {
   tiff_t t;
@@ -1207,9 +1212,132 @@ static int ifd_ok(const tiff_t *t, uint32_t ifd) {
   return ifd >= 8 && (size_t)ifd + 2 <= t->n && (size_t)ifd + 2 + (size_t)t16(t, ifd) * 12 + 4 <= t->n;
 }
 
+static size_t type_size(uint16_t type) {
+  switch (type) {
+    case 1: case 2: case 6: case 7: return 1;
+    case 3: case 8: return 2;
+    case 4: case 9: case 11: case 13: return 4;
+    case 5: case 10: case 12: return 8;
+    default: return 0;
+  }
+}
+
+// The bytes the IFD at `ifd` takes, entries and next-IFD offset.
+static size_t ifd_bytes(const tiff_t *t, uint32_t ifd) { return 2 + (size_t)t16(t, ifd) * 12 + 4; }
+
+// What a zeroing must spare: the header, and the IFDs that stay, their entry
+// tables, the values their entries hold outside them and the thumbnail they
+// locate. An entry may share a value, or part of one, with the one being
+// removed (two tags with one string; a rational inside another's three), and
+// a malformed file may point an IFD or a value into another IFD's table; what
+// another entry still refers to isn't obsolete, and only those bytes are
+// spared. The IFDs: IFD0 and those it chains to (the thumbnail's), the Exif
+// and Interoperability IFDs, and the GPS IFD when it stays (`gps`), but the
+// entry at `skip` (whose value is the one going; 0: none).
+#define SPARED_MAX_IFDS 8
+typedef struct {
+  uint32_t ifd[SPARED_MAX_IFDS];
+  size_t n;
+  size_t skip;
+} spared_t;
+
+static void spared_add(const tiff_t *t, spared_t *s, uint32_t ifd) {
+  if (!ifd || !ifd_ok(t, ifd) || s->n == SPARED_MAX_IFDS) return;
+  for (size_t k = 0; k < s->n; k++) {
+    if (s->ifd[k] == ifd) return;
+  }
+  s->ifd[s->n++] = ifd;
+}
+
+static void spared_init(const tiff_t *t, spared_t *s, int gps, size_t skip) {
+  s->n = 0;
+  s->skip = skip;
+  uint32_t ifd = t32(t, 4);
+  for (int k = 0; k < 4 && ifd && ifd_ok(t, ifd); k++) {  // IFD0, IFD1, ...
+    spared_add(t, s, ifd);
+    ifd = t32(t, ifd + 2 + (size_t)t16(t, ifd) * 12);
+  }
+  const uint32_t exif = exif_ifd_offset(t);
+  spared_add(t, s, exif);
+  if (exif && ifd_ok(t, exif)) spared_add(t, s, sub_ifd(t, exif, 0xA005));
+  if (gps) spared_add(t, s, gps_ifd_offset(t));
+}
+
+// Notes the spared range [at, at + n) against `pos`: the end of a range that
+// holds `pos` goes to *held (the farthest), the start of the nearest range
+// after `pos` to *next.
+static void spared_range(uint64_t at, uint64_t n, uint64_t pos, uint64_t *held, uint64_t *next) {
+  if (at <= pos && pos < at + n) {
+    if (at + n > *held) *held = at + n;
+  } else if (at > pos && at < *next) {
+    *next = at;
+  }
+}
+
+// The spared ranges around `pos`: *held is where the range holding `pos` ends
+// (`pos` when none does), *next where the nearest spared range after `pos`
+// starts (`limit` when none does before it). The thumbnail: what an IFD's
+// JPEGInterchangeFormat and -Length, or its one strip, locate.
+static void spared_around(const tiff_t *t, const spared_t *s, uint64_t pos, uint64_t limit, uint64_t *held,
+                          uint64_t *next) {
+  *held = pos;
+  *next = limit;
+  spared_range(0, 8, pos, held, next);
+  for (size_t k = 0; k < s->n; k++) {
+    const uint32_t ifd = s->ifd[k];
+    const size_t count = t16(t, ifd);
+    spared_range(ifd, ifd_bytes(t, ifd), pos, held, next);
+    for (size_t i = 0; i < count; i++) {
+      const size_t e = ifd + 2 + i * 12;
+      const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
+      if (e != s->skip && size > 4) spared_range(t32(t, e + 8), size, pos, held, next);
+    }
+    static const uint16_t kData[2][2] = {{0x0201, 0x0202}, {0x0111, 0x0117}};
+    for (size_t d = 0; d < 2; d++) {
+      uint32_t at = 0, n = 0;
+      if (entry_uint(t, ifd_find(t, ifd, kData[d][0]), &at) && entry_uint(t, ifd_find(t, ifd, kData[d][1]), &n)) {
+        spared_range(at, n, pos, held, next);
+      }
+    }
+  }
+}
+
+// Zeroes [at, at + n), but the bytes of it something spared still holds.
+static void zero_range(const tiff_t *t, uint64_t at, uint64_t n, const spared_t *s) {
+  if (at > t->n || n > t->n - at) return;
+  uint64_t pos = at;
+  const uint64_t end = at + n;
+  while (pos < end) {
+    uint64_t held, next;
+    spared_around(t, s, pos, end, &held, &next);
+    if (held > pos) {
+      pos = held;
+      continue;
+    }
+    memset(t->p + pos, 0, (size_t)(next - pos));
+    pos = next;
+  }
+}
+
+// Zeroes the value of entry `e` when it is stored outside the entry.
+static void zero_value(const tiff_t *t, size_t e, const spared_t *s) {
+  const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
+  if (size > 4) zero_range(t, t32(t, e + 8), size, s);
+}
+
+// Zeroes the IFD at `ifd` and the values its entries hold outside it.
+static void zero_ifd(const tiff_t *t, uint32_t ifd, const spared_t *s) {
+  if (!ifd_ok(t, ifd)) return;
+  const size_t count = t16(t, ifd);
+  for (size_t i = 0; i < count; i++) zero_value(t, ifd + 2 + i * 12, s);
+  zero_range(t, ifd, ifd_bytes(t, ifd), s);
+}
+
 // Writes IFD0 anew at the end of the data in *buf, with its entries but
-// `tag`, plus `add` if not NULL, and points the header to it. Returns 0, or
-// -1 if out of memory.
+// `tag`, plus `add` if not NULL, and points the header to it. The old table
+// is zeroed (its entries' values, inline ones copied, are elsewhere): a value
+// held in it, such as a short caption removed now or later in this
+// conversion, doesn't survive there. Returns 0, or -1 if out of memory.
 static int rewrite_ifd0(uint8_t **buf, size_t *len, int le, uint16_t tag, const entry_t *add) {
   tiff_t t = {*buf, *len, le};
   const uint32_t ifd0 = t32(&t, 4);
@@ -1229,6 +1357,9 @@ static int rewrite_ifd0(uint8_t **buf, size_t *len, int le, uint16_t tag, const 
   t.p = *buf;
   t.n = *len;
   w32(&t, 4, at);
+  spared_t spared;
+  spared_init(&t, &spared, 1, 0);
+  zero_range(&t, ifd0, 2 + old * 12 + 4, &spared);
   return 0;
 }
 
@@ -1419,12 +1550,6 @@ static int entry_degrees(const tiff_t *t, size_t e, double *deg) {
   return 1;
 }
 
-static uint32_t gps_ifd_offset(const tiff_t *t) {
-  uint32_t off = 0;
-  if (!entry_uint(t, ifd_find(t, t32(t, 4), 0x8825), &off)) return 0;
-  return off;
-}
-
 int exif_gps(const uint8_t *p, size_t n, photo_location_t *loc) {
   tiff_t t;
   if (!tiff_open(&t, p, n)) return 0;
@@ -1439,99 +1564,9 @@ int exif_gps(const uint8_t *p, size_t n, photo_location_t *loc) {
   entry_text(&t, ifd_find(&t, gps, 0x0003), lon_ref, sizeof lon_ref);
   loc->lat = lat_ref[0] == 'S' ? -lat : lat;
   loc->lon = lon_ref[0] == 'W' ? -lon : lon;
-  double alt = 0;
-  loc->has_alt = entry_number(&t, ifd_find(&t, gps, 0x0006), 0, &alt);
-  const size_t ref = ifd_find(&t, gps, 0x0005);  // 1: below sea level
-  loc->alt = loc->has_alt && ref && t16(&t, ref + 2) == TIFF_BYTE && t.p[ref + 8] == 1 ? -alt : alt;
+  loc->has_alt = 0;  // the altitude isn't compared (photo_location_same)
+  loc->alt = 0;
   return 1;
-}
-
-static size_t type_size(uint16_t type) {
-  switch (type) {
-    case 1: case 2: case 6: case 7: return 1;
-    case 3: case 8: return 2;
-    case 4: case 9: case 11: case 13: return 4;
-    case 5: case 10: case 12: return 8;
-    default: return 0;
-  }
-}
-
-// The bytes the IFD at `ifd` takes, entries and next-IFD offset.
-static size_t ifd_bytes(const tiff_t *t, uint32_t ifd) { return 2 + (size_t)t16(t, ifd) * 12 + 4; }
-
-// What a zeroing must spare: the header, and the IFDs that stay, their entry
-// tables and the values their entries hold outside them. An entry may share a
-// value with the one being removed (two tags with one string), and a
-// malformed file may point an IFD or a value into another IFD's table; what
-// another entry still refers to isn't obsolete. The IFDs: IFD0 and those it
-// chains to (the thumbnail's), the Exif and Interoperability IFDs, and the
-// GPS IFD when it stays (`gps`), but the entry at `skip` (whose value is the
-// one going; 0: none).
-#define SPARED_MAX_IFDS 8
-typedef struct {
-  uint32_t ifd[SPARED_MAX_IFDS];
-  size_t n;
-  size_t skip;
-} spared_t;
-
-static void spared_add(const tiff_t *t, spared_t *s, uint32_t ifd) {
-  if (!ifd || !ifd_ok(t, ifd) || s->n == SPARED_MAX_IFDS) return;
-  for (size_t k = 0; k < s->n; k++) {
-    if (s->ifd[k] == ifd) return;
-  }
-  s->ifd[s->n++] = ifd;
-}
-
-static void spared_init(const tiff_t *t, spared_t *s, int gps, size_t skip) {
-  s->n = 0;
-  s->skip = skip;
-  uint32_t ifd = t32(t, 4);
-  for (int k = 0; k < 4 && ifd && ifd_ok(t, ifd); k++) {  // IFD0, IFD1, ...
-    spared_add(t, s, ifd);
-    ifd = t32(t, ifd + 2 + (size_t)t16(t, ifd) * 12);
-  }
-  const uint32_t exif = exif_ifd_offset(t);
-  uint32_t interop = 0;
-  spared_add(t, s, exif);
-  if (exif && ifd_ok(t, exif) && entry_uint(t, ifd_find(t, exif, 0xA005), &interop)) spared_add(t, s, interop);
-  if (gps) spared_add(t, s, gps_ifd_offset(t));
-}
-
-static int overlaps(uint64_t at, uint64_t n, uint64_t at2, uint64_t n2) { return at < at2 + n2 && at2 < at + n; }
-
-// 1 if [at, at + n) holds any of what is spared.
-static int spared_has(const tiff_t *t, const spared_t *s, uint64_t at, uint64_t n) {
-  if (at < 8) return 1;
-  for (size_t k = 0; k < s->n; k++) {
-    const uint32_t ifd = s->ifd[k];
-    const size_t count = t16(t, ifd);
-    if (overlaps(at, n, ifd, ifd_bytes(t, ifd))) return 1;
-    for (size_t i = 0; i < count; i++) {
-      const size_t e = ifd + 2 + i * 12;
-      const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
-      if (e != s->skip && size > 4 && overlaps(at, n, t32(t, e + 8), size)) return 1;
-    }
-  }
-  return 0;
-}
-
-static void zero_range(const tiff_t *t, uint64_t at, uint64_t n, const spared_t *s) {
-  if (at > t->n || n > t->n - at || spared_has(t, s, at, n)) return;
-  memset(t->p + at, 0, (size_t)n);
-}
-
-// Zeroes the value of entry `e` when it is stored outside the entry.
-static void zero_value(const tiff_t *t, size_t e, const spared_t *s) {
-  const uint64_t size = (uint64_t)type_size(t16(t, e + 2)) * t32(t, e + 4);
-  if (size > 4) zero_range(t, t32(t, e + 8), size, s);
-}
-
-// Zeroes the IFD at `ifd` and the values its entries hold outside it.
-static void zero_ifd(const tiff_t *t, uint32_t ifd, const spared_t *s) {
-  if (!ifd_ok(t, ifd)) return;
-  const size_t count = t16(t, ifd);
-  for (size_t i = 0; i < count; i++) zero_value(t, ifd + 2 + i * 12, s);
-  zero_range(t, ifd, ifd_bytes(t, ifd), s);
 }
 
 static void put_rational(uint8_t *v, int le, uint32_t num, uint32_t den) {
@@ -1572,8 +1607,16 @@ int exif_set_gps(const uint8_t *p, size_t n, const photo_location_t *loc, uint8_
   size_t len = n;
   const int le = t.le;
   tiff_t nt = {buf, len, le};
-  // The old position goes from the data, not only from IFD0.
-  const uint32_t old = gps_ifd_offset(&nt);
+  // The old position goes from the data, not only from IFD0: also behind a
+  // pointer entry_uint won't follow (a count other than 1).
+  uint32_t old = gps_ifd_offset(&nt);
+  const size_t pointer = ifd_find(&nt, ifd0, 0x8825);
+  if (!old && pointer) {
+    const uint16_t type = t16(&nt, pointer + 2);
+    old = type == TIFF_SHORT ? t16(&nt, pointer + 8)
+          : type == TIFF_LONG || type == TIFF_IFD ? t32(&nt, pointer + 8)
+                                                  : 0;
+  }
   if (old) {
     spared_t spared;
     spared_init(&nt, &spared, 0, 0);
@@ -1682,11 +1725,11 @@ int exif_set_description(const uint8_t *p, size_t n, const char *text, uint8_t *
   spared_init(&nt, &spared, 1, e);
   zero_value(&nt, e, &spared);
   if (!k) {
+    // a short value, held in the entry, goes with the old table
     if (rewrite_ifd0(&buf, &len, le, 0x010E, NULL) != 0) {
       free(buf);
       return -1;
     }
-    memset(buf + e + 8, 0, 4);  // a short value, held in the entry, goes too
   } else {
     w16(&nt, e + 2, TIFF_ASCII);
     w32(&nt, e + 4, (uint32_t)k);

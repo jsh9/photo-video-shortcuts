@@ -731,18 +731,22 @@ Photos has none, the file's is removed.
   it has none, or without it for a removal): no other value moves. The old
   fix's direction, speed, positioning error and fix time go. Photos having none
   removes whatever GPS IFD the file has, also one without a readable position
-  (a longitude, or an altitude, alone). The old GPS IFD and the values it
-  points to are zeroed, so the old position isn't left in the file, sparing
-  whatever another entry that stays still refers to: the tables and values of
-  IFD0 (and the IFDs it chains to), the Exif and Interoperability IFDs (a valid
-  file may share one string between two tags; a malformed one may point its GPS
-  IFD into another), and the XMP's location goes too (when Photos has none,
-  whatever the EXIF's was; for another place, only once the EXIF took it: a
-  file whose EXIF can't be read keeps its location, `! location not written`)
-  (`xmp_remove_location`: `exif:GPS*`, `photoshop:City`, `State` and `Country`,
-  `Iptc4xmpCore:Location` and `CountryCode`, `Iptc4xmpExt:LocationCreated` and
-  `LocationShown`). In iPhone 13 mini, 15 Pro and 17 Pro photos the GPS IFD is
-  the only place of the location (their maker notes and XMP hold none).
+  (a longitude, or an altitude, alone), also behind a pointer with a count
+  other than 1. The old GPS IFD and the values it points to are zeroed, and so
+  is IFD0's old table whenever IFD0 is written anew (a short caption held in an
+  entry would otherwise survive there, to be removed later from the new table
+  only), so the old position isn't left in the file, sparing only the bytes
+  another entry that stays still refers to: the tables and values of IFD0 (and
+  the IFDs it chains to), the Exif and Interoperability IFDs, and the thumbnail
+  they locate (a valid file may share one string, or part of a value, between
+  two tags; a malformed one may point its GPS IFD into another), and the XMP's
+  location goes too (when Photos has none, whatever the EXIF's was; for another
+  place, only once the EXIF took it: a file whose EXIF can't be read keeps its
+  location, `! location not written`) (`xmp_remove_location`: `exif:GPS*`,
+  `photoshop:City`, `State` and `Country`, `Iptc4xmpCore:Location` and
+  `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In iPhone
+  13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
+  location (their maker notes and XMP hold none).
 - **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_read`, one pass for the
   three, and `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
   alternatives, `x-default`) and `dc:subject` (a bag), the only place a JPEG XL
@@ -752,12 +756,17 @@ Photos has none, the file's is removed.
   `rdf:value`, an element or an attribute
   (`<rdf:li rdf:parseType="Resource"><rdf:value>`,
   `<rdf:li rdf:value="..." q:confidence="..."/>`, or either in a nested
-  `rdf:Description`). An item counts only when it can be read: it has text, or
-  it is plainly empty; so is an empty array (`<rdf:Alt/>`). Anything else
-  (fields or a URI such as `rdf:resource` without text, a blank `rdf:value`
-  with qualifiers, elements but no `rdf:value`, a property holding a structure
-  or fields instead of an array) is a value the scanner can't read, which is
-  never Photos' (the property is rewritten, or removed when Photos has none).
+  `rdf:Description`). Only the value path counts: the items of the property's
+  own array and their `rdf:value`; a qualifier's own array
+  (`<q:source> <rdf:Bag>...`) or a structure's fields are passed over. An item
+  counts only when it can be read: it has text, or it is plainly empty; so is
+  an empty array (`<rdf:Alt/>`, or one holding whitespace only). Anything else
+  (fields, or a reference such as `rdf:resource`, `rdf:nodeID` or `rdf:ID`
+  without text, a blank `rdf:value` with qualifiers, elements but no
+  `rdf:value`, an array holding text instead of items, a property holding a
+  structure or fields instead of an array) is a value the scanner can't read,
+  which is never Photos' (the property is rewritten, or removed when Photos has
+  none); so is a property repeated with another value (readers take the last).
   An item's language is its effective `xml:lang`, inherited from the `rdf:Alt`
   or the node element when it has none of its own. The file's own are removed
   wherever they are (an element or an attribute, in any `rdf:Description`,
@@ -775,10 +784,14 @@ Photos has none, the file's is removed.
   26), takes EXIF's `ImageDescription` over `dc:description` when they
   disagree, and as the caption when it is alone, even blank. So the file agrees
   with Photos' caption only when both, those it has (a blank `ImageDescription`
-  too), are that caption; then an `ImageDescription` the file has is set to it,
-  or removed (`exif_set_description`: the value at the end of the data and the
-  entry patched in place; a removal rewrites IFD0 and zeroes the old entry's
-  value, a shared value excepted). An `ImageDescription` stored as BYTE or
+  too), are that caption. Each is set on its own: the XMP's when it isn't
+  Photos' (an `ImageDescription` that is stands in for a missing one), and an
+  `ImageDescription` the file has when it isn't, to Photos' caption, or removed
+  (`exif_set_description`: the value at the end of the data and the entry
+  patched in place; a removal rewrites IFD0 and zeroes the old entry's value
+  and the old table, the bytes another entry shares excepted). An EXIF whose
+  IFD0 can be read but not rewritten (truncated) keeps its caption, and the log
+  says so, as Photos shows that one. An `ImageDescription` stored as BYTE or
   UNDEFINED (some writers' UTF-8) counts as ImageIO reads it. None is added.
 - **Favorite:** no field in a file holds one (Photos doesn't take `xmp:Rating`
   5 as one; checked on macOS 26).
@@ -795,8 +808,11 @@ original in Photos (`import.applescript`: `properties of` each, one event
 apiece; the date too, as since 0.7.0) and sets what differs: the location
 (`{missing value, missing value}` removes one), title (`""` clears it),
 caption, keywords; and it makes the copy a favorite when the original is one.
-The log counts both, and the "Photos took ..." line has the time. Compress
-Videos' copies get this too.
+Each field is set in a `try` of its own: one Photos won't set is a `!` line
+naming the copy and the field, and the next is still tried. The log counts what
+was set per field, and the "Photos took ..." line has the time. Compress
+Videos' copies get this too (nothing is written into a video's file, so there
+every field Photos has is set this way).
 
 On the iPhone, a saved copy is made a favorite when its original is one
 (`wf.copy_favorite`): Get Details of Images ▸ Is Favorite, an If on it

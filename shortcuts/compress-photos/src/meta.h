@@ -108,8 +108,9 @@ typedef struct {
 // Info window, and a measured altitude is never exactly 0. Returns 1 if valid
 // (latitude within ±90, longitude within ±180).
 int photo_location_parse(const char *s, photo_location_t *loc);
-// The EXIF's GPS position (GPSLatitude and GPSLongitude with their refs, and
-// GPSAltitude if any) in *loc. Returns 1 if it has one.
+// The EXIF's GPS position (GPSLatitude and GPSLongitude with their refs) in
+// *loc; its altitude isn't read (has_alt is 0), as photo_location_same
+// doesn't compare it. Returns 1 if it has one.
 int exif_gps(const uint8_t *tiff, size_t len, photo_location_t *loc);
 // 1 if two positions are the same place: within 0.00001° (about 1 m) in both
 // coordinates. Photos gives reals, EXIF stores rationals (an iPhone writes
@@ -123,11 +124,11 @@ int photo_location_same(const photo_location_t *a, const photo_location_t *b);
 // IFD is written at the end of the data and IFD0's pointer moved to it (IFD0
 // is rewritten when it has no pointer, or without it for a removal), so no
 // other value moves. The old GPS IFD and the values it points to are zeroed,
-// so the old position isn't left in the data (but what another IFD's entry
-// still refers to, in a file that shares values or points IFDs into one
-// another). Returns 1, or 0 when removing
-// from an EXIF without a position; -1 if out of memory, -2 if the EXIF can't
-// be read (it is then kept as it is).
+// and so is IFD0's old table when IFD0 is rewritten, so the old position
+// isn't left in the data (but the bytes another IFD's entry still refers to,
+// in a file that shares values, or parts of them, or points IFDs into one
+// another). Returns 1, or 0 when removing from an EXIF without a position; -1
+// if out of memory, -2 if the EXIF can't be read (it is then kept as it is).
 int exif_set_gps(const uint8_t *tiff, size_t len, const photo_location_t *loc, uint8_t **out, size_t *out_len);
 // IFD0's ImageDescription (the caption EXIF readers show; ASCII, or BYTE or
 // UNDEFINED as some writers store UTF-8), without trailing spaces and NULs,
@@ -138,9 +139,10 @@ int exif_description(const uint8_t *tiff, size_t len, char **text);
 // Sets IFD0's ImageDescription to `text` (UTF-8), or removes it when `text`
 // is NULL or empty; only an EXIF that has one is changed (0 is returned
 // otherwise). The new value is written at the end of the data, the old one
-// zeroed (unless another entry shares it); a removal rewrites IFD0 at the end
-// and zeroes the old entry's value. Returns 1 when *out got a new,
-// malloc'ed TIFF structure, -1 if out of memory, -2 if the EXIF can't be read.
+// zeroed (but the bytes another entry shares); a removal rewrites IFD0 at
+// the end and zeroes the old entry's value and the old table, a short value
+// held in it included. Returns 1 when *out got a new, malloc'ed TIFF
+// structure, -1 if out of memory, -2 if the EXIF can't be read.
 int exif_set_description(const uint8_t *tiff, size_t len, const char *text, uint8_t **out, size_t *out_len);
 
 #endif
