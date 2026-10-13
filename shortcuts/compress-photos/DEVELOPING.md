@@ -750,16 +750,18 @@ Photos has none, the file's is removed.
   `rdf:value`, an element or an attribute
   (`<rdf:li rdf:parseType="Resource"><rdf:value>`,
   `<rdf:li rdf:value="..." q:confidence="..."/>`, or either in a nested
-  `rdf:Description`); an item holding elements or fields but no `rdf:value` is
-  a value the scanner can't read, which is never Photos' (the property is
-  rewritten, or removed when Photos has none). The file's own are removed
-  wherever they are (an element or an attribute, in any `rdf:Description`,
-  qualifiers and all), and Photos' are added in a new `rdf:Description` at the
-  end of `rdf:RDF` (an empty `rdf:RDF` written as one tag gets an end tag,
-  under its own prefix), with the packet's `rdf:about`; every other byte of the
-  packet stays. A file without XMP gets a minimal packet (`xmp_new_packet`)
-  when there is something to add: a JPEG XL `xml ` box, a HEIC `mime` item. A
-  packet without `rdf:RDF` is kept
+  `rdf:Description`). An item counts only when it can be read: it has text, or
+  it is plainly empty. Anything else (fields or a URI such as `rdf:resource`
+  without text, a blank `rdf:value` with qualifiers, elements but no
+  `rdf:value`) is a value the scanner can't read, which is never Photos' (the
+  property is rewritten, or removed when Photos has none). The file's own are
+  removed wherever they are (an element or an attribute, in any
+  `rdf:Description`, qualifiers and all), and Photos' are added in a new
+  `rdf:Description` at the end of `rdf:RDF` (an empty `rdf:RDF` written as one
+  tag gets an end tag, under its own prefix), with the packet's `rdf:about`;
+  every other byte of the packet stays. A file without XMP gets a minimal
+  packet (`xmp_new_packet`) when there is something to add: a JPEG XL `xml `
+  box, a HEIC `mime` item. A packet without `rdf:RDF` is kept
   (`! title, caption and keywords not written`). The scanner is the one
   orientation and dates use (see [XMP](#12-xmp)), which now also reports
   structured properties, with the text items of their arrays, and where each

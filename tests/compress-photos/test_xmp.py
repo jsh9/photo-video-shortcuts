@@ -777,6 +777,32 @@ TITLE_ATTRIBUTES = (
     ' c:source="camera"/></rdf:Alt></dc:title>'
 )
 CAPTION_ATTRIBUTES = '<dc:description rdf:value="C" c:source="camera"/>'
+# values that aren't text, or fields without a value: not readable either
+URI_VALUE_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:parseType="Resource">'
+    '<rdf:value rdf:resource="urn:private:keyword"/>'
+    '<c:source>camera</c:source></rdf:li></rdf:Bag></dc:subject>'
+)
+FIELDS_VALUE_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:parseType="Resource">'
+    '<rdf:value c:word="kw" c:source="camera"/></rdf:li></rdf:Bag></dc:subject>'
+)
+URI_ITEM_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:resource="urn:private:keyword"'
+    ' c:source="camera"/></rdf:Bag></dc:subject>'
+)
+NESTED_URI_VALUE_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li><rdf:Description c:source="camera">'
+    '<rdf:value rdf:resource="urn:private:keyword"/></rdf:Description>'
+    '</rdf:li></rdf:Bag></dc:subject>'
+)
+BLANK_VALUE_KEYWORD = (
+    '<dc:subject><rdf:Bag><rdf:li rdf:value=" " c:source="camera"/>'
+    '</rdf:Bag></dc:subject>'
+)
+URI_CAPTION = (
+    '<dc:description rdf:resource="urn:private:caption" c:source="camera"/>'
+)
 # fields, but no value: not readable
 KEYWORD_FIELDS_ONLY = (
     '<dc:subject><rdf:Bag><rdf:li c:word="kw" c:source="camera"/>'
@@ -799,6 +825,12 @@ KEYWORD_FIELDS_ONLY = (
         (KEYWORD_FIELDS_ONLY, '1|keywords|', None),
         (TITLE_ATTRIBUTES, '1|title|', None),
         (CAPTION_ATTRIBUTES, '1|caption|', None),
+        (URI_VALUE_KEYWORD, '1|keywords|', None),
+        (FIELDS_VALUE_KEYWORD, '1|keywords|', None),
+        (URI_ITEM_KEYWORD, '1|keywords|', None),
+        (NESTED_URI_VALUE_KEYWORD, '1|keywords|', None),
+        (BLANK_VALUE_KEYWORD, '1|keywords|', None),
+        (URI_CAPTION, '1|caption|', None),
         # replaced when Photos has another
         (QUALIFIED_KEYWORD, '1|keywords|other', ['other']),
         (UNREADABLE_KEYWORD, '1|keywords|kw', ['kw']),
@@ -808,6 +840,7 @@ KEYWORD_FIELDS_ONLY = (
         (KEYWORD_FIELDS_ONLY, '1|keywords|kw', ['kw']),
         (TITLE_ATTRIBUTES, '1|title|New', 'New'),
         (CAPTION_ATTRIBUTES, '1|caption|New', 'New'),
+        (URI_VALUE_KEYWORD, '1|keywords|kw', ['kw']),
     ],
 )
 def test_qualified_values_removed_or_replaced(
@@ -824,6 +857,7 @@ def test_qualified_values_removed_or_replaced(
     tags = ph.xmp_properties(out)
     assert tags.get(tag) == expected
     assert b'camera' not in xml_box(out)
+    assert b'urn:private' not in xml_box(out)
     assert properties(xml_box(out))[f'{{{CUSTOM}}}other'] == ('scalar', 'kept')
     assert field in log
 

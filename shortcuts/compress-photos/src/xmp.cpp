@@ -528,29 +528,33 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
   };
   // Closes open[k], which ends at `end` (its end tag starts at `at`, npos
   // for an empty-element tag). A top-level property is found, its value its
-  // text or an rdf:value attribute. Inside one: an array item (rdf:li), a
+  // text or an rdf:value attribute. Inside one, an array item (rdf:li) or a
   // qualified value (an rdf:value element, or an element with an rdf:value
-  // attribute) adds its text as an item; an item holding elements or fields
-  // but no value makes the property opaque. rdf:RDF's end tag goes to
+  // attribute) adds its text as an item when it can be read: it has text, or
+  // it is plainly empty. One that can't (fields or a URI without text, or
+  // elements but no rdf:value read) makes the property opaque, so that it is
+  // never taken for absent or for Photos' value. rdf:RDF's end tag goes to
   // `layout`.
   auto close_element = [&](size_t k, size_t end, size_t at) {
     Element &e = open[k];
     std::vector<Run> value = e.children ? std::vector<Run>() : e.text;
     if (e.has_value_attr) value = std::vector<Run>(1, e.value_attr);
-    // fields or qualifiers, but no value
-    const bool bare = e.fields && !e.has_value_attr && blank(value);
+    // fields or qualifiers (rdf:resource among them), but no text
+    const bool unreadable = e.fields && blank(value);
     if (k >= 1 && in_rdf(k - 1)) {
       found.push_back(property(e.name, e.children ? std::vector<Run>() : value, e.start, end, e.children, e.items,
-                               e.opaque || (bare && !e.children)));
+                               e.opaque || (unreadable && !e.children)));
     } else if (is(e.name, RDF, "rdf", "li")) {
       if (const size_t p = property_of(k)) {
-        if (e.has_value_attr || (!e.children && !bare)) {
+        if (e.children && !e.has_value_attr) {
+          if (!e.has_value) open[p].opaque = true;  // no rdf:value read inside
+        } else if (unreadable) {
+          open[p].opaque = true;
+        } else {
           Item item;
           item.runs = value;
           item.lang = e.lang;
           open[p].items.push_back(item);
-        } else if (bare || !e.has_value) {
-          open[p].opaque = true;
         }
       }
     } else if (is(e.name, RDF, "rdf", "value") || e.has_value_attr) {
@@ -563,15 +567,15 @@ std::vector<Property> scan(const std::string &s, Layout *layout = nullptr) {
             li = q;
             break;
           }
-        if (e.children && !e.has_value_attr) {
+        if ((e.children && !e.has_value_attr) || unreadable) {
           open[p].opaque = true;
         } else {
           Item item;
           item.runs = value;
           item.lang = !e.lang.empty() || !li ? e.lang : open[li].lang;
           open[p].items.push_back(item);
+          if (li) open[li].has_value = true;
         }
-        if (li) open[li].has_value = true;
       }
     } else if (layout && at != std::string::npos && layout->rdf_end == std::string::npos &&
                is(e.name, RDF, "rdf", "RDF")) {
