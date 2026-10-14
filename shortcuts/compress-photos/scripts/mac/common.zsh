@@ -20,8 +20,14 @@ unique() {
 VERSION='@VERSION@'
 WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
 FORMAT='@FORMAT@'  # heic: HEIC (x265, QUALITY is the RF); anything else: JPEG XL (QUALITY is the quality)
-case $FORMAT in heic) FORMAT_NAME=HEIC;; *) FORMAT_NAME='JPEG XL';; esac
 QUALITY='@QUALITY@'
+# The format's name for the log, and the keywords the selection route gives
+# each copy in Photos (selection.zsh, import.applescript): its format and
+# quality, "heic,rf=26" or "jxl,q=83"; every copy of a run has the same.
+case $FORMAT in
+  heic) FORMAT_NAME=HEIC; KEYWORDS="heic,rf=$QUALITY";;
+  *) FORMAT_NAME='JPEG XL'; KEYWORDS="jxl,q=$QUALITY";;
+esac
 CORES='@CORES@'  # all: several photos at a time, every core; one: one photo, one thread
 HDR='@HDR@'  # keep: HDR photos keep their HDR; drop: every photo becomes SDR
 # @LABEL@: one per input file, in the same order (see the shortcut)

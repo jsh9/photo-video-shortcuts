@@ -719,17 +719,33 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     # an original already in the old review album: its copy must not join it
     assert gen.OLD_ORIGINALS_ALBUM in script
     # the copies' keywords, set in Photos after the import (copyKeywords):
-    # "compr", then the format and quality selection.zsh gives each result
-    # line, which the import also knows to drop from an original's
-    assert gen.COPY_KEYWORD == 'compr'
+    # "compr" (wfkit's, shared with Compress Videos), then the format and
+    # quality common.zsh's KEYWORDS gives each result line, which the import
+    # also knows to drop from the keywords of an original that is a copy
+    assert gen.COPY_KEYWORD == 'compr' == gen.wf.COPY_KEYWORD
     assert gen.FORMAT_KEYWORDS == {'heic': 'rf=', 'jxl': 'q='}
     assert 'repeat with f in {"heic", "jxl"}' in script
     assert 'repeat with pfx in {"rf=", "q="}' in script
     assert 'set end of kws to "compr"' in script
     assert 'set keywords of copyItem to wantKeywords' in script
-    assert 'heic) keywords="heic,rf=$QUALITY";;' in selection[0]
-    assert '*) keywords="jxl,q=$QUALITY";;' in selection[0]
-    assert '"${dest:t}" "$keywords"' in selection[0]
+    assert (
+        'heic) FORMAT_NAME=HEIC; KEYWORDS="heic,rf=$QUALITY";;' in selection[0]
+    )
+    assert (
+        '*) FORMAT_NAME=\'JPEG XL\'; KEYWORDS="jxl,q=$QUALITY";;'
+        in selection[0]
+    )
+    assert '"${dest:t}" "$KEYWORDS"' in selection[0]
+    # a copy whose original is unknown (two selected photos with one name)
+    # gets them too, with the keywords Photos read from its file
+    assert (
+        'set end of orphans to {found, item i of ownKeywords, jxlName}'
+        in script
+    )
+    assert (
+        'set keywords of (item 1 of o) to my copyKeywords(had, item 2 of o)'
+        in script
+    )
 
 
 def test_photos_selection_route_notifies_without_a_picker(shortcuts):
@@ -893,14 +909,17 @@ def test_import_compares_what_photos_has(gen):
 def test_import_gives_each_copy_its_keywords(gen):
     # import.applescript's keywords for a copy, set in Photos only: its
     # original's, then "compr" and its own from its result line (its format
-    # and quality). A copy of a copy keeps none of its original's format and
-    # quality keywords, nor a second "compr"; case is ignored, as AppleScript
-    # compares text. A line without keywords (Compress Videos'): "compr" only.
+    # and quality). A copy of a copy (its original has "compr") keeps none of
+    # its original's format and quality keywords, nor a second "compr"; case
+    # is ignored, as AppleScript compares text. An original that isn't a copy
+    # keeps every keyword, a "HEIC" or "q=..." of the user's own too. A line
+    # without keywords (Compress Videos'): "compr" only.
     cases = [
         ('missing value', 'jxl,q=83'),
         ('{"NYC", "skyline"}', 'heic,rf=26'),
         ('{"compr", "heic", "rf=26", "a,b"}', 'jxl,q=83'),
         ('{"Compr", "JXL", "Q=90"}', 'jxl,q=5'),
+        ('{"HEIC", "q=high", "rf=26"}', 'jxl,q=83'),
         ('{"x"}', ''),
     ]
     call = '\n'.join([
@@ -921,6 +940,7 @@ def test_import_gives_each_copy_its_keywords(gen):
         'NYC|skyline|compr|heic|rf=26',
         'a,b|compr|jxl|q=83',
         'compr|jxl|q=5',
+        'HEIC|q=high|rf=26|compr|jxl|q=83',
         'x|compr',
     ]
 

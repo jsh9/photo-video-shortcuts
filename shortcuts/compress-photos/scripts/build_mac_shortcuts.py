@@ -99,12 +99,13 @@ WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
 # photos themselves (wf.collect_in_album).
 # The keywords the selection route gives each copy in Photos, after the
 # import (import.applescript, copyKeywords), to find the copies there:
-# COPY_KEYWORD on every copy, then its format and quality, as selection.zsh
-# gives them: FORMAT_KEYWORDS' format and its prefix with the chosen number
-# ("jxl" and "q=83", "heic" and "rf=26"). In Photos' library only, as the
-# copy's title, caption and other keywords are: none is written into the
-# file. The import drops these from an original's keywords (a copy of a copy).
-COPY_KEYWORD = 'compr'
+# COPY_KEYWORD (wfkit's, shared with Compress Videos) on every copy, then its
+# format and quality, as common.zsh's KEYWORDS gives them: FORMAT_KEYWORDS'
+# format and its prefix with the chosen number ("jxl" and "q=83", "heic" and
+# "rf=26"). In Photos' library only, as the copy's title, caption and other
+# keywords are: none is written into the file. The import drops these from the
+# keywords of an original that is itself a copy (a copy of a copy).
+COPY_KEYWORD = wf.COPY_KEYWORD
 FORMAT_KEYWORDS = {'heic': 'rf=', 'jxl': 'q='}
 # Where every route keeps its log and the progress window's script: a plain
 # folder, so that Terminal (the progress window) never needs access to
@@ -242,26 +243,18 @@ def applescript_text(name):
     """
     lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@,
     @OLD_ORIGINALS_ALBUM@, @COPY_KEYWORD@, @FORMAT_KEYWORDS@ and
-    @QUALITY_PREFIXES@ (AppleScript lists) filled in. Plain text: a Shortcuts
-    variable inside a Run AppleScript's text keeps it from compiling (it then
-    produces no output and no error; seen on macOS 26), so values go in through
-    the action's input (``wf.Builder.run_applescript``).
+    @QUALITY_PREFIXES@ (AppleScript lists) filled in (``wf.applescript_text``:
+    plain text, the values going in through the action's input).
     """
-    text = (LIB_MAC / f'{name}.applescript').read_text()
-    text = text.replace('@NAME@', NAME_PHOTOS)
-    text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
-    text = text.replace('@OLD_ORIGINALS_ALBUM@', OLD_ORIGINALS_ALBUM)
-    text = text.replace('@COPY_KEYWORD@', COPY_KEYWORD)
-    for placeholder, keywords in (
-        ('@FORMAT_KEYWORDS@', FORMAT_KEYWORDS),
-        ('@QUALITY_PREFIXES@', FORMAT_KEYWORDS.values()),
-    ):
-        text = text.replace(
-            placeholder, '{' + ', '.join(f'"{k}"' for k in keywords) + '}'
-        )
-
-    assert not re.findall('@[A-Z_]+@', text), name
-    return text
+    return wf.applescript_text(
+        LIB_MAC / f'{name}.applescript',
+        NAME=NAME_PHOTOS,
+        ORIGINALS_ALBUM=ORIGINALS_ALBUM,
+        OLD_ORIGINALS_ALBUM=OLD_ORIGINALS_ALBUM,
+        COPY_KEYWORD=COPY_KEYWORD,
+        FORMAT_KEYWORDS=list(FORMAT_KEYWORDS),
+        QUALITY_PREFIXES=list(FORMAT_KEYWORDS.values()),
+    )
 
 
 def finish_script(work):

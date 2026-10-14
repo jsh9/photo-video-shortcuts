@@ -125,14 +125,14 @@ on run {input, parameters}
 	-- added (copyKeywords). One call reads all of an item ("properties
 	-- of", its fields named by their codes: see export.applescript), and one
 	-- sets each field that differs. A field Photos won't set is a "!" line,
-	-- and the next field is still tried.
+	-- and the next field is still tried. The log counts the fields set, the
+	-- keywords excepted: every copy gets its keywords here.
+	set t0 to current date
 	if (count of pairs) > 0 then
-		set t0 to current date
 		set redated to 0
 		set relocated to 0
 		set retitled to 0
 		set recaptioned to 0
-		set rekeyworded to 0
 		set favorited to 0
 		tell application "Photos"
 			repeat with pair in pairs
@@ -183,7 +183,6 @@ on run {input, parameters}
 						set wantKeywords to my copyKeywords(«class IPkw» of want, item 3 of pair)
 						if not my sameKeywords(«class IPkw» of got, wantKeywords) then
 							set keywords of copyItem to wantKeywords
-							set rekeyworded to rekeyworded + 1
 						end if
 					on error e number errNum
 						set problems to problems & (my notSet(got, "keywords", errNum, e))
@@ -199,12 +198,10 @@ on run {input, parameters}
 				end if
 			end repeat
 		end tell
-		set tCheck to (current date) - t0
 		if redated > 0 then set problems to problems & "Photos dated " & redated & " copy(ies) differently from the original; they now have the original's date." & linefeed
 		if relocated > 0 then set problems to problems & relocated & " copy(ies) got their original's location in Photos (Photos showed another)." & linefeed
 		if retitled > 0 then set problems to problems & retitled & " copy(ies) got their original's title in Photos." & linefeed
 		if recaptioned > 0 then set problems to problems & recaptioned & " copy(ies) got their original's caption in Photos." & linefeed
-		if rekeyworded > 0 then set problems to problems & rekeyworded & " copy(ies) got their keywords in Photos." & linefeed
 		if favorited > 0 then set problems to problems & favorited & " copy(ies) marked as favorites, as their originals are." & linefeed
 	end if
 	-- A copy whose original is unknown still gets "@COPY_KEYWORD@" and its own
@@ -219,6 +216,7 @@ on run {input, parameters}
 			set problems to problems & "! " & (item 3 of o) & ": could not set its keywords (" & errNum & ": " & e & ")" & linefeed
 		end try
 	end repeat
+	set tCheck to (current date) - t0
 	-- Albums: each new item joins every album its original is in. The albums'
 	-- contents are read one folder at a time (addToAlbums), one call for all of
 	-- a folder's albums, where a call per album would take 12 s for 689
@@ -266,7 +264,7 @@ on run {input, parameters}
 	return "imported=" & imported & linefeed & "collected=" & collected & linefeed & "Photos took " & tImport & " s to import, " & tCheck & " s to check the copies against their originals, " & tAlbums & " s for the albums and " & tCollect & " s to collect the originals." & linefeed & problems
 end run
 
--- Adds each new item of pairs ({original id, item}) to the albums of
+-- Adds each new item of pairs ({original id, item, its own keywords}) to the albums of
 -- albumList its original is in, then, recursively, to those in the folders of
 -- folderList. albumIds is "id of media items of" the same albums, one list
 -- per album, which the caller fetches in one call. Returns the "! ..." lines.
@@ -339,18 +337,24 @@ on listOf(v)
 end listOf
 
 -- The keywords a copy gets in Photos: its original's (`v`, as Photos gives
--- them), less those the tool gives its copies (toolKeyword); then
--- "@COPY_KEYWORD@", which every copy gets; then its own (`own`, from its
--- result line, separated by commas: Compress Photos gives its format and
--- quality, "jxl,q=83" or "heic,rf=26"). So a copy of a copy (a HEIC copy
--- converted again, to JPEG XL) has only its own format and quality, and one
--- "@COPY_KEYWORD@".
+-- them); then "@COPY_KEYWORD@", which every copy gets; then its own (`own`,
+-- from its result line, separated by commas: Compress Photos gives its format
+-- and quality, "jxl,q=83" or "heic,rf=26"). An original that is itself a copy
+-- (it has "@COPY_KEYWORD@") passes on none of the keywords the tool gave it
+-- (toolKeyword), so a copy of a copy (a HEIC copy converted again, to JPEG
+-- XL) has only its own format and quality, and one "@COPY_KEYWORD@". Any
+-- other original's keywords are all kept, a "heic" or "q=..." of the user's
+-- own too.
 on copyKeywords(v, own)
 	set originalKeywords to my listOf(v)
+	set isCopy to false
+	repeat with k in originalKeywords
+		if (contents of k) is "@COPY_KEYWORD@" then set isCopy to true
+	end repeat
 	set kws to {}
 	repeat with k in originalKeywords
 		set kw to contents of k
-		if not my toolKeyword(kw) then set end of kws to kw
+		if not (isCopy and my toolKeyword(kw)) then set end of kws to kw
 	end repeat
 	set end of kws to "@COPY_KEYWORD@"
 	set oldDelims to AppleScript's text item delimiters

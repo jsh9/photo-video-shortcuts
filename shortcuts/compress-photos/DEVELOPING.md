@@ -822,27 +822,31 @@ For the location and date that is a safety net; the title, caption and keywords
 are set only there (an empty one reads `missing value`), as the copy's file has
 only the original file's own, which Photos reads on import. Each field is set
 in a `try` of its own: one Photos won't set is a `!` line naming the copy and
-the field, and the next is still tried. The log counts what was set per field,
-and the "Photos took ..." line has the time. Compress Videos' copies get this
-too (nothing is written into a video's file, so there every field Photos has is
-set this way).
+the field, and the next is still tried. The log counts what was set per field
+(the keywords excepted: every copy gets its keywords there), and the "Photos
+took ..." line has the time. Compress Videos' copies get this too (nothing is
+written into a video's file, so there every field Photos has is set this way).
 
 The keywords a copy gets there (`copyKeywords`) are its original's, then
 `compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `rf=26`,
 the number chosen for the run (every copy of a run has the same, as x265 and
 libjxl encode every photo at it; `q=100` is lossless). `selection.zsh` appends
-them to each result line, `path|id|delete or keep|Name.jxl|jxl,q=83`, from
-`FORMAT` and `QUALITY`; Compress Videos' lines have none, so its copies get
-`compr` only. The original's own `compr`, `heic`, `jxl` and `q=`/`rf=` keywords
-(`toolKeyword`; the builder's `COPY_KEYWORD` and `FORMAT_KEYWORDS`) are left
-out, so that a copy of a copy (a HEIC copy converted again, to JPEG XL) says
-only what it is. A copy whose original is unknown (two selected photos with one
-name) gets them too, with the keywords Photos read from its file. They are in
-Photos' library only, like the rest, and are for finding the copies there: a
-smart album (File ▸ New Smart Album) with Keyword is `compr`, and Keyword is
-`jxl` for the JPEG XL ones, lists them at once, where Photos' search finds them
-only once it has indexed them. The picker route and the iPhone don't set
-keywords: their copies get none.
+them to each result line, `path|id|delete or keep|Name.jxl|jxl,q=83`
+(`KEYWORDS`, set in `common.zsh` with `FORMAT_NAME`); Compress Videos' lines
+have none, so its copies get `compr` only. An original that is itself a copy
+(it has `compr`) passes on none of the keywords the tool gave it: its `compr`,
+`heic`, `jxl` and `q=`/`rf=` keywords (`toolKeyword`; `COPY_KEYWORD` in
+`lib/wfkit.py`, shared with Compress Videos, and the builder's
+`FORMAT_KEYWORDS`) are left out, so that a copy of a copy (a HEIC copy
+converted again, to JPEG XL) says only what it is. Any other original's
+keywords are all kept, a `heic` or `q=...` of the user's own too. A copy whose
+original is unknown (two selected photos with one name) gets them too, with the
+keywords Photos read from its file. They are in Photos' library only, like the
+rest, and are for finding the copies there: a smart album (File ▸ New Smart
+Album) with Keyword is `compr`, and Keyword is `jxl` for the JPEG XL ones,
+lists them at once, where Photos' search finds them only once it has indexed
+them. The picker route and the iPhone don't set keywords: their copies get
+none.
 
 On the iPhone, a saved copy is made a favorite when its original is one
 (`wf.copy_favorite`): Get Details of Images ▸ Is Favorite, an If on it

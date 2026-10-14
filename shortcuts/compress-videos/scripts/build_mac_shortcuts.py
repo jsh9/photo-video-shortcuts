@@ -77,9 +77,10 @@ ROOM_PER_ITEM = 500_000_000  # bytes
 ORIGINALS_ALBUM = 'Videos already compressed'
 # The keyword each copy gets in Photos after the import (import.applescript,
 # copyKeywords), with its original's, to find the copies there; in Photos'
-# library only, as in Compress Photos. No format or quality keywords
-# (Compress Photos adds "jxl" and "q=83", or "heic" and "rf=26").
-COPY_KEYWORD = 'compr'
+# library only, the same word as Compress Photos' (wfkit's). No format or
+# quality keywords (Compress Photos adds "jxl" and "q=83", or "heic" and
+# "rf=26").
+COPY_KEYWORD = vf.COPY_KEYWORD
 FORMAT_KEYWORDS = {}
 # The log, the progress window's script and its pid, and the last run's
 # settings: a plain folder, so that Terminal never needs access to Pictures.
@@ -163,27 +164,20 @@ def applescript_text(name):
     """
     lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@, @COPY_KEYWORD@,
     @FORMAT_KEYWORDS@ and @QUALITY_PREFIXES@ (AppleScript lists, empty here)
-    filled in (and @OLD_ORIGINALS_ALBUM@, an earlier version's review album,
-    which Compress Videos never had: the same album again). Plain text: a
-    Shortcuts variable inside a Run AppleScript's text keeps it from compiling
-    (it then produces no output and no error; seen on macOS 26), so values go
-    in through the action's input.
+    filled in, and @OLD_ORIGINALS_ALBUM@, an earlier version's review album,
+    which Compress Videos never had: the same album again
+    (``vf.applescript_text``: plain text, the values going in through the
+    action's input).
     """
-    text = (LIB_MAC / f'{name}.applescript').read_text()
-    text = text.replace('@NAME@', NAME)
-    text = text.replace('@ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
-    text = text.replace('@OLD_ORIGINALS_ALBUM@', ORIGINALS_ALBUM)
-    text = text.replace('@COPY_KEYWORD@', COPY_KEYWORD)
-    for placeholder, keywords in (
-        ('@FORMAT_KEYWORDS@', FORMAT_KEYWORDS),
-        ('@QUALITY_PREFIXES@', FORMAT_KEYWORDS.values()),
-    ):
-        text = text.replace(
-            placeholder, '{' + ', '.join(f'"{k}"' for k in keywords) + '}'
-        )
-
-    assert not re.findall('@[A-Z_]+@', text), name
-    return text
+    return vf.applescript_text(
+        LIB_MAC / f'{name}.applescript',
+        NAME=NAME,
+        ORIGINALS_ALBUM=ORIGINALS_ALBUM,
+        OLD_ORIGINALS_ALBUM=ORIGINALS_ALBUM,
+        COPY_KEYWORD=COPY_KEYWORD,
+        FORMAT_KEYWORDS=list(FORMAT_KEYWORDS),
+        QUALITY_PREFIXES=list(FORMAT_KEYWORDS.values()),
+    )
 
 
 def prepare_script(count):

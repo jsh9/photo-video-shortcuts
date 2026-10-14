@@ -473,6 +473,24 @@ def test_selection_converts_exported_originals(mac):
     assert (mac.selection_work / 'in' / 'IMG_0001.HEIC').exists()
 
 
+def test_selection_heic_copies_say_their_format_and_rf(mac):
+    # The result line's keywords follow the format: HEIC copies get "heic"
+    # and the chosen RF (common.zsh's KEYWORDS), for import.applescript to
+    # set in Photos.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    out = mac.batch(
+        'selection',
+        fmt='heic',
+        quality='26',
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\nA1\tgps\t\n',
+    )
+    folder = mac.selection_work / 'out'
+    assert out.splitlines() == [
+        f'{folder}/IMG_0001.heic|A1|delete|IMG_0001.heic|heic,rf=26',
+    ]
+    assert (folder / 'IMG_0001.heic').exists()
+
+
 def test_selection_gives_the_copies_their_dates_in_photos(mac):
     # Photos gives each photo's date on the Mac's clock (here New York's);
     # the script adds that zone's offset on that date (winter, summer), and

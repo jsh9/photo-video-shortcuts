@@ -10,9 +10,9 @@ encoder. Every release includes the current files of all shortcuts.
     `compr`, its format (`jxl` or `heic`) and its quality (`q=83`, `rf=26`: the
     number you chose), in Photos only, with its original's keywords. A smart
     album with Keyword is `compr` lists the copies; add Keyword is `jxl` for
-    the JPEG XL ones. A copy of a copy keeps only its own format and quality.
-    From the Mac's picker and on the iPhone, the copies get no keywords
-    (Shortcuts sets none there).
+    the JPEG XL ones. A copy of a copy keeps only its own format and quality;
+    any other original's keywords are all kept. From the Mac's picker and on
+    the iPhone, the copies get no keywords (Shortcuts sets none there).
 - Changed
   - On the Mac, from Photos (the selection), the original's title, caption and
     keywords no longer go into the copy's file (0.8.0 wrote them into its XMP,
@@ -22,9 +22,9 @@ encoder. Every release includes the current files of all shortcuts.
     the original file's own. The date, the location, and the camera and lens
     are still in the file. Copies made with 0.8.0 keep what was written into
     them.
-  - The log's lines for titles, captions and keywords set after the import now
-    only count them (`3 copy(ies) got their keywords in Photos.`), as every
-    copy gets its keywords there.
+  - The log's lines for titles and captions set after the import now only count
+    them (`3 copy(ies) got their original's title in Photos.`), and the
+    keywords get no line, as every copy gets its keywords there.
   - Update the Mac shortcuts and `photobatch-macos` together: the encoder only
     carries the new version number, which the shortcuts check. The iPhone
     shortcuts and `photobatch.wasm` only carry the new version number; iPhone
