@@ -21,10 +21,10 @@ iPhone's [Compress Photos](README.md):
 
 On the Mac, Shortcuts runs the encoder itself: its Run Shell Script action runs
 `photobatch`, a native build of the same encoder a-Shell runs on the iPhone,
-and waits for it. There is no a-Shell, no *JXL-Import*, and nothing to keep in
-the foreground. The results are byte for byte the iPhone's (same libjxl, same
-settings), and the Mac can use all of its cores, converting several photos at a
-time.
+and waits for it. There is no a-Shell, no *Compress-Photos-Import*, and nothing
+to keep in the foreground. The results are byte for byte the iPhone's (same
+libjxl, same settings), and the Mac can use all of its cores, converting
+several photos at a time.
 
 <!--TOC-->
 
@@ -99,9 +99,9 @@ ______________________________________________________________________
    Quick Actions (right-click ▸ Quick Actions); if not, check *Use as Quick
    Action ▸ Finder* in its details.
 
-The iPhone shortcuts (*Compress Photos*, *JXL-Import*) sync to the Mac too, and
-these two sync to the iPhone, but each pair runs on its own platform only: the
-iPhone's need a-Shell, these need Run Shell Script.
+The iPhone shortcuts (*Compress Photos*, *Compress-Photos-Import*) sync to the
+Mac too, and these two sync to the iPhone, but each pair runs on its own
+platform only: the iPhone's need a-Shell, these need Run Shell Script.
 
 ## 3. Use
 
@@ -146,10 +146,10 @@ iPhone's need a-Shell, these need Run Shell Script.
 - A notification says the conversion has started. It runs in the background:
   about a second per 12 MP photo on an M1, longer for 48 MP. A notification
   says how many were saved.
-- Each JPEG XL copy is saved to Photos with its original's name, into every
-  album its original is in (one photo, not a copy per album). Shared albums and
-  other built-in ones aren't handled (Favorites follows the favorite, which the
-  copy gets from Photos' selection; see
+- Each copy is saved to Photos with its original's name, into every album its
+  original is in (one photo, not a copy per album). Shared albums and other
+  built-in ones aren't handled (Favorites follows the favorite, which the copy
+  gets from Photos' selection; see
   [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - After the format and quality come **Cores to use** and **HDR**: *Keep HDR*
   keeps an HDR photo's HDR, as the camera's gain map in a HEIC or as an HDR

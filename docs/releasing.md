@@ -36,7 +36,7 @@ declares:
 {
   "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
   "shortcuts": {
-    "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
+    "iphone": ["Compress Photos.shortcut", "Compress-Photos-Import.shortcut"],
     "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]
   }
 }

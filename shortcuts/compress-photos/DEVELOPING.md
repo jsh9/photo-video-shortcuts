@@ -43,14 +43,14 @@ Compress Photos                              (shortcut)
                                             a-Shell was still starting up)
 a-Shell ▸ photobatch → jxl_out_N.heic or .jxl + jxl_done.txt, with progress on screen
 then, from the share sheet:
-   a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
-   under its original name, adds it to the albums listed in
+   a-Shell starts Compress-Photos-Import (shortcut), which saves each copy
+   to Photos under its original name, adds it to the albums listed in
    jxl_albums_N.txt (written by Compress Photos), makes it a favorite if
    jxl_favorite_N.txt is there (likewise), and cleans up
    (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
-   a-Shell switches back to Compress Photos, which saves the JXLs,
+   a-Shell switches back to Compress Photos, which saves the copies,
    adds each to its original's albums, and adds each saved copy's
    original to the album "Compressed originals"
 Nothing is deleted on either path; the user reviews the album. Only a
@@ -81,8 +81,8 @@ list. What this relies on (ContentKit's `WFImageContentItem` and
 - A photo from the library answers with its asset's media type and subtypes. An
   image that isn't in the library, such as one shared from Files, answers
   `Image` with no Photo Type, so it is converted like a photo, as before 0.3.0
-  (JXL-Import saves the result to Photos). An item with no Media Type at all is
-  converted too.
+  (Compress-Photos-Import saves the result to Photos). An item with no Media
+  Type at all is converted too.
 - A list put into a text field is one entry per line, so Match Text
   `Live Photo` finds it in an HDR Live Photo's `HDR`, `Live Photo`. Match Text
   is only run on a value that exists (an If "has any value" first).
@@ -598,9 +598,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 
 ### 1.4. Dates
 
-A JPEG XL copy gets the date Photos shows for its original, in Photos and in
-its EXIF (where other apps, such as EasyLoupe, read the capture date). Copying
-the original's EXIF isn't enough for two kinds of photos:
+A copy, HEIC or JPEG XL, gets the date Photos shows for its original, in Photos
+and in its EXIF (where other apps, such as EasyLoupe, read the capture date).
+Copying the original's EXIF isn't enough for two kinds of photos:
 
 - **A date changed in Photos** (Adjust Date and Time) lives only in Photos'
   library: the original file keeps the camera's date, the export of the
@@ -821,10 +821,10 @@ on), and Photos' Favorite Photos (`wfkit.favorite_photos`: the App Intent
 `FavoriteAssetsIntent`, stored as
 `com.apple.mobileslideshow.FavoriteAssetsIntent` with its app's descriptor and
 the photos as `assets`; the format from a shortcut built on the iPhone, iOS
-26). From the share sheet, JXL-Import saves the copies without the originals,
-so Compress Photos marks each favorite with `jxl_favorite_<i>.txt` in a-Shell.
-The Mac's picker route doesn't set it yet: the same intent may be stored under
-Photos' Mac bundle identifier there.
+26). From the share sheet, Compress-Photos-Import saves the copies without the
+originals, so Compress Photos marks each favorite with `jxl_favorite_<i>.txt`
+in a-Shell. The Mac's picker route doesn't set it yet: the same intent may be
+stored under Photos' Mac bundle identifier there.
 
 ### 1.6. HEIC output
 
@@ -1017,7 +1017,7 @@ python3 scripts/build_mac_shortcuts.py --guess
 Use this if the `.shortcut` files won't import. The a-Shell actions are under
 Apps ▸ a-Shell. Turn on each action's toggles as listed.
 
-**JXL-Import** (build this first; no share sheet):
+**Compress-Photos-Import** (build this first; no share sheet):
 
 1. a-Shell **Get File**: `jxl_done.txt`, Error If Not Found on.
 2. **Get Text from Input**: File.
@@ -1164,14 +1164,14 @@ no input: Continue):
       - `photobatch -q <Matches> -e 7 jxl_job.txt`
       - `photobatch --retry -q <Matches> -e 7 jxl_job.txt`
       - `<Skipped Echo>`
-      - `open shortcuts://run-shortcut?name=JXL-Import`
+      - `open shortcuts://run-shortcut?name=Compress-Photos-Import`
 
    - **Otherwise:**
      1. The same **Execute Command**, but with `open shortcuts://` as the last
         command.
      2. **Wait to Return**.
-     3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.10
-        with:
+     3. Steps 1–5 of Compress-Photos-Import, but inside the repeat, replace
+        steps 4.8–4.10 with:
         1. **Get Item from List**: that item of `Stills` (the original).
         2. **Get Details of Images**: Album of that original.
         3. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
@@ -1184,7 +1184,8 @@ no input: Continue):
            to Photo Album**: the original, to a **Text**
            `Compressed originals`; **Add to Variable** `Collected` (the
            original). **End If**.
-     4. Steps 6–7 of JXL-Import, the notification also counting `Collected`.
+     4. Steps 6–7 of Compress-Photos-Import, the notification also counting
+        `Collected`.
    - **End If**. (In the share-sheet branch, step 4 above runs for each item of
      `Stills` before the Execute Command.)
 

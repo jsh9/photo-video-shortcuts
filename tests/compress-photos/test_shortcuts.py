@@ -27,12 +27,12 @@ def shortcuts(gen):
     }
 
 
-@pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
+@pytest.mark.parametrize('name', ['Compress Photos', 'Compress-Photos-Import'])
 def test_blocks_balanced(shortcuts, name):
     list(ph.walk(shortcuts[name]))
 
 
-@pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
+@pytest.mark.parametrize('name', ['Compress Photos', 'Compress-Photos-Import'])
 def test_outputs_used_after_they_exist(shortcuts, name):
     seen = set()
     for action in shortcuts[name]:
@@ -43,7 +43,7 @@ def test_outputs_used_after_they_exist(shortcuts, name):
         seen.add(ph.params(action).get('UUID'))
 
 
-@pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
+@pytest.mark.parametrize('name', ['Compress Photos', 'Compress-Photos-Import'])
 def test_repeat_variables_in_scope(shortcuts, name):
     # "Repeat Item 2" is the item of a repeat inside a repeat.
     for action, depth in ph.walk(shortcuts[name]):
@@ -55,7 +55,7 @@ def test_repeat_variables_in_scope(shortcuts, name):
                 assert depth >= 1, ph.ident(action)
 
 
-@pytest.mark.parametrize('name', ['Compress Photos', 'JXL-Import'])
+@pytest.mark.parametrize('name', ['Compress Photos', 'Compress-Photos-Import'])
 def test_ashell_actions(shortcuts, name):
     # An IntentAppDefinition block made them "Unknown Action" on the iPhone.
     allowed = {'ExecuteCommandIntent', 'PutFileIntent', 'GetFileIntent'}
@@ -130,13 +130,13 @@ def test_notes_show_version(gen, shortcuts):
 
 
 def test_import_shortcut_started_by_name(gen, shortcuts):
-    # a-Shell opens JXL-Import by URL, so its name must not change.
-    assert gen.NAME_B == 'JXL-Import'
+    # a-Shell opens it by URL, so a new name means every user re-adds it.
+    assert gen.NAME_B == 'Compress-Photos-Import'
     commands = ph.ashell_commands(
         shortcuts[gen.NAME_A], {'Args': '-q 83 -e 7', 'Skipped Echo': ''}
     )
     assert any(
-        c.endswith('open shortcuts://run-shortcut?name=JXL-Import')
+        c.endswith('open shortcuts://run-shortcut?name=Compress-Photos-Import')
         for c in commands
     )
 
@@ -266,9 +266,9 @@ def test_copies_of_favorites_are_favorites(gen, shortcuts):
     # From the picker, each saved copy is made a favorite (Photos' Favorite
     # Photos) when its original's Is Favorite is true. From the share sheet,
     # Compress Photos marks each favorite with jxl_favorite_<i>.txt in
-    # a-Shell, and JXL-Import makes the saved copy a favorite when that file
-    # is there; the cleanup removes the marks, and a stale one is removed
-    # before a run.
+    # a-Shell, and Compress-Photos-Import makes the saved copy a favorite when
+    # that file is there; the cleanup removes the marks, and a stale one is
+    # removed before a run.
     by_uuid = {
         ph.params(a).get('UUID'): a
         for name in (gen.NAME_A, gen.NAME_B)
@@ -425,8 +425,8 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
     assert saves[0] < runs[0], 'the share-sheet route collects before a-Shell'
     assert saves[1] > runs[-1], 'the picker route collects after the save'
     # The share-sheet route writes the originals' album lists (for
-    # JXL-Import) before collecting them, or a re-converted photo's new copy
-    # would join the review album.
+    # Compress-Photos-Import) before collecting them, or a re-converted
+    # photo's new copy would join the review album.
     album_files = [
         i
         for i, a in enumerate(actions)
@@ -434,8 +434,8 @@ def test_originals_collected_in_the_album_never_deleted(gen, shortcuts):
         and 'jxl_albums_' in repr(ph.params(a)['WFName'])
     ]
     assert album_files and max(album_files) < saves[0]
-    # JXL-Import saves copies into their originals' albums only
-    importer = shortcuts['JXL-Import']
+    # Compress-Photos-Import saves copies into their originals' albums only
+    importer = shortcuts['Compress-Photos-Import']
     assert 'is.workflow.actions.deletephotos' not in [
         ph.ident(a) for a in importer
     ]

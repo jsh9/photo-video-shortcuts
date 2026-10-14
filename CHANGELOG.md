@@ -30,12 +30,17 @@ encoder. Every release includes the current files of all shortcuts.
     (read before the photo's file is fetched, as Shortcuts then answers with
     the file's GPS).
   - On the iPhone, a copy of a favorite is a favorite too (Photos' Favorite
-    Photos action; from the share sheet, JXL-Import does it). Not yet from the
-    Mac's picker.
+    Photos action; from the share sheet, Compress-Photos-Import does it). Not
+    yet from the Mac's picker.
   - Update both the shortcuts and the encoders (`photobatch.wasm`,
     `photobatch-macos`): an older `photobatch` ignores `jxl_meta.txt`, and an
     older shortcut gives none.
 - Changed
+  - The iPhone's helper shortcut _JXL-Import_ is now _Compress-Photos-Import_:
+    since 0.7.0 it saves HEIC copies as well as JPEG XL ones. _Compress Photos_
+    starts it by its new name, so add both shortcuts from this release, then
+    delete _JXL-Import_ (nothing starts it anymore). The files in a-Shell keep
+    their names (`jxl_done.txt` and the others).
   - The Mac's selection route reads each selected photo with one Apple event
     (`properties of`) instead of three.
 

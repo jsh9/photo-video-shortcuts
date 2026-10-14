@@ -13,7 +13,7 @@ import pytest
 import release
 
 ENCODERS = ['photobatch.wasm', 'photobatch-scalar.wasm', 'photobatch-macos']
-SHORTCUTS = ['Compress Photos.shortcut', 'JXL-Import.shortcut']
+SHORTCUTS = ['Compress Photos.shortcut', 'Compress-Photos-Import.shortcut']
 MAC_SHORTCUTS = [
     'Compress Photos (macOS).shortcut',
     'Compress Photo Files (macOS).shortcut',
@@ -207,8 +207,10 @@ def test_required_files(tmp_path, name, failure):
 def test_missing_unsigned_import(tmp_path):
     t = tool(tmp_path)
     outputs(t, False)
-    (t.path / 'build/shortcuts/JXL-Import.unsigned.wflow').unlink()
-    with pytest.raises(release.ReleaseError, match='JXL-Import.*missing'):
+    (t.path / 'build/shortcuts/Compress-Photos-Import.unsigned.wflow').unlink()
+    with pytest.raises(
+        release.ReleaseError, match='Compress-Photos-Import.*missing'
+    ):
         release.shortcut_files(t, 'iphone', False, time.time() - 60)
 
 
@@ -514,7 +516,7 @@ def test_github_only_explicit_404_means_missing(
     [
         'photobatch-scalar.wasm',
         'photobatch-macos',
-        'JXL-Import.shortcut',
+        'Compress-Photos-Import.shortcut',
         'Compress Photo Files (macOS).shortcut',
     ],
 )
