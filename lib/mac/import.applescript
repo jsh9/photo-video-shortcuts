@@ -1,13 +1,15 @@
 -- @NAME@: imports the files the shell made, each into the albums its
 -- original is in, with what Photos has for its original (date, location,
--- title, caption, keywords, favorite), and collects every imported file's
--- original in the album "@ORIGINALS_ALBUM@", for the user to review and
--- delete (a script cannot delete them). The log says which copies lack their
--- original's HDR.
+-- title, caption, keywords, favorite) and the keyword "@COPY_KEYWORD@" with
+-- its own (see copyKeywords), and collects every imported file's original in
+-- the album "@ORIGINALS_ALBUM@", for the user to review and delete (a script
+-- cannot delete them). The log says which copies lack their original's HDR.
 --
--- Input: one line per result, "path|original id|delete or keep|name" (the id
--- may be empty when the exported file could not be matched to an item; the
--- flag is photobatch's and is not acted on here).
+-- Input: one line per result, "path|original id|delete or keep|name", then,
+-- optionally, "|" and the copy's own keywords, separated by commas (Compress
+-- Photos: its format and quality, "jxl,q=83"). The id may be empty when the
+-- exported file could not be matched to an item; the flag is photobatch's
+-- and is not acted on here.
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -20,8 +22,9 @@ on run {input, parameters}
 	set imported to 0
 	set collected to 0
 	set problems to ""
-	set pairs to {} -- {original id, imported item}
+	set pairs to {} -- {original id, imported item, its own keywords}
 	set toCollect to {} -- original ids
+	set orphans to {} -- {imported item, its own keywords, name}: original unknown
 	set tImport to 0
 	set tCheck to 0
 	set tAlbums to 0
@@ -31,6 +34,7 @@ on run {input, parameters}
 	set origIds to {}
 	set flags to {}
 	set names to {}
+	set ownKeywords to {}
 	if (count of input) > 0 then
 		set plan to item 1 of input as text
 		set oldDelims to AppleScript's text item delimiters
@@ -46,6 +50,11 @@ on run {input, parameters}
 					set end of origIds to item 2 of parts
 					set end of flags to item 3 of parts
 					set end of names to item 4 of parts
+					if (count of parts) > 4 then
+						set end of ownKeywords to item 5 of parts
+					else
+						set end of ownKeywords to ""
+					end if
 				end if
 			end if
 		end repeat
@@ -97,22 +106,26 @@ on run {input, parameters}
 				set imported to imported + 1
 				set origId to item i of origIds
 				if origId is not "" then
-					set end of pairs to {origId, found}
+					set end of pairs to {origId, found, item i of ownKeywords}
 					set end of toCollect to origId
 				else
+					set end of orphans to {found, item i of ownKeywords, jxlName}
 					set problems to problems & "! " & jxlName & ": saved, but its original is unknown, so it was not added to albums" & linefeed
 				end if
 			end if
 		end repeat
 		set tImport to (current date) - t0
 	end if
-	-- What Photos has for each original: photobatch wrote its date, location,
-	-- title, caption and keywords into the copy's file, for Photos to read on
-	-- import. Should Photos have read something else, the copy gets the
-	-- original's; and the favorite, which no file holds, is set here. One call
-	-- reads all of an item ("properties of", its fields named by their codes:
-	-- see export.applescript), and one sets each field that differs. A field
-	-- Photos won't set is a "!" line, and the next field is still tried.
+	-- What Photos has for each original: photobatch wrote its date and
+	-- location into the copy's file, for Photos to read on import; should
+	-- Photos have read something else, the copy gets the original's. Its
+	-- title, caption, keywords and favorite stay in Photos' library, never in
+	-- the copy's file (the file keeps only what the original's file has), so
+	-- they are set here, the keywords with "@COPY_KEYWORD@" and the copy's own
+	-- added (copyKeywords). One call reads all of an item ("properties
+	-- of", its fields named by their codes: see export.applescript), and one
+	-- sets each field that differs. A field Photos won't set is a "!" line,
+	-- and the next field is still tried.
 	if (count of pairs) > 0 then
 		set t0 to current date
 		set redated to 0
@@ -167,8 +180,9 @@ on run {input, parameters}
 						set problems to problems & (my notSet(got, "caption", errNum, e))
 					end try
 					try
-						if not my sameKeywords(«class IPkw» of got, «class IPkw» of want) then
-							set keywords of copyItem to my listOf(«class IPkw» of want)
+						set wantKeywords to my copyKeywords(«class IPkw» of want, item 3 of pair)
+						if not my sameKeywords(«class IPkw» of got, wantKeywords) then
+							set keywords of copyItem to wantKeywords
 							set rekeyworded to rekeyworded + 1
 						end if
 					on error e number errNum
@@ -188,11 +202,23 @@ on run {input, parameters}
 		set tCheck to (current date) - t0
 		if redated > 0 then set problems to problems & "Photos dated " & redated & " copy(ies) differently from the original; they now have the original's date." & linefeed
 		if relocated > 0 then set problems to problems & relocated & " copy(ies) got their original's location in Photos (Photos showed another)." & linefeed
-		if retitled > 0 then set problems to problems & retitled & " copy(ies) got their original's title in Photos (Photos showed another)." & linefeed
-		if recaptioned > 0 then set problems to problems & recaptioned & " copy(ies) got their original's caption in Photos (Photos showed another)." & linefeed
-		if rekeyworded > 0 then set problems to problems & rekeyworded & " copy(ies) got their original's keywords in Photos (Photos showed others)." & linefeed
+		if retitled > 0 then set problems to problems & retitled & " copy(ies) got their original's title in Photos." & linefeed
+		if recaptioned > 0 then set problems to problems & recaptioned & " copy(ies) got their original's caption in Photos." & linefeed
+		if rekeyworded > 0 then set problems to problems & rekeyworded & " copy(ies) got their keywords in Photos." & linefeed
 		if favorited > 0 then set problems to problems & favorited & " copy(ies) marked as favorites, as their originals are." & linefeed
 	end if
+	-- A copy whose original is unknown still gets "@COPY_KEYWORD@" and its own
+	-- keywords, with those Photos read from its file.
+	repeat with o in orphans
+		try
+			tell application "Photos"
+				set had to keywords of (item 1 of o)
+				set keywords of (item 1 of o) to my copyKeywords(had, item 2 of o)
+			end tell
+		on error e number errNum
+			set problems to problems & "! " & (item 3 of o) & ": could not set its keywords (" & errNum & ": " & e & ")" & linefeed
+		end try
+	end repeat
 	-- Albums: each new item joins every album its original is in. The albums'
 	-- contents are read one folder at a time (addToAlbums), one call for all of
 	-- a folder's albums, where a call per album would take 12 s for 689
@@ -311,6 +337,46 @@ on listOf(v)
 	if v is missing value then return {}
 	return v
 end listOf
+
+-- The keywords a copy gets in Photos: its original's (`v`, as Photos gives
+-- them), less those the tool gives its copies (toolKeyword); then
+-- "@COPY_KEYWORD@", which every copy gets; then its own (`own`, from its
+-- result line, separated by commas: Compress Photos gives its format and
+-- quality, "jxl,q=83" or "heic,rf=26"). So a copy of a copy (a HEIC copy
+-- converted again, to JPEG XL) has only its own format and quality, and one
+-- "@COPY_KEYWORD@".
+on copyKeywords(v, own)
+	set originalKeywords to my listOf(v)
+	set kws to {}
+	repeat with k in originalKeywords
+		set kw to contents of k
+		if not my toolKeyword(kw) then set end of kws to kw
+	end repeat
+	set end of kws to "@COPY_KEYWORD@"
+	set oldDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to ","
+	set ownList to text items of (own as text)
+	set AppleScript's text item delimiters to oldDelims
+	repeat with k in ownList
+		set kw to contents of k
+		if kw is not "" then set end of kws to kw
+	end repeat
+	return kws
+end copyKeywords
+
+-- Whether `kw` is a keyword the tool gives its copies: "@COPY_KEYWORD@", a
+-- format keyword (Compress Photos: "heic", "jxl") or a quality keyword
+-- ("q=83", "rf=26"). AppleScript compares text ignoring case.
+on toolKeyword(kw)
+	if kw is "@COPY_KEYWORD@" then return true
+	repeat with f in @FORMAT_KEYWORDS@
+		if kw is (contents of f) then return true
+	end repeat
+	repeat with pfx in @QUALITY_PREFIXES@
+		if kw begins with (contents of pfx) then return true
+	end repeat
+	return false
+end toolKeyword
 
 on sameKeywords(a, b)
 	set a to my listOf(a)

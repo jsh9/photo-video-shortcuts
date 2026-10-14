@@ -228,8 +228,8 @@ Not kept:
   has only those the original file itself holds, if any; Photos' own are lost
   when you delete the original. A caption is kept from the share sheet: Photos
   writes it into the file it shares. To keep titles and keywords, compress
-  those photos on the Mac from the Photos selection, which writes them into the
-  copy (see
+  those photos on the Mac from the Photos selection, which gives them to the
+  copy in Photos, along with the keyword `compr` (see
   [Compress Photos on the Mac](README-mac.md#4-what-is-and-isnt-kept)); with
   iCloud Photos the copy then appears on the iPhone too.
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't

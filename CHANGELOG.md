@@ -3,6 +3,44 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.9.0] - 2026-10-14
+
+- Added
+  - On the Mac, from Photos (the selection), each copy gets the keywords
+    `compr`, its format (`jxl` or `heic`) and its quality (`q=83`, `rf=26`: the
+    number you chose), in Photos only, with its original's keywords. A smart
+    album with Keyword is `compr` lists the copies; add Keyword is `jxl` for
+    the JPEG XL ones. A copy of a copy keeps only its own format and quality.
+    From the Mac's picker and on the iPhone, the copies get no keywords
+    (Shortcuts sets none there).
+- Changed
+  - On the Mac, from Photos (the selection), the original's title, caption and
+    keywords no longer go into the copy's file (0.8.0 wrote them into its XMP,
+    and the caption into an EXIF description the file had). They are set on the
+    copy in Photos after the import, as its favorite is, so they stay in
+    Photos' library only, as they do for the original; the copy's file has only
+    the original file's own. The date, the location, and the camera and lens
+    are still in the file. Copies made with 0.8.0 keep what was written into
+    them.
+  - The log's lines for titles, captions and keywords set after the import now
+    only count them (`3 copy(ies) got their keywords in Photos.`), as every
+    copy gets its keywords there.
+  - Update the Mac shortcuts and `photobatch-macos` together: the encoder only
+    carries the new version number, which the shortcuts check. The iPhone
+    shortcuts and `photobatch.wasm` only carry the new version number; iPhone
+    users don't need to update.
+
+## [Compress Videos 0.3.0] - 2026-10-14
+
+- Added
+  - Each copy gets the keyword `compr` in Photos, with its original's keywords,
+    to find the copies: a smart album with Keyword is `compr` lists them
+    (Compress Photos' copies too).
+- Changed
+  - Update the shortcut and `vidmeta-macos` together: `vidmeta` only carries
+    the new version number, which the shortcut checks; so do `ffmpeg-macos` and
+    `ffprobe-macos`, which you don't need to update.
+
 ## [Compress Photos 0.8.0] - 2026-10-12
 
 - Added

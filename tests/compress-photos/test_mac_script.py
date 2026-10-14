@@ -456,8 +456,8 @@ def test_selection_converts_exported_originals(mac):
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
-        f'{folder}/IMG_0001.jxl|A1|delete|IMG_0001.jxl',
-        f'{folder}/IMG_0002.jxl|A2|keep|IMG_0002.jxl',
+        f'{folder}/IMG_0001.jxl|A1|delete|IMG_0001.jxl|jxl,q=83',
+        f'{folder}/IMG_0002.jxl|A2|keep|IMG_0002.jxl|jxl,q=83',
     ]
     assert sorted(p.name for p in folder.iterdir()) == [
         'IMG_0001.jxl',
@@ -513,9 +513,11 @@ def test_selection_gives_the_copies_their_dates_in_photos(mac):
 
 
 def test_selection_gives_the_copies_what_else_photos_has(mac):
-    # export.applescript's "id<tab>field<tab>value" lines become jxl_meta.txt
-    # by job index, the values as they are (escaped); photobatch writes them
-    # into the copies. A line for an item not converted (a video) is dropped.
+    # export.applescript's "id<tab>gps<tab>value" lines become jxl_meta.txt
+    # by job index, the values as they are; photobatch writes them into the
+    # copies. A line for an item not converted (a video) is dropped. The
+    # title, caption and keywords stay in Photos (import.applescript): none is
+    # written.
     exported(mac, 'hdr/o1.heic', 'IMG_0001.HEIC')
     exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
     (mac.selection_work / 'in' / 'clip.MOV').write_text('video')
@@ -526,27 +528,22 @@ def test_selection_gives_the_copies_what_else_photos_has(mac):
             'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
             'A3||clip.MOV\n'
             'A1\tgps\t40.758442,-73.829767,11.73\n'
-            'A1\ttitle\tA%7Cb\n'
-            'A1\tcaption\t\n'
-            'A1\tkeywords\tx%2Cy,z\n'
             'A2\tgps\t\n'
-            'A3\ttitle\tA video\n'
+            'A3\tgps\t40.5,-73.25\n'
         ),
     )
     assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
-        '1|gps|40.758442,-73.829767,11.73\n1|title|A%7Cb\n1|caption|\n'
-        '1|keywords|x%2Cy,z\n2|gps|\n'
+        '1|gps|40.758442,-73.829767,11.73\n2|gps|\n'
     )
     folder = mac.selection_work / 'out'
     first = folder / 'IMG_0001.jxl'
     tags = ph.exif_tags(first)
     assert tags['GPS:GPSLatitude'] == pytest.approx(40.758442, abs=1e-7)
     assert tags['GPS:GPSAltitude'] == 11.73
-    xmp = ph.xmp_properties(first)
-    assert xmp['XMP-dc:Title'] == 'A|b'
-    assert xmp['XMP-dc:Subject'] == ['x,y', 'z']
     log = mac.log_file('selection').read_text()
-    assert 'title from Photos' in log
+    for field in ('title', 'caption', 'keywords'):
+        assert f'{field} from Photos' not in log
+        assert f'{field} removed' not in log
 
 
 def test_selection_duplicate_names_get_no_id(mac, gen):
@@ -562,16 +559,16 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
             'A|2024-01-01 17:00:00|IMG_0001.HEIC\n'
             'B|2024-01-02 17:00:00|IMG_0001.HEIC\n'
             'C|2024-01-03 17:00:00|IMG_0002.HEIC\n'
-            'A\ttitle\tFirst\n'
-            'B\ttitle\tSecond\n'
-            'C\ttitle\tThird\n'
+            'A\tgps\t40.5,-73.25\n'
+            'B\tgps\t41.5,-74.25\n'
+            'C\tgps\t42.5,-75.25\n'
         ),
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
-        f'{folder}/IMG_0001 (1).jxl||delete|IMG_0001 (1).jxl',
-        f'{folder}/IMG_0001.jxl||delete|IMG_0001.jxl',
-        f'{folder}/IMG_0002.jxl|C|delete|IMG_0002.jxl',
+        f'{folder}/IMG_0001 (1).jxl||delete|IMG_0001 (1).jxl|jxl,q=83',
+        f'{folder}/IMG_0001.jxl||delete|IMG_0001.jxl|jxl,q=83',
+        f'{folder}/IMG_0002.jxl|C|delete|IMG_0002.jxl|jxl,q=83',
     ]
     log = mac.log_file('selection').read_text()
     assert (
@@ -583,7 +580,7 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
         '3|2024-01-03T17:00:00-0500\n'
     )
     assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
-        '3|title|Third\n'
+        '3|gps|42.5,-75.25\n'
     )
 
 
@@ -591,7 +588,7 @@ def test_selection_unknown_id_and_export_error(mac, gen):
     exported(mac, 'hdr/srgb.heic', 'IMG_0007 (1).HEIC')
     out = mac.batch('selection', lines='ERROR: Photos could not export\n')
     assert out.splitlines() == [
-        f'{mac.selection_work}/out/IMG_0007 (1).jxl||delete|IMG_0007 (1).jxl'
+        f'{mac.selection_work}/out/IMG_0007 (1).jxl||delete|IMG_0007 (1).jxl|jxl,q=83'
     ]
     log = mac.log_file('selection').read_text()
     assert log.startswith('ERROR: Photos could not export')

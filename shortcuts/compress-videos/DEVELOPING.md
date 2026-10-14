@@ -62,8 +62,10 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
      writes last-settings.txt and vid_skipped.txt
 
    Run AppleScript (lib/mac/import.applescript, input: those lines) has Photos
-   import the copies, add each to its original's albums, and add the originals
-   to the album "Videos already compressed"; returns "imported=N",
+   import the copies, give each its original's location, title, caption,
+   keywords (with "compr") and favorite in Photos, add each to its original's
+   albums, and add the originals to the album "Videos already compressed";
+   returns "imported=N",
    "collected=M" and "! ..." lines
 
    the log in Quick Look if it has a "!" note, an error or a failure; the

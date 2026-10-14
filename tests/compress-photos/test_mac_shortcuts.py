@@ -718,6 +718,18 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     assert gen.ORIGINALS_ALBUM in script
     # an original already in the old review album: its copy must not join it
     assert gen.OLD_ORIGINALS_ALBUM in script
+    # the copies' keywords, set in Photos after the import (copyKeywords):
+    # "compr", then the format and quality selection.zsh gives each result
+    # line, which the import also knows to drop from an original's
+    assert gen.COPY_KEYWORD == 'compr'
+    assert gen.FORMAT_KEYWORDS == {'heic': 'rf=', 'jxl': 'q='}
+    assert 'repeat with f in {"heic", "jxl"}' in script
+    assert 'repeat with pfx in {"rf=", "q="}' in script
+    assert 'set end of kws to "compr"' in script
+    assert 'set keywords of copyItem to wantKeywords' in script
+    assert 'heic) keywords="heic,rf=$QUALITY";;' in selection[0]
+    assert '*) keywords="jxl,q=$QUALITY";;' in selection[0]
+    assert '"${dest:t}" "$keywords"' in selection[0]
 
 
 def test_photos_selection_route_notifies_without_a_picker(shortcuts):
@@ -787,9 +799,10 @@ def run_handlers(gen, name, start, call):
 
 def test_export_lines_of_what_else_photos_has(gen):
     # export.applescript's lines for photobatch, from records like Photos'
-    # "properties of" (fields by code): coordinates to 6 decimals without a
-    # real's text (which follows the Mac's number format), an altitude of 0
-    # left out, values escaped, empty ones for none.
+    # "properties of" (fields by code): the location only, coordinates to 6
+    # decimals without a real's text (which follows the Mac's number format),
+    # an altitude of 0 left out, empty for none. The title, caption and
+    # keywords stay in Photos' library: no lines for them.
     records = (
         '{«class ID  »:"A", «class IPlo»:{40.758441666667, -73.829766666667},'
         ' «class alti»:11.730902867811, «class pnam»:"T|x%" & tab & "y",'
@@ -813,22 +826,23 @@ def test_export_lines_of_what_else_photos_has(gen):
     lines = run_handlers(gen, 'export', '-- "2024-01-01 17:00:00"', call)
     assert lines.split('\n') == [
         'A\tgps\t40.758442,-73.829767,11.73',
-        'A\ttitle\tT%7Cx%25%09y',
-        'A\tcaption\tLine 1%0ALine 2%0D',
-        'A\tkeywords\ta%2Cb,c',
         'B\tgps\t',
-        'B\ttitle\t',
-        'B\tcaption\t',
-        'B\tkeywords\t',
         'C\tgps\t-0.000050,25.770843',
-        'C\ttitle\t',
-        'C\tcaption\t',
-        'C\tkeywords\t',
         'D\tgps\t40.758442,-73.829767',
-        'D\ttitle\t',
-        'D\tcaption\t',
-        'D\tkeywords\t',
     ]
+
+
+def test_export_gives_no_title_caption_or_keywords(gen):
+    # They stay in Photos' library, never in the copy's file: the export
+    # doesn't read them for photobatch (Photos' codes: pnam, IPde, IPkw), and
+    # the import sets them on the copy in Photos.
+    export = gen.applescript_text('export')
+    for code in ('«class pnam»', '«class IPde»', '«class IPkw»'):
+        assert code not in export
+
+    importer = gen.applescript_text('import')
+    for field in ('name', 'description', 'keywords'):
+        assert f'set {field} of copyItem to ' in importer
 
 
 def test_export_and_import_guard_each_item_and_field(gen):
@@ -876,6 +890,41 @@ def test_import_compares_what_photos_has(gen):
     ]
 
 
+def test_import_gives_each_copy_its_keywords(gen):
+    # import.applescript's keywords for a copy, set in Photos only: its
+    # original's, then "compr" and its own from its result line (its format
+    # and quality). A copy of a copy keeps none of its original's format and
+    # quality keywords, nor a second "compr"; case is ignored, as AppleScript
+    # compares text. A line without keywords (Compress Videos'): "compr" only.
+    cases = [
+        ('missing value', 'jxl,q=83'),
+        ('{"NYC", "skyline"}', 'heic,rf=26'),
+        ('{"compr", "heic", "rf=26", "a,b"}', 'jxl,q=83'),
+        ('{"Compr", "JXL", "Q=90"}', 'jxl,q=5'),
+        ('{"x"}', ''),
+    ]
+    call = '\n'.join([
+        'set answers to {}',
+        *(
+            'set AppleScript\'s text item delimiters to "|"\n'
+            f'set end of answers to (my copyKeywords({v}, "{own}")) as text'
+            for v, own in cases
+        ),
+        "set AppleScript's text item delimiters to linefeed",
+        'return answers as text',
+    ])
+    got = run_handlers(
+        gen, 'import', '-- Locations as Photos gives them', call
+    )
+    assert got.split('\n') == [
+        'compr|jxl|q=83',
+        'NYC|skyline|compr|heic|rf=26',
+        'a,b|compr|jxl|q=83',
+        'compr|jxl|q=5',
+        'x|compr',
+    ]
+
+
 def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
     # The picker route reads each photo's date in Photos (Date Taken) in the
     # repeat that collects the names (ph.check_photo_dates), and its batch
@@ -902,9 +951,9 @@ def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
 def test_photos_locations_in_photos_go_to_photobatch(gen, shortcuts):
     # The picker route reads each photo's location in Photos
     # (ph.check_photo_locations) before its batch script gets the photos'
-    # files, and the script gets Meta; the selection route has the location,
-    # title, caption and keywords from Photos' AppleScript (export.applescript's
-    # "id<tab>field<tab>value" lines), and the Finder shortcut none.
+    # files, and the script gets Meta; the selection route has the location
+    # from Photos' AppleScript (export.applescript's "id<tab>gps<tab>value"
+    # lines), and the Finder shortcut none.
     actions = shortcuts[PHOTOS]
     (read,) = ph.check_photo_locations(actions)
     batches = [

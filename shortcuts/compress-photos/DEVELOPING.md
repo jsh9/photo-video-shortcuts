@@ -145,8 +145,8 @@ Compress Photos (macOS)                      (shortcut)
    Run AppleScript (lib/mac/export.applescript, input: that folder) has Photos
    export the originals into its in/ and returns "id|date|filename" lines
    (the date: the photo's in Photos, on the Mac's clock), then
-   "id<tab>field<tab>value" lines (location, title, caption, keywords, all
-   read with one "properties of" per photo); Run Shell Script
+   "id<tab>gps<tab>value" lines (the location, read with one
+   "properties of" per photo); Run Shell Script
    (common.zsh + selection.zsh, IDS = those lines) stages in/* (a photo plus
    a .mov of the same name is a Live Photo: skipped; a video alone: skipped),
    writes jxl_dates.txt (each date with the Mac's offset on that date, by
@@ -154,11 +154,13 @@ Compress Photos (macOS)                      (shortcut)
    saving time ends) and jxl_meta.txt (the other lines, by job index), runs
    photobatch, renames each result to out/Name.jxl (or .heic) and
    prints
-   "path|id|delete or keep|Name.jxl (or .heic)"; Run AppleScript
+   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)";
+   Run AppleScript
    (lib/mac/import.applescript, input: those lines) has Photos import each file,
-   give it its original's date, location, title, caption and keywords should
-   Photos have read others from the file, make it a favorite if its original
-   is one,
+   give it its original's date and location should Photos have read others
+   from the file, its original's title and caption, its original's keywords
+   with compr and the format and quality (1.5), make it a favorite if its
+   original is one,
    add it to every album its original is in (the albums' contents read one
    folder at a time, nested ones too), and add every imported file's
    original (by id reference) to the album
@@ -682,28 +684,35 @@ spikes:
   cleared it.
 - **A favorite**: the copy wasn't one.
 
-So the shortcuts give `photobatch` what Photos has, in `jxl_meta.txt` next to
-the job, one line per field, `i|field|value`: `gps` (`lat,lon` or
+The location goes into the copy's file, as the date does. The title, caption,
+keywords and favorite stay in Photos' library, never in the file (since 0.9.0;
+0.8.0 wrote the title, caption and keywords into the XMP): the Mac's selection
+route sets them on the copy in Photos after the import (below), and the copy's
+file has only what the original's file has, as it has the camera and lens.
+
+So the shortcuts give `photobatch` the location Photos has, in `jxl_meta.txt`
+next to the job, one line per field, `i|field|value`: `gps` (`lat,lon` or
 `lat,lon,alt`: degrees, north and east positive, and meters; `.` as the decimal
-point, an exponent allowed), `title`, `caption`, `keywords` (separated by
-commas). Values are escaped: `%`, `|`, tab, CR and LF as `%25`, `%7C`, `%09`,
-`%0D` and `%0A`, a comma within a keyword as `%2C`. An empty value means Photos
-has none; a field without a line is left as the file has it. Where it comes
-from:
+point, an exponent allowed). `photobatch` also takes `title`, `caption` and
+`keywords` lines (separated by commas), which 0.8.0's shortcuts gave and
+today's don't. Values are escaped: `%`, `|`, tab, CR and LF as `%25`, `%7C`,
+`%09`, `%0D` and `%0A`, a comma within a keyword as `%2C`. An empty value means
+Photos has none; a field without a line is left as the file has it. Where it
+comes from:
 
 - **The Mac's selection route:** `export.applescript` reads `properties of`
-  each selected item, one Apple event for its id, filename, date, location,
-  altitude, title, caption and keywords (checked on macOS 26: a hidden location
-  reads `{missing value, missing value}`; a location set with Copy Location and
+  each selected item, one Apple event for its id, filename, date, location and
+  altitude (checked on macOS 26: a hidden location reads
+  `{missing value, missing value}`; a location set with Copy Location and
   Assign Location brings that photo's altitude; a place typed in Info has
-  altitude 0.0; an empty title, caption or keywords is `missing value`). After
-  its `id|date|filename` lines it returns `id<tab>field<tab>value` lines, which
-  `selection.zsh` writes by job index. Inside `tell application "Photos"` the
-  record's fields are named by their codes (`«class IPlo»`, ...), as `date of`
-  the record means AppleScript's own date class there. Coordinates are
-  formatted from whole millionths of a degree: a real's text follows the Mac's
-  number format (`40,7`) and turns to E notation. Compress Videos shares the
-  script; its parser skips the new lines, which have no `|`.
+  altitude 0.0). After its `id|date|filename` lines it returns
+  `id<tab>gps<tab>value` lines, which `selection.zsh` writes by job index.
+  Inside `tell application "Photos"` the record's fields are named by their
+  codes (`«class IPlo»`, ...), as `date of` the record means AppleScript's own
+  date class there. Coordinates are formatted from whole millionths of a
+  degree: a real's text follows the Mac's number format (`40,7`) and turns to E
+  notation. Compress Videos shares the script; its parser skips the new lines,
+  which have no `|`.
 - **The iPhone and the Mac's picker route:** the location only, Get Details of
   Images ▸ Location, then Get Details of Locations ▸ Latitude and Longitude
   (`wf.photo_location`): text already, `%0.16g` of the coordinate in
@@ -747,8 +756,9 @@ Photos has none, the file's is removed.
   `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In iPhone
   13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
   location (their maker notes and XMP hold none).
-- **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_read`, one pass for the
-  three, and `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
+- **Title, caption, keywords**, when given (0.8.0's shortcuts; today's keep
+  them in Photos' library) (`xmp.cpp`: `xmp_dc_read`, one pass for the three,
+  and `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
   alternatives, `x-default`) and `dc:subject` (a bag), the only place a JPEG XL
   or HEIC has for them (IPTC IIM lives in a JPEG's APP13, which `photobatch`
   doesn't carry). Texts compare without surrounding whitespace and with
@@ -808,11 +818,31 @@ original in Photos (`import.applescript`: `properties of` each, one event
 apiece; the date too, as since 0.7.0) and sets what differs: the location
 (`{missing value, missing value}` removes one), title (`""` clears it),
 caption, keywords; and it makes the copy a favorite when the original is one.
-Each field is set in a `try` of its own: one Photos won't set is a `!` line
-naming the copy and the field, and the next is still tried. The log counts what
-was set per field, and the "Photos took ..." line has the time. Compress
-Videos' copies get this too (nothing is written into a video's file, so there
-every field Photos has is set this way).
+For the location and date that is a safety net; the title, caption and keywords
+are set only there (an empty one reads `missing value`), as the copy's file has
+only the original file's own, which Photos reads on import. Each field is set
+in a `try` of its own: one Photos won't set is a `!` line naming the copy and
+the field, and the next is still tried. The log counts what was set per field,
+and the "Photos took ..." line has the time. Compress Videos' copies get this
+too (nothing is written into a video's file, so there every field Photos has is
+set this way).
+
+The keywords a copy gets there (`copyKeywords`) are its original's, then
+`compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `rf=26`,
+the number chosen for the run (every copy of a run has the same, as x265 and
+libjxl encode every photo at it; `q=100` is lossless). `selection.zsh` appends
+them to each result line, `path|id|delete or keep|Name.jxl|jxl,q=83`, from
+`FORMAT` and `QUALITY`; Compress Videos' lines have none, so its copies get
+`compr` only. The original's own `compr`, `heic`, `jxl` and `q=`/`rf=` keywords
+(`toolKeyword`; the builder's `COPY_KEYWORD` and `FORMAT_KEYWORDS`) are left
+out, so that a copy of a copy (a HEIC copy converted again, to JPEG XL) says
+only what it is. A copy whose original is unknown (two selected photos with one
+name) gets them too, with the keywords Photos read from its file. They are in
+Photos' library only, like the rest, and are for finding the copies there: a
+smart album (File ▸ New Smart Album) with Keyword is `compr`, and Keyword is
+`jxl` for the JPEG XL ones, lists them at once, where Photos' search finds them
+only once it has indexed them. The picker route and the iPhone don't set
+keywords: their copies get none.
 
 On the iPhone, a saved copy is made a favorite when its original is one
 (`wf.copy_favorite`): Get Details of Images ▸ Is Favorite, an If on it

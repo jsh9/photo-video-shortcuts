@@ -63,9 +63,10 @@ for f in "$WORK"/in/*(.N); do
   fi
 done
 # What else Photos has for each photo, from IDS' "id<tab>field<tab>value"
-# lines (location, title, caption, keywords; escaped): jxl_meta.txt, by job
-# index, values as they are, for photobatch to write into the copies. A name
-# two selected photos share has no id, so no lines.
+# lines (the location; the title, caption and keywords stay in Photos'
+# library, so export.applescript gives none): jxl_meta.txt, by job index,
+# values as they are, for photobatch to write into the copies. A name two
+# selected photos share has no id, so no lines.
 typeset -A jobs
 for (( i = 1; i <= n; i++ )); do
   id=${ids[${origs[$i]}]}
@@ -86,8 +87,15 @@ skipped=''
 # would otherwise show nothing of.
 [ -f "$WORK/jxl_done.txt" ] && { echo; echo "Now Photos imports the files, adds them to their albums and collects the originals..."; } >> "$LOG"
 # Each result becomes <work>/out/Name.jxl (never replacing a file), and one
-# output line per result, "path|original id|delete or keep|Name.jxl", for
-# import.applescript. Nothing when nothing was converted.
+# output line per result, "path|original id|delete or keep|Name.jxl|keywords",
+# for import.applescript. Nothing when nothing was converted. The keywords are
+# the copy's format and quality ("jxl,q=83", "heic,rf=26"), which
+# import.applescript gives it in Photos only, with "compr" (never in the
+# file): every copy of a run has the same.
+case $FORMAT in
+  heic) keywords="heic,rf=$QUALITY";;
+  *) keywords="jxl,q=$QUALITY";;
+esac
 mkdir -p "$WORK/out"
 if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
@@ -95,6 +103,6 @@ if [ -f "$WORK/jxl_done.txt" ]; then
     [ -z "$name" ] && name=$flag  # a line from an older photobatch: file|index|name
     dest=$(unique "$WORK/out/$name")
     mv "$WORK/$file" "$dest" || continue
-    printf '%s|%s|%s|%s\n' "$dest" "${ids[${origs[$idx]}]}" "$flag" "${dest:t}"
+    printf '%s|%s|%s|%s|%s\n' "$dest" "${ids[${origs[$idx]}]}" "$flag" "${dest:t}" "$keywords"
   done < "$WORK/jxl_done.txt"
 fi
