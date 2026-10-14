@@ -598,9 +598,9 @@ be used (independent of the file format); `src/gainmap.c` has the math.
 
 ### 1.4. Dates
 
-A JPEG XL copy gets the date Photos shows for its original, in Photos and in
-its EXIF (where other apps, such as EasyLoupe, read the capture date). Copying
-the original's EXIF isn't enough for two kinds of photos:
+A copy, HEIC or JPEG XL, gets the date Photos shows for its original, in Photos
+and in its EXIF (where other apps, such as EasyLoupe, read the capture date).
+Copying the original's EXIF isn't enough for two kinds of photos:
 
 - **A date changed in Photos** (Adjust Date and Time) lives only in Photos'
   library: the original file keeps the camera's date, the export of the

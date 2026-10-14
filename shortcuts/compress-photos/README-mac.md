@@ -146,10 +146,10 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
 - A notification says the conversion has started. It runs in the background:
   about a second per 12 MP photo on an M1, longer for 48 MP. A notification
   says how many were saved.
-- Each JPEG XL copy is saved to Photos with its original's name, into every
-  album its original is in (one photo, not a copy per album). Shared albums and
-  other built-in ones aren't handled (Favorites follows the favorite, which the
-  copy gets from Photos' selection; see
+- Each copy is saved to Photos with its original's name, into every album its
+  original is in (one photo, not a copy per album). Shared albums and other
+  built-in ones aren't handled (Favorites follows the favorite, which the copy
+  gets from Photos' selection; see
   [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - After the format and quality come **Cores to use** and **HDR**: *Keep HDR*
   keeps an HDR photo's HDR, as the camera's gain map in a HEIC or as an HDR
