@@ -3,6 +3,54 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.8.0] - 2026-10-12
+
+- Added
+  - Each copy, JPEG XL or HEIC, gets the location Photos shows for its
+    original, in its EXIF GPS, on both platforms: a location changed or added
+    in Photos, which Photos keeps in its library and not in the original file,
+    is no longer lost with the original, and a location hidden in Photos (Hide
+    Location) is left out of the copy instead of coming back. A copy of another
+    place gets a new GPS block (latitude, longitude, and Photos' altitude on
+    the Mac), and none of the old position is left in the file; the XMP's
+    location goes with it. A photo already at that place keeps its EXIF byte
+    for byte.
+  - On the Mac, from Photos (the selection), each copy also gets its original's
+    title, caption and keywords, written into its XMP (`dc:title`,
+    `dc:description`, `dc:subject`; a file without XMP gets a packet) and into
+    an EXIF `ImageDescription` the file has (Photos reads that one first), and
+    removed from the copy when Photos has none. After the import, the shortcut
+    checks each copy's date, location, title, caption and keywords against its
+    original's in Photos, sets what Photos read differently, and makes the copy
+    a favorite when its original is one. The check reads each item in one Apple
+    event and is timed in the log (#19).
+  - The shortcuts pass all this to `photobatch` in `jxl_meta.txt` (`i|gps|…`,
+    `title`, `caption`, `keywords`); the log says what was written or removed.
+    On the iPhone and from the Mac's picker, Shortcuts gives the location only
+    (read before the photo's file is fetched, as Shortcuts then answers with
+    the file's GPS).
+  - On the iPhone, a copy of a favorite is a favorite too (Photos' Favorite
+    Photos action; from the share sheet, JXL-Import does it). Not yet from the
+    Mac's picker.
+  - Update both the shortcuts and the encoders (`photobatch.wasm`,
+    `photobatch-macos`): an older `photobatch` ignores `jxl_meta.txt`, and an
+    older shortcut gives none.
+- Changed
+  - The Mac's selection route reads each selected photo with one Apple event
+    (`properties of`) instead of three.
+
+## [Compress Videos 0.2.0] - 2026-10-12
+
+- Changed
+  - After the import, each copy also gets its original's location, title,
+    caption and keywords in Photos when Photos read them differently, and is
+    made a favorite when its original is one (the check is shared with Compress
+    Photos, and timed in the log).
+- Fixed
+  - `build-macos.sh` configures FFmpeg again when `VERSION` changes, so that
+    `ffmpeg -version` and `ffprobe -version` give the new version (they kept
+    the version of the first build).
+
 ## [Compress Photos 0.7.0] - 2026-10-11
 
 - Added

@@ -30,43 +30,17 @@ DATE_TAGS = {
 
 def convert(encoder, folder, photos, dates=None):
     """
-    Stages photos (a list), writes jxl_dates.txt from dates ({index: date}),
-    and converts; returns (photobatch's output, {index: JPEG XL}).
+    Converts photos (a list) with jxl_dates.txt from dates ({index: date});
+    returns (photobatch's output, {index: JPEG XL}).
     """
-    ph.stage(folder, photos)
-    if dates is not None:
-        (folder / 'jxl_dates.txt').write_text(
-            '\n'.join(f'{i}|{d}' for i, d in dates.items())
-        )
-
-    result = encoder.run(['-q', '60', '-e', '1', 'jxl_job.txt'], folder)
-    assert result.returncode == 0, result.stdout + result.stderr
-    return result.stdout, {
-        i: jxl for i, (jxl, _) in ph.read_done(folder).items()
-    }
-
-
-def exif_box(path):
-    """The JPEG XL's Exif box, as bytes."""
-    data = path.read_bytes()
-    return next(
-        data[start:end]
-        for kind, start, end in ph._boxes(data)
-        if kind == 'Exif'
+    return ph.convert(
+        encoder, folder, photos, ['-q', '60', '-e', '1'], dates=dates
     )
 
 
 def dates_of(path):
     tags = ph.exif_tags(path)
     return {k: tags[k] for k in sorted(DATE_TAGS & set(tags))}
-
-
-def validate(path):
-    out = ph.run(
-        ['exiftool', '-validate', '-warning', '-a', '-s', '-s', '-s', path],
-        check=True,
-    ).stdout
-    assert out.splitlines()[0] == 'OK', out
 
 
 def without_date(photo, folder):
@@ -119,7 +93,7 @@ def test_missing_date_gets_photos_date(encoder, photos, tmp_path):
         'ExifIFD:OffsetTimeDigitized': '-04:00',
     }
     assert_others_kept(photo, jxl[1])
-    validate(jxl[1])
+    ph.validate(jxl[1])
     assert (
         'date from Photos: 2026:10:08 20:32:10 -04:00 (the file had none)'
         in (' '.join(ph.photo_output(out, photo.stem).split()))
@@ -138,7 +112,7 @@ def test_changed_date_replaces_the_files(encoder, photos, tmp_path):
         'ExifIFD:OffsetTimeDigitized': '-05:00',
     }  # the original's SubSecTimeOriginal (123) is gone with its date
     assert_others_kept(photo, jxl[1])
-    validate(jxl[1])
+    ph.validate(jxl[1])
     said = ' '.join(ph.photo_output(out, photo.stem).split())
     assert (
         'date from Photos: 2024:01:01 17:00:00 -05:00 '
@@ -179,7 +153,7 @@ def test_same_moment_leaves_the_exif_as_it_is(encoder, photos, tmp_path, date):
     photo = photos['heic_srgb']
     out, dated = convert(encoder, tmp_path / 'dated', [photo], {1: date})
     _, plain = convert(encoder, tmp_path / 'plain', [photo])
-    assert exif_box(dated[1]) == exif_box(plain[1])
+    assert ph.exif_box(dated[1]) == ph.exif_box(plain[1])
     assert 'date from Photos' not in out
 
 
@@ -206,7 +180,7 @@ def test_clock_time_compared_when_the_file_has_no_zone(
         },
     )
     _, plain = convert(encoder, tmp_path / 'plain', [photo])
-    assert exif_box(jxl[1]) == exif_box(plain[1])
+    assert ph.exif_box(jxl[1]) == ph.exif_box(plain[1])
     assert 'ExifIFD:OffsetTimeOriginal' not in ph.exif_tags(jxl[1])
 
     before, tags = ph.exif_tags(photo), ph.exif_tags(jxl[2])
@@ -218,7 +192,7 @@ def test_clock_time_compared_when_the_file_has_no_zone(
         'ExifIFD:SubSecTimeOriginal'
     )
     assert_others_kept(photo, jxl[2])
-    validate(jxl[2])
+    ph.validate(jxl[2])
 
     said = ' '.join(out.split())
     assert (
@@ -256,7 +230,7 @@ def test_modification_time_stays(encoder, tmp_path):
     assert tags['ExifIFD:OffsetTimeOriginal'] == '-05:00'
     assert 'ExifIFD:SubSecTimeOriginal' not in tags
     assert_others_kept(photo, jxl[1])
-    validate(jxl[1])
+    ph.validate(jxl[1])
 
 
 def test_exif_pointer_in_other_forms(encoder, tmp_path):
@@ -290,9 +264,9 @@ def test_exif_pointer_in_other_forms(encoder, tmp_path):
     assert tags['IFD0:Make'] == 'TestMake'
     assert tags['ExifIFD:LensMake'] == 'TestLens'
     assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
-    validate(jxl[1])
+    ph.validate(jxl[1])
     _, plain = convert(encoder, tmp_path / 'plain', [unreadable])
-    assert exif_box(jxl[2]) == exif_box(plain[1])
+    assert ph.exif_box(jxl[2]) == ph.exif_box(plain[1])
     assert "! date not written: the EXIF can't be read" in ' '.join(
         out.split()
     )
@@ -313,7 +287,7 @@ def test_no_exif_at_all(encoder, imageio, tmp_path):
     assert tags['ExifIFD:OffsetTimeOriginal'] == '-04:00'
     assert tags['ExifIFD:SubSecTimeOriginal'] == 500
     assert tags['ExifIFD:ExifVersion'] == '0232'
-    validate(jxl[1])
+    ph.validate(jxl[1])
     assert 'no metadata' not in ph.photo_output(out, 'IMG_0001')
     props = imageio(jxl[1])[str(jxl[1])]
     assert props['taken'] == '2025:03:12 19:00:00'
@@ -332,7 +306,7 @@ def test_ifd0_without_an_exif_ifd(encoder, tmp_path):
     tags = ph.exif_tags(jxl[1])
     assert tags['IFD0:Make'] == 'TestMake'
     assert tags['ExifIFD:DateTimeOriginal'] == '2025:03:12 19:00:00'
-    validate(jxl[1])
+    ph.validate(jxl[1])
 
 
 def test_apple_maker_note_kept(encoder, tmp_path):
@@ -357,7 +331,7 @@ def test_apple_maker_note_kept(encoder, tmp_path):
     assert (
         dates_of(jxl[1])['ExifIFD:DateTimeOriginal'] == '2022:02:02 10:00:00'
     )
-    validate(jxl[1])
+    ph.validate(jxl[1])
 
 
 def test_xmp_dates_follow(encoder, tmp_path):
@@ -403,7 +377,7 @@ def test_unreadable_date_keeps_the_files(encoder, photos, tmp_path):
     photo = photos['heic_srgb']
     out, jxl = convert(encoder, tmp_path / 'bad', [photo], {1: 'yesterday'})
     _, plain = convert(encoder, tmp_path / 'plain', [photo])
-    assert exif_box(jxl[1]) == exif_box(plain[1])
+    assert ph.exif_box(jxl[1]) == ph.exif_box(plain[1])
     assert '! date not understood (yesterday)' in out
 
 
@@ -416,7 +390,7 @@ def test_dates_go_by_index(encoder, photos, tmp_path):
         {2: '2024-01-01T17:00:00-05:00', 7: '2020-01-01T00:00:00Z'},
     )
     _, plain = convert(encoder, tmp_path / 'plain', [a, b])
-    assert exif_box(jxl[1]) == exif_box(plain[1])
+    assert ph.exif_box(jxl[1]) == ph.exif_box(plain[1])
     assert (
         dates_of(jxl[2])['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
     )

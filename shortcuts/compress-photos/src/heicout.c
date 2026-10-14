@@ -479,7 +479,7 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
   }
 
   // The new data: every tile, and the Exif and XMP when new ones are given
-  // (the Exif as a new item describing the picture when the file has none).
+  // (each as a new item describing the picture when the file has none).
   replace = (hb_replace_t *)calloc(num_tiles + 2, sizeof *replace);
   if (!replace) goto oom;
   for (size_t t = 0; t < num_tiles; t++) {
@@ -488,7 +488,8 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
     replace[t].len = job.pic[t].len;
   }
   size_t num_replace = num_tiles;
-  hb_rewrite_t rw = {keep.ids, keep.n, replace, num_replace, hvcc_index, hvcc, hvcc_len, 0, 0, NULL, 0};
+  hb_add_t add[HB_MAX_ADD];
+  hb_rewrite_t rw = {keep.ids, keep.n, replace, num_replace, hvcc_index, hvcc, hvcc_len, add, 0};
   if (exif) {
     exif_item = (uint8_t *)malloc(4 + exif_len);
     if (!exif_item) goto oom;
@@ -501,10 +502,8 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
       replace[num_replace].len = 4 + exif_len;
       num_replace++;
     } else {
-      rw.add_type = FOURCC('E', 'x', 'i', 'f');
-      rw.add_describes = f.primary;
-      rw.add_data = exif_item;
-      rw.add_len = 4 + exif_len;
+      const hb_add_t a = {FOURCC('E', 'x', 'i', 'f'), NULL, f.primary, exif_item, 4 + exif_len};
+      add[rw.num_add++] = a;
     }
   }
   if (xmp) {
@@ -514,6 +513,9 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
       replace[num_replace].data = xmp;
       replace[num_replace].len = xmp_len;
       num_replace++;
+    } else {
+      const hb_add_t a = {FOURCC('m', 'i', 'm', 'e'), "application/rdf+xml", f.primary, xmp, xmp_len};
+      add[rw.num_add++] = a;
     }
   }
   rw.num_replace = num_replace;

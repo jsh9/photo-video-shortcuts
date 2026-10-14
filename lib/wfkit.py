@@ -332,9 +332,12 @@ class Builder:
         self.actions.append(end)
         return output_of(end, 'Repeat Results')
 
-    # If/Otherwise with the "has any value" condition (code 100). Format as
-    # written by Cherri (github.com/electrikmilk/cherri, shortcutgen.go).
-    def if_has_value(self, ref, then, otherwise):
+    def _conditional(self, condition, ref, then, otherwise):
+        """
+        If/Otherwise on ``ref`` with ``condition`` (the If's parameters besides
+        its input: WFCondition and what the condition needs). Format as written
+        by Cherri (github.com/electrikmilk/cherri, shortcutgen.go).
+        """
         group = new_uuid()
 
         def mark(mode, extra):
@@ -350,7 +353,7 @@ class Builder:
         mark(
             0,
             {
-                'WFCondition': 100,
+                **condition,
                 'WFInput': {'Type': 'Variable', 'Variable': attachment(ref)},
             },
         )
@@ -358,6 +361,48 @@ class Builder:
         mark(1, {})
         otherwise()
         mark(2, {'UUID': new_uuid()})
+
+    def if_has_value(self, ref, then, otherwise):
+        """If/Otherwise with the "has any value" condition (code 100)."""
+        self._conditional({'WFCondition': 100}, ref, then, otherwise)
+
+    def if_true(self, ref, then, otherwise):
+        """
+        If/Otherwise on a Boolean (such as Get Details of Images ▸ Is
+        Favorite): the condition "is" (code 4) with the switch on
+        (WFConditionalActionBoolean). Format from a shortcut built on the
+        iPhone (iOS 26), which leaves the switch at its default; it is written
+        here, so the default doesn't matter. An input without a value (an image
+        that isn't in the library has no Is Favorite) is not true.
+        """
+        self._conditional(
+            {'WFCondition': 4, 'WFConditionalActionBoolean': True},
+            ref,
+            then,
+            otherwise,
+        )
+
+    def favorite_photos(self, ref):
+        """
+        Photos' Favorite Photos: makes the photos ``ref`` favorites (its
+        action, Favorite or Unfavorite, left at Favorite). An App Intent
+        (FavoriteAssetsIntent, in PhotosUICore), stored as a shortcut built on
+        the iPhone (iOS 26) stores it: the app's descriptor and the photos,
+        which Shortcuts turns into the intent's AssetEntity from a library
+        photo (com.apple.Photos.PHAsset).
+        """
+        return self.add(
+            'com.apple.mobileslideshow.FavoriteAssetsIntent',
+            {
+                'AppIntentDescriptor': {
+                    'AppIntentIdentifier': 'FavoriteAssetsIntent',
+                    'BundleIdentifier': 'com.apple.mobileslideshow',
+                    'Name': 'Photos',
+                    'TeamIdentifier': '0000000000',
+                },
+                'assets': attachment(ref),
+            },
+        )
 
     def set_variable(self, name, ref):
         self.add(
@@ -437,6 +482,23 @@ class Builder:
         """
         a = self.add(
             'is.workflow.actions.properties.images',
+            {'WFContentItemPropertyName': name, 'WFInput': attachment(ref)},
+        )
+        return output_of(a, name)
+
+    def location_details(self, ref, name):
+        """
+        Get Details of Locations: the property ``name`` of the location
+        ``ref``, as photo_details does for images (the same action class,
+        WFContentItemPropertiesAction, with ``is.workflow.actions.properties
+        .locations``, in the macOS 26 frameworks). Latitude and Longitude are
+        text, the coordinate formatted with "%0.16g" (ContentKit's
+        WFLocationContentItem, iOS 18.2): "." as the decimal point whatever the
+        device's region. Altitude is a Number, which a text shows in the
+        device's region's format.
+        """
+        a = self.add(
+            'is.workflow.actions.properties.locations',
             {'WFContentItemPropertyName': name, 'WFInput': attachment(ref)},
         )
         return output_of(a, name)

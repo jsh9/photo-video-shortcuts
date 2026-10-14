@@ -98,6 +98,19 @@ typedef struct {
   size_t len;
 } hb_replace_t;
 
+// An item to add, such as an 'Exif' item for a file without one: hidden,
+// without properties, describing ('cdsc') the item `describes`, its data last
+// in 'mdat'. A 'mime' item has a content type.
+typedef struct {
+  uint32_t type;
+  const char *content_type;  // for 'mime', else NULL
+  uint32_t describes;
+  const uint8_t *data;
+  size_t len;
+} hb_add_t;
+
+#define HB_MAX_ADD 2
+
 typedef struct {
   const uint32_t *keep;  // the items to keep; every other item goes
   size_t num_keep;
@@ -106,22 +119,22 @@ typedef struct {
   uint32_t hvcc_index;  // property to replace with `hvcc` (0: none)
   const uint8_t *hvcc;  // the new 'hvcC' payload
   size_t hvcc_len;
-  // An item to add (add_type 0: none), such as an 'Exif' item for a file
-  // without one: hidden, without properties, describing ('cdsc') the item
-  // `add_describes`, its data last in 'mdat'. Its id is the next after the
-  // file's highest.
-  uint32_t add_type;
-  uint32_t add_describes;
-  const uint8_t *add_data;
-  size_t add_len;
+  // Items to add (up to HB_MAX_ADD), with the ids after the file's highest.
+  const hb_add_t *add;
+  size_t num_add;
 } hb_rewrite_t;
 
 // Writes the file again: 'ftyp' as it was; 'meta' with the kept items only
 // ('iinf', 'iref', 'ipma', 'grpl' filtered, 'iloc' regenerated, the property
-// replaced, the added item in 'iinf', 'iref' and 'iloc', everything else
-// byte for byte); 'mdat' with the kept items' data in the original order,
-// replaced data where given, the added item's data last. malloc'ed. Returns
-// 0, or -1 if out of memory (or the added item's id doesn't fit 16 bits).
+// replaced, the added items in 'iinf', 'iref' and 'iloc', 'idat' written anew
+// with the kept items' data only when one of its items is replaced or
+// dropped (unless a kept item there can't be read: then it keeps its layout,
+// with the replaced and dropped items' bytes zeroed), everything else byte for
+// byte); 'mdat' with the kept items' data in
+// the original order, replaced data where given (also for an item that was in
+// 'idat'), the added items' data last. No replaced or dropped item's data is
+// left in the file. malloc'ed. Returns 0, or -1 if out of memory (or an added
+// item's id doesn't fit 16 bits).
 int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t *out_len);
 
 // A new HEIC: one picture as a grid of HEVC tiles (a single 'hvc1' item when

@@ -509,27 +509,46 @@ typedef struct {
   uint8_t *kept;      // per item (f->items order)
   uint64_t *offsets;  // per item: where its data goes in the output (method 0)
   size_t *lengths;
-  uint32_t add_id;      // the added item (rw->add_type), 0 if none
-  uint64_t add_offset;  // where its data goes in the output
+  uint32_t add_ids[HB_MAX_ADD];      // the added items' ids (rw->add)
+  uint64_t add_offsets[HB_MAX_ADD];  // where their data goes in the output
+  // 'idat' written anew (idat_anew), with only the kept items' data, each in
+  // one piece: offsets and lengths then hold where in it (method 1). Or, when
+  // a kept item there can't be read, the old payload with the replaced and
+  // dropped items' bytes zeroed (idat set, idat_anew not): the layout stays.
+  int idat_anew;
+  uint8_t *idat;
+  size_t idat_len;
 } rewrite_t;
 
 static void put_infe(bb_t *b, uint32_t id, uint32_t flags, uint32_t type);
+static void put_infe_mime(bb_t *b, uint32_t id, uint32_t flags, const char *content_type);
 
-// The added item's 'cdsc' reference, in the file's 'iref' format.
-static void put_added_ref(bb_t *b, const rewrite_t *r) {
-  const size_t rs = bb_begin(b, FOURCC('c', 'd', 's', 'c'));
-  if (r->f->iref_version == 0) {
-    bb_u16(b, r->add_id);
-  } else {
-    bb_u32(b, r->add_id);
+// The added items' 'cdsc' references, in the file's 'iref' format.
+static void put_added_refs(bb_t *b, const rewrite_t *r) {
+  for (size_t a = 0; a < r->rw->num_add; a++) {
+    const size_t rs = bb_begin(b, FOURCC('c', 'd', 's', 'c'));
+    if (r->f->iref_version == 0) {
+      bb_u16(b, r->add_ids[a]);
+    } else {
+      bb_u32(b, r->add_ids[a]);
+    }
+    bb_u16(b, 1);
+    if (r->f->iref_version == 0) {
+      bb_u16(b, r->rw->add[a].describes);
+    } else {
+      bb_u32(b, r->rw->add[a].describes);
+    }
+    bb_end(b, rs);
   }
-  bb_u16(b, 1);
-  if (r->f->iref_version == 0) {
-    bb_u16(b, r->rw->add_describes);
-  } else {
-    bb_u32(b, r->rw->add_describes);
-  }
-  bb_end(b, rs);
+}
+
+// Appends the item's data (its extents, one after the other) to b. Returns 0,
+// or -1 when an extent lies outside the data (or there are more than 1024).
+static int put_item_data(bb_t *b, const hb_file_t *f, const hb_item_t *item) {
+  span_t spans[1024];
+  if (item->num_extents > 1024 || item_extents(f, item, spans, 1024) == (size_t)-1) return -1;
+  for (size_t e = 0; e < item->num_extents; e++) bb_put(b, spans[e].p, spans[e].n);
+  return 0;
 }
 
 static int is_kept(const rewrite_t *r, uint32_t id) {
@@ -560,7 +579,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
     if (ct == FOURCC('i', 'i', 'n', 'f') && pl.n >= 4) {
       const size_t start = bb_begin(b, ct);
       bb_put(b, pl.p, 4);
-      size_t count = r->add_id ? 1 : 0;
+      size_t count = r->rw->num_add;
       for (size_t i = 0; i < f->num_items; i++) count += r->kept[i];
       if (pl.p[0] == 0) {
         bb_u16(b, (unsigned)count);
@@ -570,12 +589,18 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
       for (size_t i = 0; i < f->num_items; i++) {
         if (r->kept[i]) bb_put(b, f->items[i].infe.p, f->items[i].infe.n);
       }
-      if (r->add_id) put_infe(b, r->add_id, 1, r->rw->add_type);
+      for (size_t a = 0; a < r->rw->num_add; a++) {
+        if (r->rw->add[a].content_type) {
+          put_infe_mime(b, r->add_ids[a], 1, r->rw->add[a].content_type);
+        } else {
+          put_infe(b, r->add_ids[a], 1, r->rw->add[a].type);
+        }
+      }
       bb_end(b, start);
-      if (r->add_id && !has_iref) {  // the added item's reference needs an 'iref'
+      if (r->rw->num_add && !has_iref) {  // the added items' references need an 'iref'
         const size_t is = bb_begin(b, FOURCC('i', 'r', 'e', 'f'));
         bb_u32(b, 0);  // version 0 (16-bit ids), no flags
-        put_added_ref(b, r);
+        put_added_refs(b, r);
         bb_end(b, is);
       }
     } else if (ct == FOURCC('i', 'r', 'e', 'f') && pl.n >= 4) {
@@ -604,7 +629,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         }
         bb_end(b, rs);
       }
-      if (r->add_id) put_added_ref(b, r);
+      put_added_refs(b, r);
       bb_end(b, start);
     } else if (ct == FOURCC('i', 'p', 'r', 'p')) {
       const size_t start = bb_begin(b, ct);
@@ -653,7 +678,7 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
       bb_u8(b, 0);
       bb_u8(b, 0x44);  // offset_size 4, length_size 4
       bb_u8(b, 0x00);  // base_offset_size 0, index_size 0
-      size_t count = r->add_id ? 1 : 0;
+      size_t count = r->rw->num_add;
       for (size_t i = 0; i < f->num_items; i++) count += r->kept[i] && f->items[i].located;
       if (v < 2) {
         bb_u16(b, (unsigned)count);
@@ -676,6 +701,10 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
           bb_u16(b, 1);
           bb_u32(b, (uint32_t)(mdat_start + r->offsets[i]));
           bb_u32(b, (uint32_t)r->lengths[i]);
+        } else if (r->idat_anew) {  // its data, in one piece, in the new 'idat'
+          bb_u16(b, 1);
+          bb_u32(b, (uint32_t)r->offsets[i]);
+          bb_u32(b, (uint32_t)r->lengths[i]);
         } else {
           bb_u16(b, (unsigned)item->num_extents);
           for (size_t e = 0; e < item->num_extents; e++) {
@@ -685,17 +714,17 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
           }
         }
       }
-      if (r->add_id) {
+      for (size_t a = 0; a < r->rw->num_add; a++) {
         if (v < 2) {
-          bb_u16(b, r->add_id);
+          bb_u16(b, r->add_ids[a]);
         } else {
-          bb_u32(b, r->add_id);
+          bb_u32(b, r->add_ids[a]);
         }
         if (v >= 1) bb_u16(b, 0);  // construction method 0: in 'mdat'
         bb_u16(b, 0);              // data_reference_index
         bb_u16(b, 1);
-        bb_u32(b, (uint32_t)(mdat_start + r->add_offset));
-        bb_u32(b, (uint32_t)r->rw->add_len);
+        bb_u32(b, (uint32_t)(mdat_start + r->add_offsets[a]));
+        bb_u32(b, (uint32_t)r->rw->add[a].len);
       }
       bb_end(b, start);
     } else if (ct == FOURCC('g', 'r', 'p', 'l')) {
@@ -721,6 +750,12 @@ static void write_meta(bb_t *b, const rewrite_t *r, uint64_t mdat_start) {
         bb_end(b, start);
       }
       free(groups.data);
+    } else if (ct == FOURCC('i', 'd', 'a', 't') && (r->idat_anew || r->idat)) {
+      if (r->idat_len) {  // none: no item is left in it
+        const size_t start = bb_begin(b, ct);
+        bb_put(b, r->idat, r->idat_len);
+        bb_end(b, start);
+      }
     } else {
       bb_put(b, box.p, box.n);  // hdlr, pitm, idat, dinf, ...
     }
@@ -738,21 +773,68 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   r.offsets = (uint64_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.offsets);
   r.lengths = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *r.lengths);
   size_t *order = (size_t *)calloc(f->num_items ? f->num_items : 1, sizeof *order);
+  r.idat_anew = 0;
+  r.idat = NULL;
+  r.idat_len = 0;
   int rc = -1;
   bb_t b = {NULL, 0, 0, 0};
+  bb_t idat = {NULL, 0, 0, 0};
+  uint8_t *scrubbed = NULL;  // the old 'idat' with the replaced and dropped items' bytes zeroed
   if (!r.kept || !r.offsets || !r.lengths || !order) goto done;
-  r.add_id = 0;
-  r.add_offset = 0;
-  if (rw->add_type) {  // the next id after the file's highest
+  if (rw->num_add > HB_MAX_ADD) goto done;
+  if (rw->num_add) {  // the next ids after the file's highest
     uint32_t top = 0;
     for (size_t i = 0; i < f->num_items; i++) top = f->items[i].id > top ? f->items[i].id : top;
-    if (top >= 0xffff) goto done;  // 'infe' version 2 and 'iref' version 0 hold 16-bit ids
-    r.add_id = top + 1;
+    // 'infe' version 2 and 'iref' version 0 hold 16-bit ids (the sum would
+    // wrap for a 32-bit id near the top, where size_t is 32 bits)
+    if (top > 0xffffu - (uint32_t)rw->num_add) goto done;
+    for (size_t a = 0; a < rw->num_add; a++) r.add_ids[a] = top + 1 + (uint32_t)a;
   }
   for (size_t i = 0; i < f->num_items; i++) {
     for (size_t k = 0; k < rw->num_keep; k++) {
       if (rw->keep[k] == f->items[i].id) r.kept[i] = 1;
     }
+  }
+  // 'idat' stays as it was unless an item in it is replaced or dropped. Then
+  // it is written anew with the data of the kept items only, each in one
+  // piece, so that no replaced or dropped data stays in the file (an old
+  // Exif's GPS, say); the other items in it (a 'grid', a 'tmap') keep their
+  // bytes. Should one of those not be readable (a malformed file), 'idat'
+  // keeps its layout instead, with the replaced and dropped items' bytes
+  // zeroed in place, rather than the file not being written.
+  int idat_touched = 0;
+  for (size_t i = 0; i < f->num_items; i++) {
+    const hb_item_t *item = &f->items[i];
+    if (item->located && item->method == 1 && (!r.kept[i] || replacement(&r, item->id))) idat_touched = 1;
+  }
+  r.idat_anew = idat_touched;
+  for (size_t i = 0; r.idat_anew && i < f->num_items; i++) {
+    const hb_item_t *item = &f->items[i];
+    if (!r.kept[i] || !item->located || item->method != 1 || replacement(&r, item->id)) continue;
+    r.offsets[i] = idat.len;
+    if (put_item_data(&idat, f, item) != 0) r.idat_anew = 0;
+    r.lengths[i] = idat.len - (size_t)r.offsets[i];
+  }
+  if (idat.oom || idat.len > 0xFFFFFFFFu) goto done;
+  if (r.idat_anew) {
+    r.idat = idat.data;
+    r.idat_len = idat.len;
+  } else if (idat_touched && f->idat.p) {
+    scrubbed = (uint8_t *)malloc(f->idat.n ? f->idat.n : 1);
+    if (!scrubbed) goto done;
+    memcpy(scrubbed, f->idat.p, f->idat.n);
+    for (size_t i = 0; i < f->num_items; i++) {
+      const hb_item_t *item = &f->items[i];
+      if (!item->located || item->method != 1 || (r.kept[i] && !replacement(&r, item->id))) continue;
+      for (size_t e = 0; e < item->num_extents; e++) {
+        const hb_extent_t *ext = &f->extents[item->first_extent + e];
+        if (ext->offset >= f->idat.n) continue;
+        const uint64_t room = f->idat.n - ext->offset;
+        memset(scrubbed + ext->offset, 0, (size_t)(ext->length && ext->length < room ? ext->length : room));
+      }
+    }
+    r.idat = scrubbed;
+    r.idat_len = f->idat.n;
   }
   // The data's order in the new 'mdat': the kept items with file data, by
   // where their data was (replaced data in the place of the old), and the
@@ -791,7 +873,10 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     r.lengths[i] = len;
     pos += len;
   }
-  r.add_offset = pos;
+  for (size_t a = 0; a < rw->num_add; a++) {
+    r.add_offsets[a] = pos;
+    pos += rw->add[a].len;
+  }
   // 'meta' once to measure it (its size doesn't depend on the offsets), then
   // for real with the offsets into 'mdat'.
   write_meta(&b, &r, 0);
@@ -806,14 +891,11 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
     const hb_replace_t *rep = replacement(&r, f->items[i].id);
     if (rep) {
       bb_put(&b, rep->data, rep->len);
-    } else {
-      span_t spans[1024];
-      if (f->items[i].num_extents > 1024) goto done;
-      item_extents(f, &f->items[i], spans, 1024);
-      for (size_t e = 0; e < f->items[i].num_extents; e++) bb_put(&b, spans[e].p, spans[e].n);
+    } else if (put_item_data(&b, f, &f->items[i]) != 0) {
+      goto done;
     }
   }
-  if (r.add_id) bb_put(&b, rw->add_data, rw->add_len);
+  for (size_t a = 0; a < rw->num_add; a++) bb_put(&b, rw->add[a].data, rw->add[a].len);
   bb_end(&b, mdat);
   if (b.oom) goto done;
   *out = b.data;
@@ -822,6 +904,8 @@ int hb_rewrite(const hb_file_t *f, const hb_rewrite_t *rw, uint8_t **out, size_t
   rc = 0;
 done:
   free(b.data);
+  free(idat.data);
+  free(scrubbed);
   free(r.kept);
   free(r.offsets);
   free(r.lengths);

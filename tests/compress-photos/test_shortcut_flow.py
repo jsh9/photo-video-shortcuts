@@ -185,7 +185,7 @@ def stage_like_shortcut(actions, folder, photos):
         ph.params(a)['WFTextActionText']
         for a in actions['compress']
         if ph.ident(a) == 'is.workflow.actions.gettext'
-        and '|' in str(ph.params(a)['WFTextActionText'])
+        and "'OutputName': 'Name'" in str(ph.params(a)['WFTextActionText'])
     )
     lines = []
     for i, photo in enumerate(photos, 1):
@@ -215,6 +215,32 @@ def dates_like_shortcut(actions, folder, dates):
             for i, d in dates.items()
         )
     )
+
+
+def locations_like_shortcut(actions, folder, locations):
+    """
+    Writes jxl_meta.txt with the lines the shortcut builds for ``locations``
+    ({index: (Latitude, Longitude)}, or None for a library photo without one):
+    its Texts "<Repeat Index>|gps|<Latitude>,<Longitude>" and "<Repeat
+    Index>|gps|" (wf.photo_location), joined by Combine Text.
+    """
+    templates = [
+        ph.params(a)['WFTextActionText']
+        for a in actions['compress']
+        if ph.ident(a) == 'is.workflow.actions.gettext'
+        and '|gps|' in str(ph.params(a)['WFTextActionText'])
+    ]
+    known, unknown = sorted(templates, key=lambda t: -len(str(t)))
+    lines = []
+    for i, location in locations.items():
+        if location is None:
+            lines.append(ph.render(unknown, {'Repeat Index': i}))
+        else:
+            lat, lon = location
+            values = {'Repeat Index': i, 'Latitude': lat, 'Longitude': lon}
+            lines.append(ph.render(known, values))
+
+    (folder / 'jxl_meta.txt').write_text('\n'.join(lines))
 
 
 def import_results(folder):
@@ -320,12 +346,35 @@ def test_dates_reach_photobatch(actions, ashell, photos, launched):
     assert 'date from Photos' in shell.output
 
 
+@LAUNCHED
+def test_locations_reach_photobatch(actions, ashell, photos, launched):
+    # jxl_meta.txt, next to the job, is read wherever a-Shell started; the
+    # coordinates as Shortcuts' Latitude and Longitude give them (%0.16g).
+    shell = ashell(launched)
+    originals = [photos['heic_p3'], photos['jpeg']]
+    stage_like_shortcut(actions, shell.shortcuts, originals)
+    locations_like_shortcut(
+        actions,
+        shell.shortcuts,
+        {1: None, 2: ('40.75844166666667', '-73.82976666666667')},
+    )
+    shell.run(batch_command(actions, 'shortcuts://'))
+    (first, _, _), (second, _, _) = import_results(shell.shortcuts)
+    assert not ph.gps_of(first)
+    gps = ph.gps_of(second)
+    assert gps['GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-7)
+    assert gps['GPSLongitudeRef'] == 'W'
+    assert 'location from Photos' in shell.output
+
+
 def test_cleanup_leaves_nothing(actions, ashell, photos):
     shell = ashell()
     stage_like_shortcut(actions, shell.shortcuts, [photos['jpeg']])
     dates_like_shortcut(actions, shell.shortcuts, {1: '2024-01-01T17:00:00Z'})
+    locations_like_shortcut(actions, shell.shortcuts, {1: None})
     shell.run(batch_command(actions, 'shortcuts://'))
     (shell.shortcuts / 'jxl_albums_1.txt').write_text('Holidays')
+    (shell.shortcuts / 'jxl_favorite_1.txt').write_text('favorite')
     cleanup = next(
         c
         for c in ph.ashell_commands(actions['import'], {})

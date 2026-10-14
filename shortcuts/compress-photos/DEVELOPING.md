@@ -15,7 +15,8 @@ ______________________________________________________________________
   - [1.2. XMP](#12-xmp)
   - [1.3. HDR](#13-hdr)
   - [1.4. Dates](#14-dates)
-  - [1.5. HEIC output](#15-heic-output)
+  - [1.5. Location, title, caption, keywords and favorite](#15-location-title-caption-keywords-and-favorite)
+  - [1.6. HEIC output](#16-heic-output)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Generating the shortcuts](#4-generating-the-shortcuts)
@@ -34,8 +35,8 @@ Compress Photos                              (shortcut)
    keeps the still photos (skips Live Photos and videos, and says how many),
    asks the format (HEIC or JPEG XL) and that format's quality preset, copies
    each original photo to a-Shell's shared folder as jxl_in_N.orig, writes
-   jxl_job.txt and jxl_dates.txt (each photo's date in Photos), then runs in
-   a-Shell:
+   jxl_job.txt, jxl_dates.txt (each photo's date in Photos) and jxl_meta.txt
+   (its location in Photos, read first), then runs in a-Shell:
      photobatch --heic --rf 26 jxl_job.txt   (or -q 83 -e 7 for JPEG XL; after
                                             a short wait, in a-Shell's
                                             Shortcuts folder; retried if
@@ -44,7 +45,8 @@ a-Shell ▸ photobatch → jxl_out_N.heic or .jxl + jxl_done.txt, with progress 
 then, from the share sheet:
    a-Shell starts JXL-Import (shortcut), which saves each JXL to Photos
    under its original name, adds it to the albums listed in
-   jxl_albums_N.txt (written by Compress Photos), and cleans up
+   jxl_albums_N.txt (written by Compress Photos), makes it a favorite if
+   jxl_favorite_N.txt is there (likewise), and cleans up
    (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
@@ -142,16 +144,21 @@ Compress Photos (macOS)                      (shortcut)
    ~/Pictures/.compress-photos-macos (Photos' sandbox reaches ~/Pictures);
    Run AppleScript (lib/mac/export.applescript, input: that folder) has Photos
    export the originals into its in/ and returns "id|date|filename" lines
-   (the date: the photo's in Photos, on the Mac's clock); Run Shell Script
+   (the date: the photo's in Photos, on the Mac's clock), then
+   "id<tab>field<tab>value" lines (location, title, caption, keywords, all
+   read with one "properties of" per photo); Run Shell Script
    (common.zsh + selection.zsh, IDS = those lines) stages in/* (a photo plus
    a .mov of the same name is a Live Photo: skipped; a video alone: skipped),
    writes jxl_dates.txt (each date with the Mac's offset on that date, by
    `date -j`; none for a clock time in the hour repeated when daylight
-   saving time ends), runs photobatch, renames each result to out/Name.jxl (or .heic) and
+   saving time ends) and jxl_meta.txt (the other lines, by job index), runs
+   photobatch, renames each result to out/Name.jxl (or .heic) and
    prints
    "path|id|delete or keep|Name.jxl (or .heic)"; Run AppleScript
    (lib/mac/import.applescript, input: those lines) has Photos import each file,
-   give it its original's date should Photos have read another from the file,
+   give it its original's date, location, title, caption and keywords should
+   Photos have read others from the file, make it a favorite if its original
+   is one,
    add it to every album its original is in (the albums' contents read one
    folder at a time, nested ones too), and add every imported file's
    original (by id reference) to the album
@@ -159,13 +166,13 @@ Compress Photos (macOS)                      (shortcut)
    "imported=N", "collected=M" and "! ..." lines, which join the log
 
    picker route: keeps the still photos (same as the iPhone), asks the same
-   three questions, collects the photos' names and their dates in Photos
-   (Dates, as on the iPhone), then
+   three questions, collects the photos' locations, names and dates in Photos
+   (Meta and Dates, as on the iPhone), then
    Run Shell Script
    (/bin/zsh, the photos passed as files, "$@"):
      scripts/mac/common.zsh + photos.zsh: finds photobatch (~/.local/bin, ~/bin,
      /usr/local/bin, /opt/homebrew/bin), stages jxl_in_N.orig as symlinks and
-     writes jxl_job.txt and jxl_dates.txt in compress-photos-macos/ inside
+     writes jxl_job.txt, jxl_dates.txt and jxl_meta.txt in compress-photos-macos/ inside
      Shortcuts' iCloud Drive folder (~/Library/Mobile Documents/
      iCloud~is~workflow~my~workflows/Documents), runs
        photobatch --mac -q 83 -e 7 -j 0 -C "$WORK" jxl_job.txt
@@ -660,7 +667,166 @@ that repeats when daylight saving time ends is two moments (AppleScript's dates
 are clock times): `selection.zsh` gives no date for it, and
 `import.applescript` dates the copy in Photos.
 
-### 1.5. HEIC output
+### 1.5. Location, title, caption, keywords and favorite
+
+What Photos shows for a photo besides its date can live in its library only, so
+a copy of the original's EXIF and XMP isn't enough (issue #21; the plan and its
+spikes:
+[compress-photos-metadata-plan.md](../../docs/compress-photos-metadata-plan.md)):
+
+- **A location changed, added or hidden in Photos** (Image ▸ Location; Hide
+  Location): the file keeps the camera's GPS, or has none. The copy got the
+  camera's position back, also one the user had hidden.
+- **A title, caption or keywords** set in Photos: the copy had none, and a
+  file's own (a camera's, another app's) came back even when Photos changed or
+  cleared it.
+- **A favorite**: the copy wasn't one.
+
+So the shortcuts give `photobatch` what Photos has, in `jxl_meta.txt` next to
+the job, one line per field, `i|field|value`: `gps` (`lat,lon` or
+`lat,lon,alt`: degrees, north and east positive, and meters; `.` as the decimal
+point, an exponent allowed), `title`, `caption`, `keywords` (separated by
+commas). Values are escaped: `%`, `|`, tab, CR and LF as `%25`, `%7C`, `%09`,
+`%0D` and `%0A`, a comma within a keyword as `%2C`. An empty value means Photos
+has none; a field without a line is left as the file has it. Where it comes
+from:
+
+- **The Mac's selection route:** `export.applescript` reads `properties of`
+  each selected item, one Apple event for its id, filename, date, location,
+  altitude, title, caption and keywords (checked on macOS 26: a hidden location
+  reads `{missing value, missing value}`; a location set with Copy Location and
+  Assign Location brings that photo's altitude; a place typed in Info has
+  altitude 0.0; an empty title, caption or keywords is `missing value`). After
+  its `id|date|filename` lines it returns `id<tab>field<tab>value` lines, which
+  `selection.zsh` writes by job index. Inside `tell application "Photos"` the
+  record's fields are named by their codes (`«class IPlo»`, ...), as `date of`
+  the record means AppleScript's own date class there. Coordinates are
+  formatted from whole millionths of a degree: a real's text follows the Mac's
+  number format (`40,7`) and turns to E notation. Compress Videos shares the
+  script; its parser skips the new lines, which have no `|`.
+- **The iPhone and the Mac's picker route:** the location only, Get Details of
+  Images ▸ Location, then Get Details of Locations ▸ Latitude and Longitude
+  (`wf.photo_location`): text already, `%0.16g` of the coordinate in
+  ContentKit's `WFLocationContentItem` (iOS 18.2), so `.` whatever the device's
+  region. The altitude is a Number, shown in the region's format and 0 when
+  unknown, so it is left out. For a library photo, Location is the asset's only
+  until a file of the photo is fetched (`-[WFPhotoMediaContentItem location]`
+  returns the file's GPS once the item has a file representation), so it is
+  read first in the repeat, before Put File or the script's input. A library
+  photo without a location (Is Favorite has a value) gets `i|gps|`. PhotoKit
+  has no title, caption or keywords: on these routes they stay as the file has
+  them.
+
+`photobatch` (`apply_photos_meta`, after the date) treats each field as the
+date: the file's the same, it stays byte for byte; another, Photos' is written;
+Photos has none, the file's is removed.
+
+- **Location** (`meta.c`: `exif_gps`, `exif_set_gps`): the same place within
+  0.00001° (about 1 m) in both coordinates, Photos' reals against the EXIF's
+  rationals (an iPhone writes seconds to 0.01"). Another place: a new GPS IFD
+  with `GPSVersionID` 2.2, the latitude and longitude (degrees/1, minutes/1,
+  seconds/10000, from whole ten-thousandths of a second, so every build writes
+  the same bytes) and the altitude when there is one (centimeters; 0 is none),
+  at the end of the EXIF, and IFD0's pointer moved to it (IFD0 rewritten when
+  it has none, or without it for a removal): no other value moves. The old
+  fix's direction, speed, positioning error and fix time go. Photos having none
+  removes whatever GPS IFD the file has, also one without a readable position
+  (a longitude, or an altitude, alone), also behind a pointer with a count
+  other than 1. The old GPS IFD and the values it points to are zeroed, and so
+  is IFD0's old table whenever IFD0 is written anew (a short caption held in an
+  entry would otherwise survive there, to be removed later from the new table
+  only), so the old position isn't left in the file, sparing only the bytes
+  another entry that stays still refers to: the tables and values of IFD0 (and
+  the IFDs it chains to), the Exif and Interoperability IFDs, and the thumbnail
+  they locate (a valid file may share one string, or part of a value, between
+  two tags; a malformed one may point its GPS IFD into another), and the XMP's
+  location goes too (when Photos has none, whatever the EXIF's was; for another
+  place, only once the EXIF took it: a file whose EXIF can't be read keeps its
+  location, `! location not written`) (`xmp_remove_location`: `exif:GPS*`,
+  `photoshop:City`, `State` and `Country`, `Iptc4xmpCore:Location` and
+  `CountryCode`, `Iptc4xmpExt:LocationCreated` and `LocationShown`). In iPhone
+  13 mini, 15 Pro and 17 Pro photos the GPS IFD is the only place of the
+  location (their maker notes and XMP hold none).
+- **Title, caption, keywords** (`xmp.cpp`: `xmp_dc_read`, one pass for the
+  three, and `xmp_set_dc`): the XMP's `dc:title` and `dc:description` (language
+  alternatives, `x-default`) and `dc:subject` (a bag), the only place a JPEG XL
+  or HEIC has for them (IPTC IIM lives in a JPEG's APP13, which `photobatch`
+  doesn't carry). Texts compare without surrounding whitespace and with
+  references decoded; keywords as a set. A qualified item counts by its
+  `rdf:value`, an element or an attribute
+  (`<rdf:li rdf:parseType="Resource"><rdf:value>`,
+  `<rdf:li rdf:value="..." q:confidence="..."/>`, or either in a nested
+  `rdf:Description`). Only the value path counts: the items of the property's
+  own array and their `rdf:value`; a qualifier's own array
+  (`<q:source> <rdf:Bag>...`) or a structure's fields are passed over. An item
+  counts only when it can be read: it has text, or it is plainly empty; so is
+  an empty array (`<rdf:Alt/>`, or one holding whitespace only). Anything else
+  (fields, or a reference such as `rdf:resource`, `rdf:nodeID` or `rdf:ID`
+  without text, a blank `rdf:value` with qualifiers, elements but no
+  `rdf:value`, an array holding text instead of items, a property holding a
+  structure or fields instead of an array) is a value the scanner can't read,
+  which is never Photos' (the property is rewritten, or removed when Photos has
+  none); so is a property repeated with another value (readers take the last).
+  An item's language is its effective `xml:lang`, inherited from the `rdf:Alt`
+  or the node element when it has none of its own. The file's own are removed
+  wherever they are (an element or an attribute, in any `rdf:Description`,
+  qualifiers and all), and Photos' are added in a new `rdf:Description` at the
+  end of `rdf:RDF` (an empty `rdf:RDF` written as one tag gets an end tag,
+  under its own prefix), with the packet's `rdf:about`; every other byte of the
+  packet stays. A file without XMP gets a minimal packet (`xmp_new_packet`)
+  when there is something to add: a JPEG XL `xml ` box, a HEIC `mime` item. A
+  packet without `rdf:RDF` is kept
+  (`! title, caption and keywords not written`). The scanner is the one
+  orientation and dates use (see [XMP](#12-xmp)), which now also reports
+  structured properties, with the text items of their arrays, and where each
+  property is written.
+- **Caption and `ImageDescription`:** ImageIO, and so Photos (checked on macOS
+  26), takes EXIF's `ImageDescription` over `dc:description` when they
+  disagree, and as the caption when it is alone, even blank. So the file agrees
+  with Photos' caption only when both, those it has (a blank `ImageDescription`
+  too), are that caption. Each is set on its own: the XMP's when it isn't
+  Photos' (an `ImageDescription` that is stands in for a missing one), and an
+  `ImageDescription` the file has when it isn't, to Photos' caption, or removed
+  (`exif_set_description`: the value at the end of the data and the entry
+  patched in place; a removal rewrites IFD0 and zeroes the old entry's value
+  and the old table, the bytes another entry shares excepted). An EXIF whose
+  IFD0 can be read but not rewritten (truncated) keeps its caption, and the log
+  says so, as Photos shows that one. An `ImageDescription` stored as BYTE or
+  UNDEFINED (some writers' UTF-8) counts as ImageIO reads it. None is added.
+- **Favorite:** no field in a file holds one (Photos doesn't take `xmp:Rating`
+  5 as one; checked on macOS 26).
+
+The log says what was written, as
+`location from Photos: 40.758442, -73.829767 (the file had another)`,
+`location removed: Photos has none`, `title from Photos (the file had none)`,
+`caption removed: Photos has none`; `! location not understood (...)` leaves
+the file's. `test_photos_meta.py` checks all of it on every build, as JPEG XL
+and HEIC.
+
+After the import, the Mac's selection route compares each copy with its
+original in Photos (`import.applescript`: `properties of` each, one event
+apiece; the date too, as since 0.7.0) and sets what differs: the location
+(`{missing value, missing value}` removes one), title (`""` clears it),
+caption, keywords; and it makes the copy a favorite when the original is one.
+Each field is set in a `try` of its own: one Photos won't set is a `!` line
+naming the copy and the field, and the next is still tried. The log counts what
+was set per field, and the "Photos took ..." line has the time. Compress
+Videos' copies get this too (nothing is written into a video's file, so there
+every field Photos has is set this way).
+
+On the iPhone, a saved copy is made a favorite when its original is one
+(`wf.copy_favorite`): Get Details of Images ▸ Is Favorite, an If on it
+(`wfkit.if_true`: the condition "is", code 4, with `WFConditionalActionBoolean`
+on), and Photos' Favorite Photos (`wfkit.favorite_photos`: the App Intent
+`FavoriteAssetsIntent`, stored as
+`com.apple.mobileslideshow.FavoriteAssetsIntent` with its app's descriptor and
+the photos as `assets`; the format from a shortcut built on the iPhone, iOS
+26). From the share sheet, JXL-Import saves the copies without the originals,
+so Compress Photos marks each favorite with `jxl_favorite_<i>.txt` in a-Shell.
+The Mac's picker route doesn't set it yet: the same intent may be stored under
+Photos' Mac bundle identifier there.
+
+### 1.6. HEIC output
 
 `photobatch --heic [--rf RF]` (0.7.0) writes HEIC instead of JPEG XL
 (`src/heicout.c`, `heifbox.c`, `hevcenc.c`). The point of the route: Photos
@@ -688,16 +854,23 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   XMP, plus the `altr` group. Dropped: Apple's Photographic Styles data (the
   linear style-delta image, three mattes, the linear thumbnail, the styles
   metadata; about 0.3 MB of a 2.7 MB photo) and any other auxiliary image. A
-  date from Photos replaces the data of the picture's Exif item (the 4-byte
-  offset header put back) or, when the file has none, adds one (`hb_rewrite_t`
-  `add_*`: a hidden `infe`, a `cdsc` reference to the picture, an `iloc` entry,
-  its data last in `mdat`), and replaces the picture's XMP item with its
-  capture dates changed (`xmp_set_dates`, as in the JPEG XL route). A single
-  `hvc1` picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N
-  gives the same size as x265 on the whole picture at CRF N (within 0.3%), and
-  for a still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers
-  run finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈
-  JPEG XL 83).
+  date or other metadata from Photos replaces the data of the picture's Exif
+  item (the 4-byte offset header put back) or, when the file has none, adds one
+  (`hb_rewrite_t` `add`: a hidden `infe`, a `cdsc` reference to the picture, an
+  `iloc` entry, its data last in `mdat`), and likewise the picture's XMP item
+  (added as a `mime` item, `application/rdf+xml`), as in the JPEG XL route.
+  Replaced data always goes to `mdat`; when an item kept in `idat`
+  (construction method 1, where some writers put the Exif) is replaced or
+  dropped, `idat` is written anew with only the kept items' data, each in one
+  piece (their `iloc` offsets moved), so that no old Exif (a hidden location's
+  GPS) stays in the file (a kept item there that can't be read, in a malformed
+  file, keeps `idat`'s layout instead, with the replaced and dropped items'
+  bytes zeroed in place); otherwise it stays byte for byte. A single `hvc1`
+  picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N gives
+  the same size as x265 on the whole picture at CRF N (within 0.3%), and for a
+  still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers run
+  finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈ JPEG
+  XL 83).
 - **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
   HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
   several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full
@@ -850,24 +1023,27 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
 2. **Get Text from Input**: File.
 3. **Split Text**: Text, by New Lines.
 4. **Repeat with Each** item in Split Text:
-   1. **Split Text**: Repeat Item, by Custom `|`.
-   2. **Get Item from List**: First Item of Split Text.
-   3. **Get Item from List**: Last Item of Split Text (the one from step 4.1).
-   4. a-Shell **Get File**: the First Item, Error If Not Found on.
-   5. **Set Name**: File to Last Item, with Don't Include File Extension on.
-   6. **Save to Photo Album**: Renamed Item, to Recents.
-   7. **Get Item from List**: Item At Index 2 of the `|` split (the photo's
-      position).
-   8. a-Shell **Get File**: `jxl_albums_<Item from List>.txt`, Error If Not
-      Found **off**.
-   9. **If** File has any value:
-      1. **Get Text from Input**: File, then **Split Text** by New Lines.
-      2. **Repeat with Each** item in Split Text: **Save to Photo Album**:
-         Saved Photo Media, to Repeat Item 2.
-      3. **End If** (Otherwise stays empty).
+   01. **Split Text**: Repeat Item, by Custom `|`.
+   02. **Get Item from List**: First Item of Split Text.
+   03. **Get Item from List**: Last Item of Split Text (the one from step 4.1).
+   04. a-Shell **Get File**: the First Item, Error If Not Found on.
+   05. **Set Name**: File to Last Item, with Don't Include File Extension on.
+   06. **Save to Photo Album**: Renamed Item, to Recents.
+   07. **Get Item from List**: Item At Index 2 of the `|` split (the photo's
+       position).
+   08. a-Shell **Get File**: `jxl_albums_<Item from List>.txt`, Error If Not
+       Found **off**.
+   09. **If** File has any value:
+       1. **Get Text from Input**: File, then **Split Text** by New Lines.
+       2. **Repeat with Each** item in Split Text: **Save to Photo Album**:
+          Saved Photo Media, to Repeat Item 2.
+       3. **End If** (Otherwise stays empty).
+   10. a-Shell **Get File**: `jxl_favorite_<Item from List>.txt`, Error If Not
+       Found **off**. **If** File has any value: Photos' **Favorite Photos**:
+       Saved Photo Media. **End If**.
 5. **Count**: Items in the Split Text from step 3.
 6. a-Shell **Execute Command**:
-   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started`,
+   `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_favorite_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started`,
    Keep Going on.
 7. **Show Notification**: `Saved <Count> photo(s) to Photos.`
 
@@ -933,23 +1109,32 @@ no input: Continue):
    6. **Match Text**: `\d+` in Name. Its Matches is the quality.
 
 4. a-Shell **Execute Command**:
-   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started`, Keep
-   Going on.
+   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started`,
+   Keep Going on.
 
 5. **Repeat with Each** item in `Stills`:
 
-   1. **Get Name** of Repeat Item.
-   2. **Set Name**: Repeat Item to `jxl_in_<Repeat Index>.orig`, Don't Include
-      File Extension on.
-   3. a-Shell **Put File**: Renamed Item, Overwrite on.
-   4. **Text**: `<Repeat Index>|<Name>`.
-   5. **Add to Variable**: Text to `Jobs`.
-   6. **Get Details of Images**: Date Taken of Repeat Item.
-   7. **Match Text**: `.` in Date Taken, Case Sensitive on.
-   8. **If** Matches has any value: **Format Date**: Date Taken, Date Format
-      ISO 8601, Include ISO 8601 Time on; **Text**:
-      `<Repeat Index>|<Formatted Date>`; **Add to Variable**: Text to `Dates`.
-      **End If**.
+   01. **Get Details of Images**: Location of Repeat Item (before anything
+       reads the photo's file: Location is then the file's GPS).
+   02. **If** Location has any value: **Get Details of Locations**: Latitude of
+       Location; **Get Details of Locations**: Longitude of Location; **Text**:
+       `<Repeat Index>|gps|<Latitude>,<Longitude>`; **Add to Variable**: Text
+       to `Meta`. **Otherwise**: **Get Details of Images**: Is Favorite of
+       Repeat Item; **Match Text**: `.` in Is Favorite, Case Sensitive on;
+       **If** Matches has any value: **Text**: `<Repeat Index>|gps|`; **Add to
+       Variable**: Text to `Meta`. **End If**. **End If**.
+   03. **Get Name** of Repeat Item.
+   04. **Set Name**: Repeat Item to `jxl_in_<Repeat Index>.orig`, Don't Include
+       File Extension on.
+   05. a-Shell **Put File**: Renamed Item, Overwrite on.
+   06. **Text**: `<Repeat Index>|<Name>`.
+   07. **Add to Variable**: Text to `Jobs`.
+   08. **Get Details of Images**: Date Taken of Repeat Item.
+   09. **Match Text**: `.` in Date Taken, Case Sensitive on.
+   10. **If** Matches has any value: **Format Date**: Date Taken, Date Format
+       ISO 8601, Include ISO 8601 Time on; **Text**:
+       `<Repeat Index>|<Formatted Date>`; **Add to Variable**: Text to `Dates`.
+       **End If**.
 
 6. **Combine Text**: `Jobs` with New Lines.
 
@@ -959,7 +1144,7 @@ no input: Continue):
 8. a-Shell **Put File**: Renamed Item, Overwrite on. Then **If** `Dates` has
    any value: **Combine Text** `Dates` with New Lines, **Set Name** to
    `jxl_dates.txt` (Don't Include File Extension on), a-Shell **Put File**
-   (Overwrite on). **End If**.
+   (Overwrite on). **End If**. The same for `Meta` and `jxl_meta.txt`.
 
 9. **If** Shortcut Input has any value:
 
@@ -968,6 +1153,10 @@ no input: Continue):
       2. **If** Album has any value: **Combine Text** Album with New Lines,
          **Set Name** to `jxl_albums_<Repeat Index>.txt` (Don't Include File
          Extension on), a-Shell **Put File** (Overwrite on). **End If**.
+      3. **Get Details of Images**: Is Favorite of Repeat Item. **If** Is
+         Favorite is true: **Text** `favorite`, **Set Name** to
+         `jxl_favorite_<Repeat Index>.txt` (Don't Include File Extension on),
+         a-Shell **Put File** (Overwrite on). **End If**.
    2. a-Shell **Execute Command**, Keep Going off, with these commands:
       - `sleep 2`
       - `cd ~shortcuts`
@@ -981,13 +1170,16 @@ no input: Continue):
      1. The same **Execute Command**, but with `open shortcuts://` as the last
         command.
      2. **Wait to Return**.
-     3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.9
+     3. Steps 1–5 of JXL-Import, but inside the repeat, replace steps 4.8–4.10
         with:
         1. **Get Item from List**: that item of `Stills` (the original).
         2. **Get Details of Images**: Album of that original.
         3. **Repeat with Each** item in Album: **Save to Photo Album**: Saved
            Photo Media, to Repeat Item 2.
-        4. **Match Text** `(^|\n)Compressed originals($|\n)` in that Album
+        4. **Get Details of Images**: Is Favorite of the original. **If** Is
+           Favorite is true: Photos' **Favorite Photos**: Saved Photo Media.
+           **End If**.
+        5. **Match Text** `(^|\n)Compressed originals($|\n)` in that Album
            list. **If** Matches has any value: nothing. **Otherwise**: **Save
            to Photo Album**: the original, to a **Text**
            `Compressed originals`; **Add to Variable** `Collected` (the

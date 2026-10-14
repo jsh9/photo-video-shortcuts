@@ -51,6 +51,7 @@ from wf import (  # noqa: E402
     copy_to_albums,
     keep_still_photos,
     photo_date,
+    photo_location,
     variable,
     workflow,
 )
@@ -147,7 +148,8 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # (Combine Text), Skipped Echo (an echo of what the shortcut skipped; empty
 # when nothing was, which leaves ">> $LOG" alone, a command that only touches
 # the log), and the picker route's Dates ("index|date" lines, wf.photo_date; a
-# list in a text field is one item per line).
+# list in a text field is one item per line) and Meta ("index|gps|lat,lon"
+# lines, wf.photo_location).
 SLOTS = {
     '@FORMAT@': 'Format',
     '@QUALITY@': 'Quality',
@@ -156,6 +158,7 @@ SLOTS = {
     '@LINES@': 'Combined Text',
     '@SKIPPED@': 'Skipped Echo',
     '@DATES@': 'Dates',
+    '@META@': 'Meta',
 }
 
 
@@ -275,6 +278,7 @@ def script(name, body, label, work, fmt, quality, cores, hdr, lines):
         '@LINES@': lines,
         '@SKIPPED@': variable('Skipped Echo'),
         '@DATES@': variable('Dates'),
+        '@META@': variable('Meta'),
     }
     parts = []
     for piece in re.split(
@@ -462,8 +466,11 @@ def picker_route(b):
 
     # The photos' names, one per line in job order: Shortcuts names the files
     # it passes to the script, and the JPEG XL copies keep the photos' names.
-    # And their dates in Photos (wf.photo_date), for jxl_dates.txt.
+    # And their dates and locations in Photos (wf.photo_date,
+    # wf.photo_location), for jxl_dates.txt and jxl_meta.txt; the location is
+    # read first, before anything fetches the file.
     def per_photo():
+        photo_location(b, REPEAT_ITEM, REPEAT_INDEX)
         b.append_variable('Names', b.text(b.get_name(REPEAT_ITEM)))
         photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
 

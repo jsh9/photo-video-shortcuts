@@ -348,6 +348,31 @@ def test_date_from_photos_becomes_an_exif_item_when_the_file_has_none(
     assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
 
 
+def test_photos_metadata_adds_an_exif_and_an_xmp_item(
+        encoder, tmp_path, imageio
+):
+    # A file with neither gets both, each describing the picture (jxl_meta.txt:
+    # the location into the Exif item, the title into the XMP item); the gain
+    # map stays.
+    photo = without_exif_item(SINGLE, tmp_path / 'src')
+    assert not any(typ in {'Exif', 'mime'} for typ, _ in items(photo).values())
+    log, done = ph.convert(
+        encoder,
+        tmp_path,
+        [photo],
+        ['--heic'],
+        meta=['1|gps|48.8584,2.2945', '1|title|Tour'],
+    )
+    assert 'HDR kept' in log
+    out = done[1]
+    types = [typ for typ, _ in items(out).values()]
+    assert types.count('Exif') == 1 and types.count('mime') == 1
+    assert ph.xmp_properties(out)['XMP-dc:Title'] == 'Tour'
+    props = imageio(out)[str(out)]
+    assert props['lat'].endswith('N') and props['title'] == 'Tour'
+    assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
+
+
 def test_date_from_photos_lands_in_the_xmp_too(encoder, tmp_path):
     # The picture's XMP capture dates get the date, as in the JPEG XL route.
     photo = with_xmp_date(OLDER, tmp_path / 'src')
@@ -489,13 +514,17 @@ class Meta:
         return copy
 
 
-def with_exif_in_idat(path, folder):
+def with_exif_in_idat(path, folder, tiff=None):
     """
     A copy of the HEIC whose Exif item's data is in 'idat' (construction method
-    1, where some writers keep small items) instead of 'mdat'.
+    1, where some writers keep small items) instead of 'mdat'; with ``tiff``
+    (EXIF, TIFF data) as that data instead of the item's own.
     """
     before = items(path)
     (exif_id,) = [i for i, (t, _) in before.items() if t == 'Exif']
+    if tiff is not None:
+        before[exif_id] = ('Exif', b'\0\0\0\0' + tiff)
+
     m = Meta(path)
     for entry in m.entries:
         if entry[0] == exif_id:
@@ -579,6 +608,43 @@ def test_date_lands_in_an_exif_item_stored_in_idat(encoder, tmp_path):
     assert tags['ExifIFD:OffsetTimeOriginal'] == '-05:00'
     assert set(items(out)) == set(items(SINGLE))
     assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(SINGLE)
+
+
+@pytest.mark.parametrize('fixture', [SINGLE, GRID])
+@pytest.mark.parametrize('location', ['', '48.8584,2.2945'])
+def test_location_in_an_exif_item_in_idat_leaves_no_trace(
+        encoder, tmp_path, imageio, fixture, location
+):
+    # An Exif item in 'idat' whose location Photos hid (none) or changed: its
+    # new data goes to 'mdat', and the old, GPS and all, must not stay in
+    # 'idat'. The other items there (the gain map's 'tmap', the 'grid') stay
+    # as they were.
+    tiff = ph.tiff(ph.TIFF_IFD0, ph.TIFF_EXIF, ph.OLD_GPS)
+    photo = with_exif_in_idat(fixture, tmp_path / 'src', tiff)
+    assert [b for b in ph.OLD_BYTES if b in photo.read_bytes()]
+    _, done = ph.convert(
+        encoder, tmp_path, [photo], ['--heic'], meta=[f'1|gps|{location}']
+    )
+    out = done[1]
+    assert not [b for b in ph.OLD_BYTES if b in out.read_bytes()]
+    gps = ph.gps_of(out)
+    if location:
+        assert gps['GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
+    else:
+        assert gps == {}
+
+    assert ph.exif_tags(out)['IFD0:Make'] == 'TestMake'
+    before, after = items(photo), items(out)
+    assert set(after) == set(before)
+    for iid, (typ, data) in before.items():
+        if typ in ('grid', 'tmap'):
+            assert after[iid] == (typ, data), typ
+
+    assert ph.iso_gain_map_headroom(out) == ph.iso_gain_map_headroom(fixture)
+    assert (
+        imageio(out)[str(out)]['upright']
+        == imageio(fixture)[str(fixture)]['upright']
+    )
 
 
 def test_transparent_image_is_refused_for_heic(encoder, tmp_path):
@@ -809,3 +875,34 @@ def test_macos_build_matches_wasm(wasm, macos, tmp_path):
     a, _, _ = convert(wasm, tmp_path / 'wasm', GRID, '--rf', '26')
     b, _, _ = convert(macos, tmp_path / 'macos', GRID, '--rf', '26')
     assert a.read_bytes() == b.read_bytes()
+
+
+@pytest.mark.parametrize('location', ['', '48.8584,2.2945'])
+def test_an_unreadable_item_in_idat_still_loses_the_old_location(
+        encoder, tmp_path, location
+):
+    # The Exif item is in 'idat' with another item whose extent runs past the
+    # end of 'idat' (a malformed file): 'idat' can't be written anew, so it
+    # keeps its layout, but the old Exif's bytes in it are zeroed all the
+    # same, and the file is still written.
+    tiff = ph.tiff(ph.TIFF_IFD0, ph.TIFF_EXIF, ph.OLD_GPS)
+    photo = with_exif_in_idat(SINGLE, tmp_path / 'src', tiff)
+    m = Meta(photo)
+    (exif_id,) = [i for i, (t, _) in items(photo).items() if t == 'Exif']
+    broken = [e for e in m.entries if e[1] == 1 and e[0] != exif_id]
+    assert broken, 'the fixture needs another item in idat'
+    off, ln = broken[0][3][0]
+    broken[0][3] = [(off, ln + 1000000)]
+    photo = m.write(tmp_path / 'src' / 'broken.heic')
+    _, done = ph.convert(
+        encoder, tmp_path, [photo], ['--heic'], meta=[f'1|gps|{location}']
+    )
+    out = done[1]
+    assert not [b for b in ph.OLD_BYTES if b in out.read_bytes()]
+    gps = ph.gps_of(out)
+    if location:
+        assert gps['GPSLatitude'] == pytest.approx(48.8584, abs=1e-7)
+    else:
+        assert gps == {}
+
+    assert ph.exif_tags(out)['IFD0:Make'] == 'TestMake'

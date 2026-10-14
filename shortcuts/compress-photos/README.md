@@ -36,6 +36,7 @@ ______________________________________________________________________
 - [3. What is and isn't kept](#3-what-is-and-isnt-kept)
   - [3.1. HDR photos](#31-hdr-photos)
   - [3.2. Dates](#32-dates)
+  - [3.3. Location](#33-location)
 - [4. Troubleshooting](#4-troubleshooting)
 
 ______________________________________________________________________
@@ -76,8 +77,10 @@ pace (nothing is added to it any more).
     - Deleted photos go to Recently Deleted for 30 days. Deleting also removes
       what the JXL doesn't have: depth/Portrait data, the SDR version of an HDR
       photo (see [HDR photos](#31-hdr-photos)), edit history, and Photos-only
-      information (favorites, captions, people). Albums are kept, because the
-      JXL is added to them. Live Photos are never converted, so they are never
+      information (titles, captions, keywords, people). Albums are kept,
+      because the JXL is added to them, and so are the location (see
+      [Location](#33-location)) and a favorite: a copy of a favorite is a
+      favorite too. Live Photos are never converted, so they are never
       collected.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
@@ -122,10 +125,14 @@ pace (nothing is added to it any more).
   one photo, not a copy per album.
   - From the share sheet, the albums are passed to JXL-Import by name. If two
     of your albums have the same name, the JXL may land in only one of them.
-  - This is meant for your own albums. Shared albums and built-in ones such as
-    Favorites aren't handled.
+  - This is meant for your own albums. Shared albums and other built-in ones
+    aren't handled (Favorites follows the favorite: a copy of a favorite is a
+    favorite too).
 - When sharing from Photos, keep **Location** on under **Options**. Otherwise
   iOS removes GPS before the shortcut sees the photo.
+- The copies get the location Photos shows for their originals, also one you
+  changed in Photos; a location you hid is left out (see
+  [Location](#33-location)).
 
 ### 2.1. Quality presets
 
@@ -190,6 +197,9 @@ Kept:
   notes;
 - the date Photos shows, also one you changed in Photos (see
   [Dates](#32-dates));
+- the location Photos shows, also one you changed or hid in Photos (see
+  [Location](#33-location));
+- a favorite: the copy of a favorite is a favorite too;
 - XMP;
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
@@ -212,6 +222,15 @@ Not kept:
   the photo picker alike, so the JXL has neither the original nor the edit. If
   you want both, convert the photo before editing it, and edit the JXL (or keep
   the HEIC).
+- **A title or keywords set in Photos.** Shortcuts on the iPhone can't read
+  them (nor can any app through Apple's photo library interface), so the copy
+  has only those the original file itself holds, if any; Photos' own are lost
+  when you delete the original. A caption is kept from the share sheet: Photos
+  writes it into the file it shares. To keep titles and keywords, compress
+  those photos on the Mac from the Photos selection, which writes them into the
+  copy (see
+  [Compress Photos on the Mac](README-mac.md#4-what-is-and-isnt-kept)); with
+  iCloud Photos the copy then appears on the iPhone too.
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't
   normally have any.
 - **RAW/ProRAW (DNG) and other formats** aren't converted; only HEIF, JPEG and
@@ -359,6 +378,28 @@ time zone (iPhones before iOS 13, most cameras) but whose time is that moment
 somewhere keeps its time and gets that zone instead
 (`time zone from Photos: ...`). This needs the shortcuts and `photobatch.wasm`
 from version 0.7.0.
+
+### 3.3. Location
+
+Each copy gets the location Photos shows for its original, in the file itself
+(its GPS, which other apps read too):
+
+- **A location you changed or added in Photos** (in the photo's info) is kept.
+  Photos keeps such a change in its library, not in the original file, so a
+  plain copy of the file would have the camera's location again.
+- **A location you hid** (Hide Location) is left out: the copy has no GPS, as
+  Photos shows the original, and none of the original's position is left in the
+  file.
+- A photo whose GPS already is that place keeps it as it is, with its altitude
+  and direction. A changed location replaces them all.
+
+When a location is written or removed, a-Shell's output says so, for example
+`location from Photos: 40.758442, -73.829767 (the file had another)` or
+`location removed: Photos has none`. A copy of a favorite is a favorite too.
+Shortcuts doesn't give a photo's title or keywords on the iPhone, so the copies
+keep the file's own (Photos-only ones are lost with the original). A caption
+set in Photos is kept from the share sheet, as Photos writes it into the file
+it shares. This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
 
 ## 4. Troubleshooting
 

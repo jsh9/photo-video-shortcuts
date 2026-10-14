@@ -54,6 +54,8 @@ from wf import (  # noqa: E402
     keep_still_photos,
     output_of,
     photo_date,
+    photo_location,
+    copy_favorite,
     plain_or_text,
     text,
     variable,
@@ -231,7 +233,9 @@ def save_results(b, originals=None, album=None):
     means the JPEG XL lacks the original's HDR, which a-Shell's output says
     too; it doesn't change what happens here. Without ``originals``, the albums
     are read from jxl_albums_<index>.txt, one album name per line, if that file
-    exists. Returns the number of photos saved.
+    exists. A copy is made a favorite when its original is one: with
+    ``originals``, by asking the original (copy_favorite); without, when
+    jxl_favorite_<index>.txt exists. Returns the number of photos saved.
     """
     lines = b.split(b.text_from_input(b.ashell_get_file('jxl_done.txt')), '\n')
 
@@ -251,7 +255,9 @@ def save_results(b, originals=None, album=None):
             original = b.item_at_index(originals, index)
             albums = b.photo_albums(original)
             add_to_albums(albums)
-            collect_in_album(b, original, album, albums)
+            favorite = b.photo_details(original, 'Is Favorite')
+            copy_favorite(b, favorite, saved)
+            collect_in_album(b, original, album, albums, favorite)
         else:
             albums_file = b.ashell_get_file(
                 'jxl_albums_', index, '.txt', error_if_missing=False
@@ -263,6 +269,13 @@ def save_results(b, originals=None, album=None):
                 ),
                 lambda: None,
             )
+            b.if_has_value(
+                b.ashell_get_file(
+                    'jxl_favorite_', index, '.txt', error_if_missing=False
+                ),
+                lambda: b.favorite_photos(saved),
+                lambda: None,
+            )
 
     b.repeat_each(lines, per_file)
     # Not the Repeat Results: a photo in no album adds nothing to those. A
@@ -270,7 +283,7 @@ def save_results(b, originals=None, album=None):
     return b.count(lines)
 
 
-CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_job.txt jxl_dates.txt jxl_done.txt jxl_started'
+CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_favorite_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started'
 
 
 def build_compress(sample):
@@ -296,19 +309,22 @@ def build_compress(sample):
     # in Stills are the job indices, also when saving the results.
     photos = keep_still_photos(b, variable('Photos'))
     args = choose_args(b)
-    # A stale album or dates file from an unfinished run would put a photo
-    # into the wrong albums or give it a wrong date; jxl_in_* files are
-    # overwritten anyway.
+    # A stale album, dates or metadata file from an unfinished run would put a
+    # photo into the wrong albums or give it a wrong date or location;
+    # jxl_in_* files are overwritten anyway.
     b.ashell_execute(
-        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_dates.txt jxl_started',
+        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started',
         keep_going=True,
         open_app='close',
     )
 
     # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step. Each photo's date in
-    # Photos goes too (jxl_dates.txt; see wf.photo_date).
+    # PNG itself, so there is no Convert Image step. Each photo's date and
+    # location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
+    # wf.photo_date, wf.photo_location), the location read before Put File
+    # fetches the file.
     def per_photo():
+        photo_location(b, REPEAT_ITEM, REPEAT_INDEX)
         name = b.get_name(REPEAT_ITEM)
         b.ashell_put_file(
             b.set_name(REPEAT_ITEM, 'jxl_in_', REPEAT_INDEX, '.orig')
@@ -320,18 +336,23 @@ def build_compress(sample):
     b.ashell_put_file(
         b.set_name(b.combine(variable('Jobs'), '\n'), 'jxl_job.txt')
     )
-    b.if_has_value(
-        variable('Dates'),
-        lambda: b.ashell_put_file(
-            b.set_name(b.combine(variable('Dates'), '\n'), 'jxl_dates.txt')
-        ),
-        lambda: None,
-    )
+    for var, file_name in (
+        ('Dates', 'jxl_dates.txt'),
+        ('Meta', 'jxl_meta.txt'),
+    ):
+        b.if_has_value(
+            variable(var),
+            lambda var=var, file_name=file_name: b.ashell_put_file(
+                b.set_name(b.combine(variable(var), '\n'), file_name)
+            ),
+            lambda: None,
+        )
 
     def from_share_sheet():
         # A share-sheet shortcut can't resume after a-Shell: JXL-Import saves,
         # and it no longer has the originals. So their album names go to
-        # a-Shell too, as jxl_albums_<i>.txt (same order as jxl_in_<i>.orig).
+        # a-Shell too, as jxl_albums_<i>.txt (same order as jxl_in_<i>.orig),
+        # and jxl_favorite_<i>.txt marks a favorite (see save_results).
         def write_albums():
             albums = b.photo_albums(REPEAT_ITEM)
             b.if_has_value(
@@ -340,6 +361,18 @@ def build_compress(sample):
                     b.set_name(
                         b.combine(albums, '\n'),
                         'jxl_albums_',
+                        REPEAT_INDEX,
+                        '.txt',
+                    )
+                ),
+                lambda: None,
+            )
+            b.if_true(
+                b.photo_details(REPEAT_ITEM, 'Is Favorite'),
+                lambda: b.ashell_put_file(
+                    b.set_name(
+                        b.text('favorite'),
+                        'jxl_favorite_',
                         REPEAT_INDEX,
                         '.txt',
                     )

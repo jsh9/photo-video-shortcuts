@@ -148,7 +148,9 @@ iPhone's need a-Shell, these need Run Shell Script.
   says how many were saved.
 - Each JPEG XL copy is saved to Photos with its original's name, into every
   album its original is in (one photo, not a copy per album). Shared albums and
-  built-in ones such as Favorites aren't handled.
+  other built-in ones aren't handled (Favorites follows the favorite, which the
+  copy gets from Photos' selection; see
+  [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - After the format and quality come **Cores to use** and **HDR**: *Keep HDR*
   keeps an HDR photo's HDR, as the camera's gain map in a HEIC or as an HDR
   JPEG XL (see [HDR photos](README.md#31-hdr-photos)); *Drop HDR* saves every
@@ -184,9 +186,10 @@ iPhone's need a-Shell, these need Run Shell Script.
   the shortcut's hidden work folder in Pictures, which the next run empties:
   don't use the selection path with that setting, or move the copies out of the
   folder before the next run. Deleted photos go to Recently Deleted for 30
-  days. Deleting also removes what the JPEG XL doesn't have: depth data, the
-  SDR version of an HDR photo, edit history and Photos-only information
-  (favorites, captions, people).
+  days. Deleting also removes what the copy doesn't have: depth data, the SDR
+  version of an HDR photo, edit history and people. A copy has its original's
+  location, title, caption and keywords, and is a favorite if its original is
+  (see [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - Photos may list the copies under Duplicates. Merging keeps only one file, so
   check which one before you merge.
 - With iCloud Photos and *Optimize Mac Storage*, Shortcuts downloads each
@@ -218,6 +221,18 @@ Photos and in its EXIF, also a date you changed in Photos (Image ▸ Adjust Date
 and Time) and for a photo without a capture date of its own; from Photos (the
 selection), a copy that Photos dated differently on import is given its
 original's date. The Finder shortcut's files keep their own dates.
+
+Each copy also gets the location Photos shows for its original, in its GPS: a
+location you changed in Photos (Image ▸ Location) is kept, and one you hid
+(Hide Location) is left out (see [Location](README.md#33-location)). From
+Photos (the selection), the copy also gets its original's title, caption and
+keywords, written into the file (its XMP, which other apps read too; a caption
+also into an EXIF description the file has), and a copy whose original is a
+favorite is a favorite too. After the import, the shortcut checks each copy in
+Photos and gives it whatever Photos read differently; the log says when. From
+the picker, a copy gets the location only, as on the iPhone (Shortcuts doesn't
+give the rest), and isn't a favorite yet. People (named faces) aren't copied:
+Photos finds the faces again and may recognize them.
 
 ## 5. Updating
 

@@ -261,6 +261,109 @@ def stage(folder, photos):
     return staged
 
 
+# EXIF (TIFF data) written by hand, so that a test knows where every value is,
+# such as an iPhone's GPS IFD whose bytes must not survive its removal.
+
+
+def ascii_value(text):
+    return (2, len(text.encode()) + 1, text.encode() + b'\0')
+
+
+def rationals(*pairs, little_endian=False):
+    order = '<' if little_endian else '>'
+    return (
+        5,
+        len(pairs),
+        b''.join(struct.pack(order + 'II', *p) for p in pairs),
+    )
+
+
+def tiff(ifd0, exif=None, gps=None, little_endian=False):
+    """
+    EXIF (TIFF) data, big-endian unless ``little_endian``: IFD0 with ``ifd0``'s
+    entries, and an Exif and a GPS IFD with theirs if given, each {tag: (type,
+    count, value)}. A value longer than 4 bytes follows its IFD. A value may
+    instead be ('shares', ifd, tag, offset): the entry then points into that
+    entry's value, ``offset`` bytes in (TIFF allows sharing). Written by hand,
+    so that the test knows where every value is.
+    """
+    order = '<' if little_endian else '>'
+    ifds = [('ifd0', dict(ifd0))]
+    for name, tag, entries in (('exif', 0x8769, exif), ('gps', 0x8825, gps)):
+        if entries is not None:
+            ifds.append((name, entries))
+            ifds[0][1][tag] = (4, 1, name)
+
+    # Where each IFD and each value longer than 4 bytes goes.
+    offsets, where, at = {}, {}, 8
+    for name, entries in ifds:
+        offsets[name] = at
+        at += 2 + 12 * len(entries) + 4
+        for tag in sorted(entries):
+            value = entries[tag][2]
+            if isinstance(value, bytes) and len(value) > 4:
+                where[name, tag] = at
+                at += len(value) + len(value) % 2
+
+    header = b'II\x2a\x00' if little_endian else b'MM\x00\x2a'
+    out = bytearray(header + struct.pack(order + 'I', 8))
+    for name, entries in ifds:
+        table, values = struct.pack(order + 'H', len(entries)), b''
+        for tag in sorted(entries):
+            kind, count, value = entries[tag]
+            if isinstance(value, str):  # a pointer to that IFD
+                value = struct.pack(order + 'I', offsets[value])
+
+            if isinstance(value, tuple):  # ('shares', ifd, tag, offset)
+                _, other, other_tag, offset = value
+                table += struct.pack(
+                    order + 'HHII',
+                    tag,
+                    kind,
+                    count,
+                    where[other, other_tag] + offset,
+                )
+            elif len(value) <= 4:
+                table += struct.pack(
+                    order + 'HHI', tag, kind, count
+                ) + value.ljust(4, b'\0')
+            else:
+                table += struct.pack(
+                    order + 'HHII', tag, kind, count, where[name, tag]
+                )
+                values += value + b'\0' * (len(value) % 2)
+
+        out += table + struct.pack(order + 'I', 0) + values
+
+    return bytes(out)
+
+
+# An iPhone's GPS IFD (40°42'52.70" N, 73°59'53.71" W, 16.12 m, its
+# direction, speed and positioning error): values whose bytes can be looked for.
+OLD_GPS = {
+    0x0001: ascii_value('N'),
+    0x0002: rationals((40, 1), (42, 1), (5270, 100)),
+    0x0003: ascii_value('W'),
+    0x0004: rationals((73, 1), (59, 1), (5371, 100)),
+    0x0005: (1, 1, b'\0'),
+    0x0006: rationals((1612147834, 100000000)),
+    0x000C: ascii_value('K'),
+    0x000D: rationals((304941505, 1000000000)),
+    0x0011: rationals((1979783019, 10000000)),
+    0x001F: rationals((3345064213, 100000000)),
+}
+OLD_LAT = 40 + 42 / 60 + 52.70 / 3600
+OLD_LON = -(73 + 59 / 60 + 53.71 / 3600)
+OLD_BYTES = [
+    struct.pack('>II', 5270, 100),
+    struct.pack('>II', 5371, 100),
+    struct.pack('>II', 1612147834, 100000000),
+    struct.pack('>II', 1979783019, 10000000),
+]
+TIFF_IFD0 = {0x010F: ascii_value('TestMake')}
+TIFF_EXIF = {0x9003: ascii_value('2024:05:06 07:08:09')}
+
+
 def done_lines(folder):
     """jxl_done.txt's lines, split at "|"; [] if there is none."""
     done = folder / 'jxl_done.txt'
@@ -276,6 +379,27 @@ def read_done(folder):
         int(parts[1]): (folder / parts[0], parts[-1])
         for parts in done_lines(folder)
     }
+
+
+def convert(encoder, folder, photos, args, dates=None, meta=None):
+    """
+    Converts photos (a list) the way the shortcuts do: staged (stage), with
+    jxl_dates.txt from ``dates`` ({index: date}) and jxl_meta.txt from ``meta``
+    (its lines) when given, by ``photobatch <args> jxl_job.txt``. Returns
+    (photobatch's output, {index: output file}).
+    """
+    stage(folder, photos)
+    if dates is not None:
+        (folder / 'jxl_dates.txt').write_text(
+            '\n'.join(f'{i}|{d}' for i, d in dates.items())
+        )
+
+    if meta is not None:
+        (folder / 'jxl_meta.txt').write_text('\n'.join(meta))
+
+    result = encoder.run([*args, 'jxl_job.txt'], folder)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout, {i: out for i, (out, _) in read_done(folder).items()}
 
 
 def kept_originals(folder):
@@ -297,6 +421,40 @@ def exif_tags(path):
     tags = json.loads(out)[0]
     tags.pop('SourceFile', None)
     return tags
+
+
+def gps_of(path):
+    """The GPS IFD's tags (exiftool, numbers as numbers): {name: value}."""
+    return {
+        k.split(':')[1]: v
+        for k, v in exif_tags(path).items()
+        if k.startswith('GPS:')
+    }
+
+
+def validate(path):
+    """exiftool -validate finds nothing to warn about in the file."""
+    out = run(
+        ['exiftool', '-validate', '-warning', '-a', '-s', '-s', '-s', path],
+        check=True,
+    ).stdout
+    assert out.splitlines()[0] == 'OK', out
+
+
+def box(path, kind):
+    """A JPEG XL's box of this kind ('Exif', 'xml '), as bytes; b'' if none."""
+    data = path.read_bytes()
+    return next(
+        (data[start:end] for k, start, end in _boxes(data) if k == kind), b''
+    )
+
+
+def exif_box(path):
+    return box(path, 'Exif')
+
+
+def xml_box(path):
+    return box(path, 'xml ')
 
 
 def xmp_tags(path):
@@ -422,6 +580,84 @@ def check_photo_dates(actions):
         )
         assert ident(append) == 'is.workflow.actions.appendvariable'
         assert params(append)['WFVariableName'] == 'Dates'
+        found.append(i)
+
+    return found
+
+
+def check_photo_locations(actions):
+    """
+    Checks wf.photo_location's steps in a shortcut and returns where each
+    photo's Location is read: inside a repeat, the Repeat Item's Location (Get
+    Details of Images); if it has a value, its Latitude and Longitude (Get
+    Details of Locations) in "Repeat Index|gps|lat,lon", appended to Meta;
+    otherwise, only for a library photo (Is Favorite, through Match Text),
+    "Repeat Index|gps|".
+    """
+    walked = list(walk(actions))
+    found = []
+    for i, (a, depth) in enumerate(walked):
+        p = params(a)
+        if not (
+            ident(a) == 'is.workflow.actions.properties.images'
+            and p['WFContentItemPropertyName'] == 'Location'
+        ):
+            continue
+
+        assert depth == 1
+        assert list(references(p['WFInput'])) == [
+            {'Type': 'Variable', 'VariableName': 'Repeat Item'}
+        ]
+        inside = dict(
+            (id(x), yes) for x, yes in inside_if_on(actions, p['UUID'])
+        )
+        details = {
+            params(x)['WFContentItemPropertyName']: x
+            for x in actions
+            if ident(x) == 'is.workflow.actions.properties.locations'
+            and [r.get('OutputUUID') for r in references(params(x)['WFInput'])]
+            == [p['UUID']]
+        }
+        assert set(details) == {'Latitude', 'Longitude'}
+        assert all(inside[id(x)] for x in details.values())
+        lines = [
+            (j, x)
+            for j, x in enumerate(actions)
+            if ident(x) == 'is.workflow.actions.gettext'
+            and '|gps|' in repr(params(x)['WFTextActionText'])
+        ]
+        rendered = {
+            render(
+                params(x)['WFTextActionText'],
+                {'Repeat Index': '3', 'Latitude': 'LAT', 'Longitude': 'LON'},
+            ): j
+            for j, x in lines
+        }
+        assert set(rendered) == {'3|gps|LAT,LON', '3|gps|'}
+        for line, j in rendered.items():
+            append = actions[j + 1]
+            assert ident(append) == 'is.workflow.actions.appendvariable'
+            assert params(append)['WFVariableName'] == 'Meta'
+            # the coordinates when there is a location, else the empty line
+            assert inside[id(actions[j])] == (line != '3|gps|')
+
+        favorite = [
+            x
+            for x in actions[i:]
+            if ident(x) == 'is.workflow.actions.properties.images'
+            and params(x)['WFContentItemPropertyName'] == 'Is Favorite'
+        ][0]
+        guard = next(
+            params(x)['UUID']
+            for x in actions
+            if ident(x) == 'is.workflow.actions.text.match'
+            and [r.get('OutputUUID') for r in references(params(x)['text'])]
+            == [params(favorite)['UUID']]
+        )
+        empty = actions[rendered['3|gps|']]
+        assert dict((id(x), yes) for x, yes in inside_if_on(actions, guard))[
+            id(empty)
+        ]
         found.append(i)
 
     return found

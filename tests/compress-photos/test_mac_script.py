@@ -116,6 +116,7 @@ class Mac:
             cores='all',
             hdr='keep',
             dates='',
+            meta='',
     ):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
@@ -129,6 +130,7 @@ class Mac:
                 'Skipped Echo': skipped,
                 'AppleScript Result': lines,  # the selection route's IDS
                 'Dates': dates,  # the picker route's dates in Photos
+                'Meta': meta,  # and their locations
             },
         )
 
@@ -251,6 +253,26 @@ def test_photos_dates_go_to_photobatch(mac):
     shutil.rmtree(mac.work)
     mac.batch('photos', a)
     assert not (mac.work / 'jxl_dates.txt').exists()
+
+
+def test_photos_locations_go_to_photobatch(mac):
+    # The picker route's Meta ("index|gps|...", wf.photo_location) becomes
+    # jxl_meta.txt as it is; photobatch writes the location into the copy, or
+    # removes the file's.
+    a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
+    b = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    meta = '1|gps|\n2|gps|48.8584,2.2945'
+    out = mac.batch('photos', a, b, meta=meta)
+    assert (mac.work / 'jxl_meta.txt').read_text() == meta + '\n'
+    first, second = (
+        mac.work / line.split('|')[0] for line in out.splitlines()
+    )
+    assert not ph.gps_of(first)
+    assert ph.gps_of(second)['GPSLatitude'] == pytest.approx(48.8584)
+    # none at all: no file
+    shutil.rmtree(mac.work)
+    mac.batch('photos', a)
+    assert not (mac.work / 'jxl_meta.txt').exists()
 
 
 def test_photos_follow_up_scripts_read_the_log_and_clean_up(mac):
@@ -490,6 +512,43 @@ def test_selection_gives_the_copies_their_dates_in_photos(mac):
     assert 'date from Photos: 2024:01:01 17:00:00 -05:00' in log
 
 
+def test_selection_gives_the_copies_what_else_photos_has(mac):
+    # export.applescript's "id<tab>field<tab>value" lines become jxl_meta.txt
+    # by job index, the values as they are (escaped); photobatch writes them
+    # into the copies. A line for an item not converted (a video) is dropped.
+    exported(mac, 'hdr/o1.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    (mac.selection_work / 'in' / 'clip.MOV').write_text('video')
+    mac.batch(
+        'selection',
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
+            'A3||clip.MOV\n'
+            'A1\tgps\t40.758442,-73.829767,11.73\n'
+            'A1\ttitle\tA%7Cb\n'
+            'A1\tcaption\t\n'
+            'A1\tkeywords\tx%2Cy,z\n'
+            'A2\tgps\t\n'
+            'A3\ttitle\tA video\n'
+        ),
+    )
+    assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
+        '1|gps|40.758442,-73.829767,11.73\n1|title|A%7Cb\n1|caption|\n'
+        '1|keywords|x%2Cy,z\n2|gps|\n'
+    )
+    folder = mac.selection_work / 'out'
+    first = folder / 'IMG_0001.jxl'
+    tags = ph.exif_tags(first)
+    assert tags['GPS:GPSLatitude'] == pytest.approx(40.758442, abs=1e-7)
+    assert tags['GPS:GPSAltitude'] == 11.73
+    xmp = ph.xmp_properties(first)
+    assert xmp['XMP-dc:Title'] == 'A|b'
+    assert xmp['XMP-dc:Subject'] == ['x,y', 'z']
+    log = mac.log_file('selection').read_text()
+    assert 'title from Photos' in log
+
+
 def test_selection_duplicate_names_get_no_id(mac, gen):
     # Two selected photos with one file name can't be told apart in the
     # export: neither gets an id (no albums, nothing collected), and the log
@@ -503,6 +562,9 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
             'A|2024-01-01 17:00:00|IMG_0001.HEIC\n'
             'B|2024-01-02 17:00:00|IMG_0001.HEIC\n'
             'C|2024-01-03 17:00:00|IMG_0002.HEIC\n'
+            'A\ttitle\tFirst\n'
+            'B\ttitle\tSecond\n'
+            'C\ttitle\tThird\n'
         ),
     )
     folder = mac.selection_work / 'out'
@@ -516,9 +578,12 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
         log.count('! two or more selected photos are named IMG_0001.HEIC') == 1
     )
     assert re.search(gen.WARNINGS, log)
-    # nor a date: only IMG_0002 (the third job) has one
+    # nor a date, nor anything else: only IMG_0002 (the third job) has one
     assert (mac.selection_work / 'jxl_dates.txt').read_text() == (
         '3|2024-01-03T17:00:00-0500\n'
+    )
+    assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
+        '3|title|Third\n'
     )
 
 
@@ -760,8 +825,8 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
     Same libraries, same settings: the Mac shortcuts' encoder writes the same
     bytes as the iPhone's, HDR included (libjxl's output doesn't depend on the
     thread count), also converting two photos at a time (-j 2, as the
-    shortcuts' "All cores" may), and with dates from Photos written into the
-    EXIF.
+    shortcuts' "All cores" may), and with dates, locations, titles, captions
+    and keywords from Photos written into the EXIF and XMP.
     """
     fixtures = [
         FIXTURES / 'hdr' / 'o1.heic',
@@ -781,6 +846,11 @@ def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
         ph.stage(folder, fixtures)
         (folder / 'jxl_dates.txt').write_text(
             '1|2024-01-01T17:00:00-05:00\n3|2022-02-02T10:00:00.250+09:00\n'
+        )
+        (folder / 'jxl_meta.txt').write_text(
+            '1|gps|40.758441666667,-73.829766666667,11.730902867811\n'
+            '2|gps|5e-05,-179.99999999\n3|gps|\n'
+            '1|title|Caf\u00e9\n2|caption|Two%0Alines\n3|keywords|a,b%2Cc\n'
         )
         result = encoder.run(
             ['-q', '83', '-e', '7', *args, 'jxl_job.txt'], folder

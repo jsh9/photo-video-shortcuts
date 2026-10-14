@@ -26,7 +26,7 @@ FAKE_FFMPEG = r"""#!/bin/zsh
 dir=${0:A:h}
 case " $* " in
   *" -version "*)
-    print -r -- "ffmpeg version ${FAKE_VERSION:-9.0.2-compress-videos-0.1.0} Copyright (c) 2000-2026 the FFmpeg developers"
+    print -r -- "ffmpeg version ${FAKE_VERSION:-9.0.2-compress-videos-@VERSION@} Copyright (c) 2000-2026 the FFmpeg developers"
     exit 0;;
   *" -encoders "*)
     print -r -- "Encoders:"
@@ -156,7 +156,7 @@ class Fake:
         self.bin = root / 'bin'
         (self.bin / 'probes').mkdir(parents=True)
         for name, text in (
-            ('ffmpeg', FAKE_FFMPEG),
+            ('ffmpeg', FAKE_FFMPEG.replace('@VERSION@', vh.VERSION)),
             ('ffprobe', FAKE_FFPROBE),
             ('vidmeta', FAKE_VIDMETA.replace('@VERSION@', vh.VERSION)),
         ):

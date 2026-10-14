@@ -1,6 +1,6 @@
 // Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG and PNG files, plus
 // in-place helpers for the EXIF/XMP orientation and pixel-dimension tags, and
-// setting the EXIF capture date.
+// setting the EXIF capture date, GPS position and caption.
 #ifndef JXLBATCH_META_H
 #define JXLBATCH_META_H
 
@@ -94,5 +94,55 @@ void photo_date_iso_text(const photo_date_t *d, char *buf, size_t buf_len);
 // can't be followed from IFD0; the EXIF is then kept as it is).
 int exif_set_capture_date(const uint8_t *tiff, size_t len, photo_date_t *date, uint8_t **out, size_t *out_len,
                           char *was, size_t was_len);
+
+// A photo's location as the shortcut gives it (Photos' location): degrees,
+// north and east positive, and the altitude in meters when has_alt.
+typedef struct {
+  double lat, lon, alt;
+  int has_alt;
+} photo_location_t;
+
+// Parses "lat,lon" or "lat,lon,alt": decimal numbers with "." as the decimal
+// point, an exponent allowed ("5e-05", as Shortcuts writes small values).
+// An altitude of exactly 0 is none: Photos gives 0 for a place typed in its
+// Info window, and a measured altitude is never exactly 0. Returns 1 if valid
+// (latitude within ±90, longitude within ±180).
+int photo_location_parse(const char *s, photo_location_t *loc);
+// The EXIF's GPS position (GPSLatitude and GPSLongitude with their refs) in
+// *loc; its altitude isn't read (has_alt is 0), as photo_location_same
+// doesn't compare it. Returns 1 if it has one.
+int exif_gps(const uint8_t *tiff, size_t len, photo_location_t *loc);
+// 1 if two positions are the same place: within 0.00001° (about 1 m) in both
+// coordinates. Photos gives reals, EXIF stores rationals (an iPhone writes
+// seconds to 0.01", about 0.3 m).
+int photo_location_same(const photo_location_t *a, const photo_location_t *b);
+// Makes `loc` the EXIF's GPS position, or removes the position (loc NULL).
+// *out gets a new, malloc'ed TIFF structure (from `tiff`, or from scratch when
+// len is 0) whose GPS IFD has only GPSVersionID, the latitude and longitude
+// with their refs, and the altitude when loc has one: the file's direction,
+// speed, positioning error and fix time belong to its old position. The GPS
+// IFD is written at the end of the data and IFD0's pointer moved to it (IFD0
+// is rewritten when it has no pointer, or without it for a removal), so no
+// other value moves. The old GPS IFD and the values it points to are zeroed,
+// and so is IFD0's old table when IFD0 is rewritten, so the old position
+// isn't left in the data (but the bytes another IFD's entry still refers to,
+// in a file that shares values, or parts of them, or points IFDs into one
+// another). Returns 1, or 0 when removing from an EXIF without a position; -1
+// if out of memory, -2 if the EXIF can't be read (it is then kept as it is).
+int exif_set_gps(const uint8_t *tiff, size_t len, const photo_location_t *loc, uint8_t **out, size_t *out_len);
+// IFD0's ImageDescription (the caption EXIF readers show; ASCII, or BYTE or
+// UNDEFINED as some writers store UTF-8), without trailing spaces and NULs,
+// malloc'ed in *text: "" when it is blank (ImageIO still takes it over the
+// XMP's caption). Returns 1 when the EXIF has one, 0 when not (*text NULL),
+// -1 if out of memory.
+int exif_description(const uint8_t *tiff, size_t len, char **text);
+// Sets IFD0's ImageDescription to `text` (UTF-8), or removes it when `text`
+// is NULL or empty; only an EXIF that has one is changed (0 is returned
+// otherwise). The new value is written at the end of the data, the old one
+// zeroed (but the bytes another entry shares); a removal rewrites IFD0 at
+// the end and zeroes the old entry's value and the old table, a short value
+// held in it included. Returns 1 when *out got a new, malloc'ed TIFF
+// structure, -1 if out of memory, -2 if the EXIF can't be read.
+int exif_set_description(const uint8_t *tiff, size_t len, const char *text, uint8_t **out, size_t *out_len);
 
 #endif
