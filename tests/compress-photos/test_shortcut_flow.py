@@ -1,7 +1,7 @@
 """
 Integration: the commands the generated shortcut sends to a-Shell, run line by
-line the way a-Shell runs them, against the real encoder; then JXL-Import's
-reading of the results, and the cleanup.
+line the way a-Shell runs them, against the real encoder; then
+Compress-Photos-Import's reading of the results, and the cleanup.
 
 The model of a-Shell follows its source (a-Shell/SceneDelegate.swift and
 a-Shell-Intents/ExecuteCommandIntentHandler.swift):
@@ -245,8 +245,8 @@ def locations_like_shortcut(actions, folder, locations):
 
 def import_results(folder):
     """
-    jxl_done.txt read the way JXL-Import reads it: split each line at "|"; the
-    first item is the file, the last is the name, item 2 the index.
+    jxl_done.txt read the way Compress-Photos-Import reads it: split each line
+    at "|"; the first item is the file, the last is the name, item 2 the index.
     """
     assert (folder / 'jxl_done.txt').exists(), 'nothing was converted'
     results = []
@@ -266,7 +266,10 @@ def batches_started(shell):
 @pytest.mark.parametrize(
     ('start', 'url'),
     [
-        ('share sheet', 'shortcuts://run-shortcut?name=JXL-Import'),
+        (
+            'share sheet',
+            'shortcuts://run-shortcut?name=Compress-Photos-Import',
+        ),
         ('Shortcuts app', 'shortcuts://'),
     ],
 )

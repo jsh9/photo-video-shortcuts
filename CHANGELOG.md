@@ -3,6 +3,17 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.8.1] - 2026-10-14
+
+- Changed
+  - The iPhone's helper shortcut _JXL-Import_ is now _Compress-Photos-Import_:
+    since 0.7.0 it saves HEIC copies as well as JPEG XL ones. _Compress Photos_
+    starts it by its new name, so add both shortcuts from this release, then
+    delete _JXL-Import_ (nothing starts it anymore). The files in a-Shell keep
+    their names (`jxl_done.txt` and the others). Nothing else changes, on the
+    iPhone or the Mac: the encoders differ from 0.8.0's only in their version,
+    and the Mac shortcuts only in the version they expect of `photobatch`.
+
 ## [Compress Photos 0.8.0] - 2026-10-12
 
 - Added

@@ -237,9 +237,9 @@ reach, as are edits (the selection route converts the unedited original).
   Favorite's text is localized ("Yes" in any language), so the test is If's
   Boolean condition, not Match Text. The action's and the condition's format is
   from a sample shortcut built on the iPhone (spike 4), written by the builder
-  (`wfkit.favorite_photos`, `wfkit.if_true`). From the share sheet, JXL-Import
-  has no originals: Compress Photos marks each favorite with
-  `jxl_favorite_<i>.txt` in a-Shell.
+  (`wfkit.favorite_photos`, `wfkit.if_true`). From the share sheet,
+  Compress-Photos-Import has no originals: Compress Photos marks each favorite
+  with `jxl_favorite_<i>.txt` in a-Shell.
 
 ## 4. Spikes
 
