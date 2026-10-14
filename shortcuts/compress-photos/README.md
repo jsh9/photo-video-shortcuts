@@ -222,11 +222,13 @@ Not kept:
   the photo picker alike, so the JXL has neither the original nor the edit. If
   you want both, convert the photo before editing it, and edit the JXL (or keep
   the HEIC).
-- **A title, caption or keywords set in Photos.** Shortcuts on the iPhone can't
-  read them (nor can any app through Apple's photo library interface), so the
-  copy has only those the original file itself holds, if any; Photos' own are
-  lost when you delete the original. To keep them, compress those photos on the
-  Mac from the Photos selection, which writes them into the copy (see
+- **A title or keywords set in Photos.** Shortcuts on the iPhone can't read
+  them (nor can any app through Apple's photo library interface), so the copy
+  has only those the original file itself holds, if any; Photos' own are lost
+  when you delete the original. A caption is kept from the share sheet: Photos
+  writes it into the file it shares. To keep titles and keywords, compress
+  those photos on the Mac from the Photos selection, which writes them into the
+  copy (see
   [Compress Photos on the Mac](README-mac.md#4-what-is-and-isnt-kept)); with
   iCloud Photos the copy then appears on the iPhone too.
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't
@@ -394,9 +396,10 @@ Each copy gets the location Photos shows for its original, in the file itself
 When a location is written or removed, a-Shell's output says so, for example
 `location from Photos: 40.758442, -73.829767 (the file had another)` or
 `location removed: Photos has none`. A copy of a favorite is a favorite too.
-Shortcuts doesn't give a photo's title, caption or keywords on the iPhone, so
-the copies keep the file's own (Photos-only ones are lost with the original).
-This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
+Shortcuts doesn't give a photo's title or keywords on the iPhone, so the copies
+keep the file's own (Photos-only ones are lost with the original). A caption
+set in Photos is kept from the share sheet, as Photos writes it into the file
+it shares. This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
 
 ## 4. Troubleshooting
 
