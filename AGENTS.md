@@ -33,14 +33,15 @@ Apple Shortcuts that compress photos and videos, with the encoders they run:
   runs `photobatch.wasm`; a-Shell then starts the helper shortcut
   *Compress-Photos-Import* by URL (from the share sheet) or switches back to
   *Compress Photos* (from the Shortcuts app). On the Mac, Run Shell Script runs
-  `photobatch-macos` directly. The encoder is C (`src/`), built for WebAssembly
-  (WASI), natively against Homebrew, and statically for macOS.
+  the native encoder directly (released as `photobatch-macos`, installed as
+  `photobatch`). The encoder is C (`src/`), built for WebAssembly (WASI),
+  natively against Homebrew, and statically for macOS.
 - **Compress Videos** (`shortcuts/compress-videos/`): Mac only for now; ffmpeg
   plus `vidmeta` (C) for the metadata.
 
-The `.shortcut` files are **generated** by Python (`scripts/build_*.py`, on top
-of `lib/wfkit.py`), never edited by hand, and published on GitHub Releases, not
-committed.
+The `.shortcut` files are **generated** by Python
+(`shortcuts/<name>/scripts/build_*.py`, on top of `lib/wfkit.py`), never edited
+by hand, and published on GitHub Releases, not committed.
 
 ## 2. Read first
 

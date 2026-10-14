@@ -84,7 +84,7 @@ OUT = HERE.parent / 'build' / 'shortcuts'
 
 NAME_A = 'Compress Photos'
 # a-Shell starts it by name, so a new name means every user re-adds it (it
-# was "JXL-Import" until 0.8.0). No spaces, so no URL escaping.
+# was "JXL-Import" until 0.7.0). No spaces, so no URL escaping.
 NAME_B = 'Compress-Photos-Import'
 
 # ---------------------------------------------------------------------------
@@ -223,8 +223,8 @@ def run_photobatch(b, args, then):
 
 def save_results(b, originals=None, album=None):
     """
-    Saves the JPEG XL files listed in jxl_done.txt to Photos, each also to the
-    albums its original is in.
+    Saves the HEIC or JPEG XL files listed in jxl_done.txt to Photos, each also
+    to the albums its original is in.
 
     Each line is "file|index|delete or keep|name". With ``originals`` (the
     staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the
@@ -296,7 +296,7 @@ def build_compress(sample):
         'other way, it shows a photo picker (which gives the original HEIF files), '
         'saves the results itself. Either way, the converted originals go into the '
         f'album "{ORIGINALS_ALBUM}" for you to review; nothing is deleted. '
-        "each JPEG XL copy is also added to its original's albums. "
+        "Each copy is also added to its original's albums. "
         'Setup and help: '
         f'{HELP_URL}'
     )

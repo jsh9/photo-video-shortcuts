@@ -117,14 +117,14 @@ pace (nothing is added to it any more).
   - iOS pauses a-Shell in the background.
   - When started from the Shortcuts app, switching back early makes the
     shortcut continue before the conversion is done. It then saves nothing.
-- The JXL copies get the date Photos shows for their originals, so they sort
-  next to them, also when you changed a photo's date in Photos or the photo has
-  no capture date of its own (see [Dates](#32-dates)). A notification shows how
+- The copies get the date Photos shows for their originals, so they sort next
+  to them, also when you changed a photo's date in Photos or the photo has no
+  capture date of its own (see [Dates](#32-dates)). A notification shows how
   many were saved.
-- **Albums:** each JXL is also added to every album its original is in. It's
+- **Albums:** each copy is also added to every album its original is in. It's
   one photo, not a copy per album.
   - From the share sheet, the albums are passed to Compress-Photos-Import by
-    name. If two of your albums have the same name, the JXL may land in only
+    name. If two of your albums have the same name, the copy may land in only
     one of them.
   - This is meant for your own albums. Shared albums and other built-in ones
     aren't handled (Favorites follows the favorite: a copy of a favorite is a

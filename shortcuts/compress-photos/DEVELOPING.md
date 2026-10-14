@@ -43,14 +43,14 @@ Compress Photos                              (shortcut)
                                             a-Shell was still starting up)
 a-Shell ▸ photobatch → jxl_out_N.heic or .jxl + jxl_done.txt, with progress on screen
 then, from the share sheet:
-   a-Shell starts Compress-Photos-Import (shortcut), which saves each JXL to Photos
-   under its original name, adds it to the albums listed in
+   a-Shell starts Compress-Photos-Import (shortcut), which saves each copy
+   to Photos under its original name, adds it to the albums listed in
    jxl_albums_N.txt (written by Compress Photos), makes it a favorite if
    jxl_favorite_N.txt is there (likewise), and cleans up
    (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
-   a-Shell switches back to Compress Photos, which saves the JXLs,
+   a-Shell switches back to Compress Photos, which saves the copies,
    adds each to its original's albums, and adds each saved copy's
    original to the album "Compressed originals"
 Nothing is deleted on either path; the user reviews the album. Only a

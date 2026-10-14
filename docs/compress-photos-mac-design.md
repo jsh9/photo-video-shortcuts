@@ -72,10 +72,10 @@ in through its input. Written 2026-10-04 against Compress Photos 0.3.1 on macOS
 
 Feasible, and simpler than the iPhone version. macOS Shortcuts has a built-in
 **Run Shell Script** action that runs `/bin/zsh` as the user and *waits for it
-to finish*, so the Mac shortcuts need no a-Shell, no `Compress-Photos-Import`
-helper, no marker files, no `--retry`, no `Wait to Return`, and no app
-switching. The encoder is the same `photobatch` source and the same job-file
-protocol (`jxl_job.txt` → `jxl_out_N.jxl` + `jxl_done.txt`), built as a native,
+to finish*, so the Mac shortcuts need no a-Shell, no `JXL-Import` helper, no
+marker files, no `--retry`, no `Wait to Return`, and no app switching. The
+encoder is the same `photobatch` source and the same job-file protocol
+(`jxl_job.txt` → `jxl_out_N.jxl` + `jxl_done.txt`), built as a native,
 statically linked, multi-threaded macOS binary instead of WebAssembly.
 
 What is confirmed, on this Mac and in Apple's Shortcuts for Mac guide:
@@ -109,16 +109,16 @@ format).
 
 ## 2. What changes compared with the iPhone
 
-| iPhone (a-Shell)                                                                | Mac (Run Shell Script)                                                                       |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Put File copies each photo into a-Shell's folder                                | Shortcuts passes the photos to the script as file arguments (`"$@"`); the script stages them |
-| a-Shell runs `photobatch.wasm`, single core, iOS memory ceiling                 | native `photobatch`, all cores (`JXLBATCH_THREADS`), no ceiling                              |
-| handoff back by URL (`shortcuts://run-shortcut?name=Compress-Photos-Import`)    | none: Run Shell Script is synchronous, the shortcut continues when it exits                  |
-| progress visible in a-Shell, which must stay in the foreground                  | runs in the background; the log is shown afterwards (Quick Look) when it has warnings        |
-| two shortcuts (`Compress Photos`, `Compress-Photos-Import`), the second by name | one shortcut per use case, no helper                                                         |
-| `Wait to Return` only works inside the Shortcuts app                            | works from the Share menu, the Shortcuts app, the menu bar, a keyboard shortcut, Finder      |
-| Send As: Automatic turns HEIF into JPEG in the share sheet                      | to be measured (spike S5); the picker path gives the library file either way                 |
-| encoder installed by `curl` inside a-Shell                                      | encoder installed by `curl` in Terminal (the one place the user uses a terminal)             |
+| iPhone (a-Shell)                                                    | Mac (Run Shell Script)                                                                       |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Put File copies each photo into a-Shell's folder                    | Shortcuts passes the photos to the script as file arguments (`"$@"`); the script stages them |
+| a-Shell runs `photobatch.wasm`, single core, iOS memory ceiling     | native `photobatch`, all cores (`JXLBATCH_THREADS`), no ceiling                              |
+| handoff back by URL (`shortcuts://run-shortcut?name=JXL-Import`)    | none: Run Shell Script is synchronous, the shortcut continues when it exits                  |
+| progress visible in a-Shell, which must stay in the foreground      | runs in the background; the log is shown afterwards (Quick Look) when it has warnings        |
+| two shortcuts (`Compress Photos`, `JXL-Import`), the second by name | one shortcut per use case, no helper                                                         |
+| `Wait to Return` only works inside the Shortcuts app                | works from the Share menu, the Shortcuts app, the menu bar, a keyboard shortcut, Finder      |
+| Send As: Automatic turns HEIF into JPEG in the share sheet          | to be measured (spike S5); the picker path gives the library file either way                 |
+| encoder installed by `curl` inside a-Shell                          | encoder installed by `curl` in Terminal (the one place the user uses a terminal)             |
 
 The parts that stay the same: the quality presets and their contact-card list,
 the still-photo filter (Get Details of Images: Media Type / Photo Type), albums
@@ -434,7 +434,7 @@ Changes:
   {
     "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
     "shortcuts": {
-      "iphone": ["Compress Photos.shortcut", "Compress-Photos-Import.shortcut"],
+      "iphone": ["Compress Photos.shortcut", "JXL-Import.shortcut"],
       "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]
     }
   }
