@@ -477,6 +477,12 @@ def test_applescripts_in_order_with_their_inputs(gen, actions):
     assert gen.ORIGINALS_ALBUM == 'Videos already compressed'
     assert f'"{gen.ORIGINALS_ALBUM}"' in text
     assert text.startswith(f'-- {NAME}: imports the files the shell made')
+    # each copy gets "compr" in Photos after the import (copyKeywords), with
+    # its original's keywords; no format or quality keywords for a video
+    assert gen.COPY_KEYWORD == 'compr'
+    assert 'repeat with f in {}' in text and 'repeat with pfx in {}' in text
+    assert 'set end of kws to "compr"' in text
+    assert 'set keywords of copyItem to wantKeywords' in text
     assert 'with timeout of 3600 seconds' in gen.applescript_text('export')
 
 

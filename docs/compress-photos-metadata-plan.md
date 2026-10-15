@@ -25,6 +25,13 @@ Plan for issue #21, written 2026-10-12. It extends 0.7.0's dates
 ([compress-photos-dates-plan.md](compress-photos-dates-plan.md)) to the rest of
 what Photos keeps for a photo in its library only.
 
+Since Compress Photos 0.9.0 (2026-10-14), the title, caption and keywords are
+no longer written into the copy's file: like the favorite, they stay in Photos'
+library, set on the copy after the import (`import.applescript`), with the
+keywords `compr` and the copy's format and quality added. The location is still
+written as planned here. How it works now is in
+[DEVELOPING.md](../shortcuts/compress-photos/DEVELOPING.md#15-location-title-caption-keywords-and-favorite).
+
 ## 1. The problem
 
 `photobatch` copies the original's EXIF and XMP as they are. Photos keeps some

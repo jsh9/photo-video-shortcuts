@@ -190,6 +190,10 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   version of an HDR photo, edit history and people. A copy has its original's
   location, title, caption and keywords, and is a favorite if its original is
   (see [What is and isn't kept](#4-what-is-and-isnt-kept)).
+- To find the copies later, make a smart album (File ▸ New Smart Album) with
+  Keyword is `compr`; add Keyword is `jxl` (or `heic`, `q=83`, `rf=26`, ...)
+  with Match all for those of one format or quality. A smart album lists them
+  at once; Photos' search finds the keywords only once it has indexed them.
 - Photos may list the copies under Duplicates. Merging keeps only one file, so
   check which one before you merge.
 - With iCloud Photos and *Optimize Mac Storage*, Shortcuts downloads each
@@ -224,15 +228,22 @@ original's date. The Finder shortcut's files keep their own dates.
 
 Each copy also gets the location Photos shows for its original, in its GPS: a
 location you changed in Photos (Image ▸ Location) is kept, and one you hid
-(Hide Location) is left out (see [Location](README.md#33-location)). From
-Photos (the selection), the copy also gets its original's title, caption and
-keywords, written into the file (its XMP, which other apps read too; a caption
-also into an EXIF description the file has), and a copy whose original is a
-favorite is a favorite too. After the import, the shortcut checks each copy in
-Photos and gives it whatever Photos read differently; the log says when. From
-the picker, a copy gets the location only, as on the iPhone (Shortcuts doesn't
-give the rest), and isn't a favorite yet. People (named faces) aren't copied:
-Photos finds the faces again and may recognize them.
+(Hide Location) is left out (see [Location](README.md#33-location)). The date,
+the location and the camera and lens are in the copy's file, so other apps and
+an exported copy have them too.
+
+From Photos (the selection), the copy also gets its original's title, caption
+and keywords, and is a favorite if its original is, in Photos only: they aren't
+written into the copy's file, which has only the original file's own, if any
+(as the original's file does). It also gets the keywords `compr`, its format
+(`jxl` or `heic`) and its quality (`q=83`, `rf=26`: the number you chose), also
+in Photos only, to find the copies (see
+[Compress Photos (macOS)](#31-compress-photos-macos)). After the import, the
+shortcut checks each copy in Photos and gives it whatever Photos read
+differently; the log says when. From the picker, a copy gets the location only,
+as on the iPhone (Shortcuts doesn't give the rest), no keywords, and isn't a
+favorite yet. People (named faces) aren't copied: Photos finds the faces again
+and may recognize them.
 
 ## 5. Updating
 

@@ -10,6 +10,7 @@ its own parts (the quality list and the still-photo filter).
 import copy
 import json
 import plistlib
+import re
 import subprocess
 import sys
 import urllib.request
@@ -18,6 +19,7 @@ import uuid
 # What `from wfkit import *` gives a tool's own module (Compress Photos'
 # scripts/wf.py re-exports it this way).
 __all__ = [
+    'COPY_KEYWORD',
     'OBJ',
     'REPEAT_INDEX',
     'REPEAT_ITEM',
@@ -27,6 +29,7 @@ __all__ = [
     'Ref',
     'Sample',
     'action',
+    'applescript_text',
     'attachment',
     'fetch_sample',
     'guessed_workflow',
@@ -40,6 +43,32 @@ __all__ = [
 ]
 
 OBJ = '￼'  # placeholder for a variable inside a text field
+# The keyword every copy gets in Photos after a Mac import
+# (lib/mac/import.applescript, copyKeywords), to find the copies there; in
+# Photos' library only. One word for every tool, so that one smart album
+# lists all their copies.
+COPY_KEYWORD = 'compr'
+
+
+def applescript_text(path, **values):
+    """
+    The AppleScript at ``path`` (lib/mac/<name>.applescript) with its
+    @PLACEHOLDERS@ filled in: each keyword argument names one, and its value is
+    the text to put there, or a list of texts, which becomes an AppleScript
+    list literal (``{"heic", "jxl"}``; ``{}`` when empty). Plain text: a
+    Shortcuts variable inside a Run AppleScript's text keeps it from compiling
+    (it then produces no output and no error; seen on macOS 26), so values go
+    in through the action's input (``Builder.run_applescript``).
+    """
+    text = path.read_text()
+    for name, value in values.items():
+        if not isinstance(value, str):
+            value = '{' + ', '.join(f'"{v}"' for v in value) + '}'
+
+        text = text.replace(f'@{name}@', value)
+
+    assert not re.findall('@[A-Z_]+@', text), path.name
+    return text
 
 
 # ---------------------------------------------------------------------------

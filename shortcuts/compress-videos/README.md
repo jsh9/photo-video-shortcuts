@@ -126,7 +126,14 @@ Kept, as Photos shows them:
 - HDR: a 10-bit HLG video stays 10-bit HLG; and Dolby Vision, as HandBrake
   carries it (to H.265 as profile 8.4, like the iPhone's; to AV1 as profile
   10);
-- the albums and the file name.
+- the albums and the file name;
+- the title, caption, keywords and favorite, in Photos only (they aren't
+  written into the copy's file, as they aren't in the original's).
+
+Each copy also gets the keyword `compr` in Photos, to find the copies later: a
+smart album (File ▸ New Smart Album) with Keyword is `compr` lists them (and
+Compress Photos' copies, which have it too, with `heic` or `jxl`). Photos'
+search finds the keyword only once it has indexed it.
 
 Not converted at all (counted as skipped): slo-mo videos (the slow part is an
 edit that a copy would lose: it would play at normal speed), spatial videos

@@ -5,13 +5,12 @@
 -- .mov). The date is the item's in Photos, "2024-01-01 17:00:00" as the Mac's
 -- clock shows it (Photos gives it in the Mac's time zone; the shell adds the
 -- offset), empty if Photos gives none.
--- Then, per item, what else Photos has for it, one line per field,
--- "id<tab>field<tab>value" (no "|" in it, so a reader of the first lines
--- alone skips these): gps ("40.758442,-73.829767" and ",11.73" for the
--- altitude when Photos has one other than 0; empty when it has no location,
--- as for a location hidden in Photos), title, caption, keywords (separated
--- by commas). Values are escaped: %, |, tab, CR and LF as %25, %7C, %09, %0D
--- and %0A, and a comma within a keyword as %2C. Empty: Photos has none.
+-- Then, per item, its location in Photos, "id<tab>gps<tab>value" (no "|" in
+-- it, so a reader of the first lines alone skips it): "40.758442,-73.829767"
+-- and ",11.73" for the altitude when Photos has one other than 0; empty when
+-- it has no location, as for a location hidden in Photos. Its title, caption
+-- and keywords aren't given: they stay in Photos' library, never in the
+-- copy's file (import.applescript sets them on the copy in Photos).
 -- "using originals": the file as it was recorded or imported (an edited
 -- item's edits are not applied, nor a date changed in Photos); without it,
 -- Photos renders a copy. On an error, returns "ERROR: ...".
@@ -66,8 +65,8 @@ on two(n)
 	return text -2 thru -1 of ("0" & n)
 end two
 
--- The item's location, title, caption and keywords in Photos (its
--- properties record `p`), one "id<tab>field<tab>value" line each.
+-- The item's location in Photos (its properties record `p`), as an
+-- "id<tab>gps<tab>value" line.
 on metaLines(itemId, p)
 	set gps to ""
 	set loc to «class IPlo» of p
@@ -86,19 +85,7 @@ on metaLines(itemId, p)
 			end if
 		end if
 	end if
-	set keywordText to ""
-	set kw to «class IPkw» of p
-	if kw is not missing value then
-		repeat with k in kw
-			if keywordText is not "" then set keywordText to keywordText & ","
-			set keywordText to keywordText & my replaced(my escaped(k as text), ",", "%2C")
-		end repeat
-	end if
-	set t to tab
-	return itemId & t & "gps" & t & gps & linefeed & ¬
-		itemId & t & "title" & t & my escaped(my textOf(«class pnam» of p)) & linefeed & ¬
-		itemId & t & "caption" & t & my escaped(my textOf(«class IPde» of p)) & linefeed & ¬
-		itemId & t & "keywords" & t & keywordText & linefeed
+	return itemId & tab & "gps" & tab & gps & linefeed
 end metaLines
 
 -- `x` with `places` decimals ("-73.829767"), from a whole number: a real's
@@ -118,26 +105,3 @@ on decimalText(x, places)
 	end repeat
 	return minus & ((n div factor) as text) & "." & digits
 end decimalText
-
-on textOf(v)
-	if v is missing value then return ""
-	return v as text
-end textOf
-
-on escaped(t)
-	set t to my replaced(t, "%", "%25")
-	set t to my replaced(t, "|", "%7C")
-	set t to my replaced(t, tab, "%09")
-	set t to my replaced(t, return, "%0D")
-	return my replaced(t, linefeed, "%0A")
-end escaped
-
-on replaced(t, a, b)
-	set oldDelims to AppleScript's text item delimiters
-	set AppleScript's text item delimiters to a
-	set parts to text items of t
-	set AppleScript's text item delimiters to b
-	set t to parts as text
-	set AppleScript's text item delimiters to oldDelims
-	return t
-end replaced
