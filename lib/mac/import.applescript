@@ -315,10 +315,11 @@ end notSet
 -- The plan's text from one item of the run's input. Shortcuts types the
 -- shell script's output by its content, and when it takes it for something
 -- other than text it passes a file ("stdout") instead: three or more lines
--- with a comma each are CSV to it (Compress Photos' keywords, "jxl,q=83", or
--- names with commas; macOS 26). Its text is then read from the file; an
--- empty file is no lines, and any other failure to read it is the caller's
--- to report.
+-- with the same number of commas each are CSV to it (Compress Photos'
+-- keywords, "jxl,q=83", on every line, or every name with a comma; one line
+-- without, or with another count, keeps it text; macOS 26). Its text is then
+-- read from the file; an empty file is no lines, and any other failure to
+-- read it is the caller's to report.
 on planText(v)
 	if class of v is in {alias, «class furl», file} then
 		try

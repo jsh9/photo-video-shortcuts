@@ -610,9 +610,12 @@ class Builder:
         Run Shell Script (/bin/zsh): ``script`` is text with variables; the
         input items are passed as files, their paths as arguments ("$@") or on
         stdin. Returns the script's standard output, which Shortcuts types by
-        its content: text normally, but three or more lines with a comma each
-        are a CSV file to it (a ``dyn.`` type), and the next action then gets a
-        file named "stdout" instead of text (macOS 26; see ``planText`` in
+        its content: text normally, but three or more newline-terminated lines
+        with the same number of commas each are a CSV file to it (a ``dyn.``
+        type), and the next action then gets a file named "stdout" instead of
+        text; one line without a comma or with another count, no final newline,
+        or an empty line at the end keeps it text (macOS 26, WorkflowKit's
+        ``WFFileRepresentation``; see ``planText`` in
         lib/mac/import.applescript).
         """
         params = {

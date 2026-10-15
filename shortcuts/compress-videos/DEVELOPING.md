@@ -62,8 +62,9 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
      writes last-settings.txt and vid_skipped.txt
 
    Run AppleScript (lib/mac/import.applescript, input: those lines, as text
-   or as the file "stdout" once Shortcuts takes three or more lines with a
-   comma each for CSV: see Compress Photos' DEVELOPING.md) has Photos
+   or as the file "stdout" once Shortcuts takes three or more lines with the
+   same number of commas each, every name with a comma, for CSV: see Compress
+   Photos' DEVELOPING.md) has Photos
    import the copies, give each its original's location, title, caption,
    keywords (with "compr") and favorite in Photos, add each to its original's
    albums, and add the originals to the album "Videos already compressed";

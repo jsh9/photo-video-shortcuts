@@ -33,9 +33,10 @@ encoder. Every release includes the current files of all shortcuts.
   - On the Mac, from Photos (the selection), three or more photos were
     converted but none was saved to Photos, and the log said
     `! unexpected result line: ...:stdout`: Shortcuts took the script's result
-    lines for a CSV file once each had a comma (the keywords, `jxl,q=83`, or a
-    name with a comma, which earlier versions failed on too) and handed the
-    import a file instead of text. The import now reads that file.
+    lines for a CSV file once each had the same number of commas (the keywords,
+    `jxl,q=83`, on every line; or every name with a comma, which earlier
+    versions failed on too) and handed the import a file instead of text. The
+    import now reads that file.
 
 ## [Compress Videos 0.3.0] - 2026-10-14
 
@@ -48,9 +49,10 @@ encoder. Every release includes the current files of all shortcuts.
     the new version number, which the shortcut checks; so do `ffmpeg-macos` and
     `ffprobe-macos`, which you don't need to update.
 - Fixed
-  - Three or more videos whose names have a comma were converted but none was
-    saved to Photos (`! unexpected result line: ...:stdout` in the log), as in
-    Compress Photos 0.9.0.
+  - Three or more videos whose names each have a comma (the same number of
+    them) were converted but none was saved to Photos
+    (`! unexpected result line: ...:stdout` in the log), as in Compress Photos
+    0.9.0.
 
 ## [Compress Photos 0.8.0] - 2026-10-12
 

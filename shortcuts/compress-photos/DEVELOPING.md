@@ -296,18 +296,23 @@ lists as they come instead of building a list of all of them. Photos'
 `whose id is in {...}` is not supported (error -1700). Run AppleScript's text
 must be plain: with a Shortcuts variable in it the script doesn't compile and
 the action silently returns nothing, so values go in through the action's input
-(`item 1 of input`). A Run Shell Script's output comes in as text only when
+(`input`, a list: `item 1 of input` in `export.applescript`, every item in
+`import.applescript`). A Run Shell Script's output comes in as text only when
 Shortcuts takes it for text: it types the output by its content, and three or
-more lines with a comma each are CSV to it (a `dyn.` type, not
-`public.plain-text`; the selection route's lines have one since 0.9.0's
-keywords, `jxl,q=83`). Run AppleScript then gets the file `stdout` (an alias),
-whose `as text` is its path, so `import.applescript` reads the file then
-(`planText`; seen on macOS 26, and with `WFFileRepresentation` from
-WorkflowKit, the output given as data with no type). And `item 1 of selection`
-must be read from a variable (`set sel to selection`), not from `selection`
-directly. What the Mac doesn't do (macOS 26): Photos' Share menu and
-right-click ▸ Shortcuts hand the shortcut an `NSItemProvider` with a file URL
-of a JPEG export that Shortcuts' extension can't represent
+more newline-terminated lines with the same number of commas each are CSV to it
+(a `dyn.` type with the MIME type `application/csv`, not `public.plain-text`;
+the selection route's lines have one each since 0.9.0's keywords, `jxl,q=83`).
+One line without a comma or with another count, no final newline, or an empty
+line at the end keeps it text, so the run log and the import's outcome, with
+commas on some lines only, stay text. Run AppleScript then gets the file
+`stdout` (an alias), whose `as text` is its path, so `import.applescript` reads
+the file then (`planText`; seen on macOS 26, and measured with
+`+[WFFileRepresentation typeOfData:]` from WorkflowKit, the output given as
+data with no type). And `item 1 of selection` must be read from a variable
+(`set sel to selection`), not from `selection` directly. What the Mac doesn't
+do (macOS 26): Photos' Share menu and right-click ▸ Shortcuts hand the shortcut
+an `NSItemProvider` with a file URL of a JPEG export that Shortcuts' extension
+can't represent
 (`WFFileRepresentation ... Cannot represent file URL, returning nil`, type
 `public.jpeg`), so Shortcut Input is empty and the shortcut falls back to its
 picker; and Delete Photos isn't registered in the share extension at all, and

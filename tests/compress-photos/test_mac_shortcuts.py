@@ -908,8 +908,9 @@ def test_import_compares_what_photos_has(gen):
 
 def test_import_reads_its_plan_from_text_or_a_file(gen, tmp_path):
     # Shortcuts passes the selection script's output to import.applescript as
-    # a file ("stdout") when it takes it for CSV: three or more lines with a
-    # comma each, as 0.9.0's keywords ("jxl,q=63") give every line. The plan
+    # a file ("stdout") when it takes it for CSV: three or more lines with the
+    # same number of commas each, as 0.9.0's keywords ("jxl,q=63") give every
+    # line. The plan
     # is then read from the file (UTF-8), whether it comes as an alias or a
     # file reference; an empty file is no lines, and text stays text. The
     # run reads every item of its input, and a plan it can't read (any
