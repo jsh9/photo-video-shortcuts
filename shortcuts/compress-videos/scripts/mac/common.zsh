@@ -26,7 +26,8 @@ RF='@RF@'
 SIZE='@SIZE@'
 AUDIO='@AUDIO@'
 REUSE='@REUSE@'
-# IDS: one "id|filename" line per item selected in Photos (or "ERROR: ...")
+# IDS: one "id|date|filename" line per item selected in Photos (or
+# "ERROR: ..."): see selection.zsh
 IDS=$(cat <<'VID_LINES'
 @LINES@
 VID_LINES

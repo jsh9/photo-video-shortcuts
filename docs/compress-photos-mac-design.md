@@ -319,6 +319,10 @@ Notes:
   converted, so the shortcut ends with the log on screen in that case.
 - stdout is the protocol, stderr goes into the log; the `!` warning for a
   version mismatch is appended to the log too so Quick Look shows it.
+  (2026-10-15: not for the result lines. Shortcuts types stdout by its content,
+  and three or more lines with the same number of commas each are a CSV file to
+  it, so the picker route reads `jxl_done.txt` with Get File and
+  `import.applescript` accepts a file; see `DEVELOPING.md`.)
 
 ### 4.3. Getting File items back into Shortcuts
 

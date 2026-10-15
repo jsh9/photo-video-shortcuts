@@ -25,14 +25,15 @@ JXL_META
 )
 [ -n "$META" ] && print -r -- "$META" > "$WORK/jxl_meta.txt"
 @RUN@
-# One line per converted photo, jxl_done.txt's "file|index|delete or keep|Name.jxl";
-# the shortcut reads each file from the work folder with Get File (the only
-# way a file gets from a script into Shortcuts on the Mac; see the shortcut).
-# Nothing when nothing was converted. The work folder stays for the shortcut,
-# which removes it at the end (and the next run starts by removing what's
-# left).
-if [ -f "$WORK/jxl_done.txt" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$line" ] && printf '%s\n' "$line"
-  done < "$WORK/jxl_done.txt"
-fi
+# The results stay in jxl_done.txt, one line per converted photo,
+# "file|index|delete or keep|Name.jxl" (no file when nothing was converted):
+# the shortcut reads it, then each file, from the work folder with Get File,
+# the one way a file gets from a script into Shortcuts on the Mac (see the
+# shortcut). Nothing is printed: Shortcuts types a script's output by its
+# content, and three or more lines whose names each have a comma would reach
+# the shortcut as a CSV file, not as text. The work folder stays for the
+# shortcut, which removes it at the end (and the next run starts by removing
+# what's left). The script's status is 0 whatever photobatch's (1 for a batch
+# with nothing converted): errors are in the log, and Run Shell Script would
+# fail the shortcut on any other status.
+exit 0

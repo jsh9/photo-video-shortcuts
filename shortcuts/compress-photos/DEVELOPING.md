@@ -182,11 +182,13 @@ Compress Photos (macOS)                      (shortcut)
      iCloud~is~workflow~my~workflows/Documents), runs
        photobatch --mac -q 83 -e 7 -j 0 -C "$WORK" jxl_job.txt
      (-j 1 -t 1 for One core; --sdr for Drop HDR; the log in
-     ~/Library/Caches, below) and prints
-     jxl_done.txt's lines:
+     ~/Library/Caches, below) and leaves jxl_done.txt there, one line per
+     converted photo (it prints nothing: see the notes below):
        jxl_out_N.jxl|N|delete or keep|Name.jxl (or .heic)
-         then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl, relative
-   to the Shortcuts folder in iCloud Drive) reads the file, which is renamed
+         Get File (compress-photos-macos/jxl_done.txt, relative to the Shortcuts
+   folder in iCloud Drive) reads it, Get Text from Input and Split Text give
+   its lines; then, for each line: Get File (compress-photos-macos/jxl_out_N.jxl)
+   reads the file, which is renamed
    and saved to Photos and added to the original's albums, and the original
    (the item itself, no lookup by name) is added to the album "Compressed to
    JXL" unless its albums already list it
@@ -230,10 +232,12 @@ written by a script gets back into Shortcuts on the Mac: Get File with a path
 relative to that folder works, while Run AppleScript's file results
 (`POSIX file`, `alias`, file URL) come back as nothing and Get File refuses
 absolute paths (checked on macOS 26 with a diagnostic shortcut; see
-`docs/compress-photos-mac-design.md`, section 5). The Finder shortcut needs no
-bridge and works in `$TMPDIR`. A save that produces nothing (for example with
-iCloud Drive off for Shortcuts) leaves the original alone and is listed in the
-log as `! not saved to Photos`. The script is assembled by
+`docs/compress-photos-mac-design.md`, section 5). The picker route's results,
+`jxl_done.txt`'s lines, come that way too since 0.9.0, not as the script's
+output, which Shortcuts types by its content (below). The Finder shortcut needs
+no bridge and works in `$TMPDIR`. A save that produces nothing (for example
+with iCloud Drive off for Shortcuts) leaves the original alone and is listed in
+the log as `! not saved to Photos`. The script is assembled by
 `build_mac_shortcuts.py` from `scripts/mac/*.zsh` with the quality, the lines
 of names or paths, and the Skipped Echo as Shortcuts variables; `photobatch`
 itself and the job and result files are the iPhone's. The encoder is the static
@@ -303,12 +307,17 @@ the action silently returns nothing, so values go in through the action's input
 Shortcuts takes it for text: it types the output by its content, and three or
 more newline-terminated lines with the same number of commas each are CSV to it
 (a `dyn.` type with the MIME type `application/csv`, not `public.plain-text`;
-the selection route's lines have one each since 0.9.0's keywords, `jxl,q=83`).
-One line without a comma or with another count, no final newline, or an empty
-line at the end keeps it text, so the run log and the import's outcome, with
-commas on some lines only, stay text. Run AppleScript then gets the file
-`stdout` (an alias), whose `as text` is its path, so `import.applescript` reads
-the file then (`planText`; seen on macOS 26, and measured with
+the selection route's lines have one each since 0.9.0's keywords, `jxl,q=83`,
+and the picker route's when every photo's name has one). The first line's count
+is the header's, and about nine in ten of the other lines must match it: one
+odd line among three to nine keeps the output text, one among ten doesn't, a
+first line with another count keeps it text at any length, and leaving the
+final newline out only drops the last line (three lines stay text, four don't).
+The run log stays text: its first line, photobatch's, has three commas and the
+others fewer. Run AppleScript gets the CSV as the file `stdout` (an alias),
+whose `as text` is its path, so `import.applescript` reads the file then
+(`planText`), and the picker route reads `jxl_done.txt` with Get File instead
+of the script's output (seen on macOS 26, and measured with
 `+[WFFileRepresentation typeOfData:]` from WorkflowKit, the output given as
 data with no type). And `item 1 of selection` must be read from a variable
 (`set sel to selection`), not from `selection` directly. What the Mac doesn't

@@ -98,7 +98,7 @@ MAC = HERE / 'mac'
 LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # The placeholders that become Shortcuts variables: the six answers (vf.py)
 # and Reuse ("1" for the last run's settings), and @LINES@, the export's
-# "id|filename" lines (its Run AppleScript's result).
+# "id|date|filename" lines (its Run AppleScript's result).
 SLOTS = {
     '@CODEC@': 'Codec',
     '@PRESET@': 'Preset',

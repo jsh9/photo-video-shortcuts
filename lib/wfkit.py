@@ -613,10 +613,13 @@ class Builder:
         its content: text normally, but three or more newline-terminated lines
         with the same number of commas each are a CSV file to it (a ``dyn.``
         type), and the next action then gets a file named "stdout" instead of
-        text; one line without a comma or with another count, no final newline,
-        or an empty line at the end keeps it text (macOS 26, WorkflowKit's
-        ``WFFileRepresentation``; see ``planText`` in
-        lib/mac/import.applescript).
+        text. The first line's count is the header's and about nine in ten of
+        the other lines must match it, so an odd line keeps short outputs text
+        and long ones not (macOS 26, WorkflowKit's ``WFFileRepresentation``).
+        Lines a later action reads go through a file the script writes instead
+        (Get File), or the reader accepts a file (``planText`` in
+        lib/mac/import.applescript); see
+        shortcuts/compress-photos/DEVELOPING.md.
         """
         params = {
             'Script': plain_or_text(*script),

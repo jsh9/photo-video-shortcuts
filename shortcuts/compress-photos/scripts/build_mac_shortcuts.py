@@ -487,7 +487,7 @@ def picker_route(b):
         photo_date(b, REPEAT_ITEM, REPEAT_INDEX)
 
     b.repeat_each(photos, per_photo)
-    result = b.run_shell_script(
+    b.run_shell_script(
         *script(
             NAME_PHOTOS,
             'photos.zsh',
@@ -504,10 +504,16 @@ def picker_route(b):
 
     album = b.text(ORIGINALS_ALBUM)
 
-    # Each output line is "file|index|delete or keep|Name.jxl"; no line when
-    # nothing was converted (then Match Text finds no "|").
+    # The results: jxl_done.txt's lines, "file|index|delete or keep|Name.jxl",
+    # read from the work folder with Get File, as the iPhone's import shortcut
+    # reads them; no file when nothing was converted. Not the script's output:
+    # Shortcuts types that by its content, and three or more lines whose names
+    # each have a comma would come as a CSV file instead of text
+    # (Builder.run_shell_script).
+    done = b.get_file_from_shortcuts_folder(f'{WORK_NAME}/jxl_done.txt')
+
     def save_results():
-        lines = b.split(result, '\n')
+        lines = b.split(b.text_from_input(done), '\n')
 
         def per_file():
             parts = b.split(REPEAT_ITEM, '|')
@@ -539,7 +545,7 @@ def picker_route(b):
         b.repeat_each(lines, per_file)
 
     b.set_variable('Saved', b.text('0'))
-    b.if_has_value(b.match_text(result, r'\|'), save_results, lambda: None)
+    b.if_has_value(done, save_results, lambda: None)
     b.if_has_value(
         variable('Saved Photos'),
         lambda: b.set_variable('Saved', b.count(variable('Saved Photos'))),

@@ -37,6 +37,11 @@ encoder. Every release includes the current files of all shortcuts.
     `jxl,q=83`, on every line; or every name with a comma, which earlier
     versions failed on too) and handed the import a file instead of text. The
     import now reads that file.
+  - From the Mac's picker, three or more photos whose names each have a comma
+    (the same number of them) were converted but none was saved to Photos, for
+    the same reason, in earlier versions too. The shortcut now reads the
+    results from `jxl_done.txt` in its work folder, as the iPhone shortcuts do,
+    not from the script's output.
 
 ## [Compress Videos 0.3.0] - 2026-10-14
 

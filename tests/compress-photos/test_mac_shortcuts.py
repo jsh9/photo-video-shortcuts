@@ -336,32 +336,64 @@ def test_hdr_menu_after_the_cores_in_each_route(gen, shortcuts):
 def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
         gen, shortcuts
 ):
-    # Each output line is "file|index|delete or keep|Name.jxl": the file is
+    # The results are jxl_done.txt's lines, "file|index|delete or keep|Name.jxl",
     # read from the work folder inside Shortcuts' iCloud Drive folder with Get
     # File (the one bridge from a script to Shortcuts on the Mac: AppleScript
-    # file results come back empty, absolute paths are refused), renamed to
-    # Name.jxl and saved.
+    # file results come back empty, absolute paths are refused), as the iPhone
+    # shortcut reads them, then Get Text from Input and Split Text, all inside
+    # "If (File) has any value" (no file when nothing was converted). Not the
+    # script's output, which Shortcuts types by its content: three or more
+    # lines whose names each have a comma are a CSV file to it. Each line's
+    # file is read with Get File too, renamed to Name.jxl and saved.
     actions = shortcuts[PHOTOS]
     gets = [a for a in actions if ph.ident(a) == GET_FILE]
-    assert len(gets) == 1
-    p = ph.params(gets[0])
-    assert p['WFFileStorageService'] == 'iCloud Drive'
-    assert p['WFShowFilePicker'] is False
+    assert len(gets) == 2
+    done, copy = (ph.params(g) for g in gets)
+    for p in (done, copy):
+        assert p['WFFileStorageService'] == 'iCloud Drive'
+        assert p['WFShowFilePicker'] is False
+
+    assert done['WFGetFilePath'] == f'{gen.WORK_NAME}/jxl_done.txt'
+    assert done['WFFileErrorIfNotFound'] is False
     assert ph.render(
-        p['WFGetFilePath'], {'Item from List': 'jxl_out_1.jxl'}
+        copy['WFGetFilePath'], {'Item from List': 'jxl_out_1.jxl'}
     ) == (f'{gen.WORK_NAME}/jxl_out_1.jxl')
+    idents = [ph.ident(a) for a in actions]
+    i_done = idents.index(GET_FILE)
+    get_text = actions[idents.index('is.workflow.actions.detect.text', i_done)]
+    assert done['UUID'] in repr(ph.params(get_text)['WFInput'])
+    split = actions[idents.index('is.workflow.actions.text.split', i_done)]
+    assert ph.params(split)['WFTextSeparator'] == 'New Lines'
+    assert ph.params(get_text)['UUID'] in repr(ph.params(split)['text'])
+    for action, inside in ph.inside_if_on(actions, done['UUID']):
+        if action in (get_text, split) or ph.ident(action) in (
+            GET_FILE,
+            'is.workflow.actions.savetocameraroll',
+        ):
+            assert inside is (action is not gets[0]), ph.ident(action)
+    # no action reads the picker script's output
+    batch = next(
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.runshellscript'
+        and 'for f in "$@"; do' in repr(ph.params(a)['Script'])
+    )
+    assert not any(
+        ph.params(batch)['UUID'] in repr(ph.params(a))
+        for a in actions
+        if a is not batch
+    )
     # the picker route (the Otherwise branch of "If Selection") runs no
     # AppleScript but the probe before the branch
     for action, inside in ph.inside_if_on(actions, "'Selection'"):
         if ph.ident(action) == RUN_APPLESCRIPT and not inside:
             assert 'is Photos in front' in ph.params(action)['Script']
 
-    idents = [ph.ident(a) for a in actions]
+    i_copy = idents.index(GET_FILE, i_done + 1)
     assert (
-        idents.index(GET_FILE)
-        < idents.index(
-            'is.workflow.actions.setitemname', idents.index(GET_FILE)
-        )
+        i_done
+        < i_copy
+        < idents.index('is.workflow.actions.setitemname', i_copy)
         < idents.index('is.workflow.actions.savetocameraroll')
     )
     # the script's work folder is that folder, and the follow-up scripts use it
