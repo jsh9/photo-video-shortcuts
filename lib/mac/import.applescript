@@ -5,7 +5,8 @@
 -- the album "@ORIGINALS_ALBUM@", for the user to review and delete (a script
 -- cannot delete them). The log says which copies lack their original's HDR.
 --
--- Input: one line per result, "path|original id|delete or keep|name", then,
+-- Input (text, or a file holding it: see planText): one line per result,
+-- "path|original id|delete or keep|name", then,
 -- optionally, "|" and the copy's own keywords, separated by commas (Compress
 -- Photos: its format and quality, "jxl,q=83"). The id may be empty when the
 -- exported file could not be matched to an item; the flag is photobatch's
@@ -36,7 +37,7 @@ on run {input, parameters}
 	set names to {}
 	set ownKeywords to {}
 	if (count of input) > 0 then
-		set plan to item 1 of input as text
+		set plan to my planText(item 1 of input)
 		set oldDelims to AppleScript's text item delimiters
 		set AppleScript's text item delimiters to "|"
 		repeat with ln in paragraphs of plan
@@ -301,6 +302,22 @@ end addToAlbums
 on notSet(got, field, errNum, e)
 	return "! " & («class filn» of got) & ": could not set its " & field & " (" & errNum & ": " & e & ")" & linefeed
 end notSet
+
+-- The plan's text, from the run's input. Shortcuts types the shell script's
+-- output by its content, and when it takes it for something other than text
+-- it passes a file ("stdout") instead: three or more lines with a comma each
+-- are CSV to it (Compress Photos' keywords, "jxl,q=83", or names with
+-- commas; macOS 26). Its text is then read from the file.
+on planText(v)
+	if class of v is in {alias, «class furl», file} then
+		try
+			return read v as «class utf8»
+		on error number -39 -- an empty file: end of file
+			return ""
+		end try
+	end if
+	return v as text
+end planText
 
 -- Locations as Photos gives them ({latitude, longitude}, or two missing
 -- values): the same place within 0.00001 degree (about 1 m), as photobatch

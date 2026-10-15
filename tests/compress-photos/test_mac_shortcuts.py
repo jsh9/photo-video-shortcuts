@@ -906,6 +906,33 @@ def test_import_compares_what_photos_has(gen):
     ]
 
 
+def test_import_reads_its_plan_from_text_or_a_file(gen, tmp_path):
+    # Shortcuts passes the selection script's output to import.applescript as
+    # a file ("stdout") when it takes it for CSV: three or more lines with a
+    # comma each, as 0.9.0's keywords ("jxl,q=63") give every line. The plan
+    # is then read from the file (UTF-8), whether it comes as an alias or a
+    # file reference; an empty file is no lines, and text stays text.
+    plan = ''.join(
+        f'/out/Café ({i}).jxl||delete|Café ({i}).jxl|jxl,q=63\n'
+        for i in (1, 2, 3)
+    )
+    (tmp_path / 'stdout').write_text(plan, encoding='utf-8')
+    (tmp_path / 'empty').write_bytes(b'')
+    call = '\n'.join([
+        f'set p to POSIX file "{tmp_path / "stdout"}"',
+        f'set e to POSIX file "{tmp_path / "empty"}"',
+        'set AppleScript\'s text item delimiters to "#"',
+        'return {my planText(p as alias), my planText(p),'
+        ' my planText(e as alias), my planText("a|b")} as text',
+    ])
+    got = run_handlers(gen, 'import', "-- The plan's text, from the run", call)
+    assert got == f'{plan}#{plan}##a|b'
+
+    importer = gen.applescript_text('import')
+    assert 'set plan to my planText(item 1 of input)' in importer
+    assert 'item 1 of input as text' not in importer
+
+
 def test_import_gives_each_copy_its_keywords(gen):
     # import.applescript's keywords for a copy, set in Photos only: its
     # original's, then "compr" and its own from its result line (its format
