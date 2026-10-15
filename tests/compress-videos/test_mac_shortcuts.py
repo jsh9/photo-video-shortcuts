@@ -474,6 +474,11 @@ def test_applescripts_in_order_with_their_inputs(gen, actions):
     ]
     assert [r['OutputUUID'] for r in refs] == [vh.params(export)['UUID']]
     text = gen.applescript_text('import')
+    # the import reads its plan from every input item, text or the file
+    # "stdout" Shortcuts passes once it takes three or more lines with a
+    # comma each (names with commas) for CSV; see Compress Photos' tests
+    assert 'my planText(item i of input)' in text
+    assert 'read v as «class utf8»' in text
     assert gen.ORIGINALS_ALBUM == 'Videos already compressed'
     assert f'"{gen.ORIGINALS_ALBUM}"' in text
     assert text.startswith(f'-- {NAME}: imports the files the shell made')

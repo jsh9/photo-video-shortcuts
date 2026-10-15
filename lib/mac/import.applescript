@@ -30,37 +30,46 @@ on run {input, parameters}
 	set tCheck to 0
 	set tAlbums to 0
 	set tCollect to 0
-	-- The plan: the files, their originals' ids, the flags and the names.
+	-- The plan: the files, their originals' ids, the flags and the names,
+	-- from every item of the input (one text, or one file, normally: see
+	-- planText). A plan that can't be read is a "!" line, and nothing is
+	-- imported.
 	set theFiles to {}
 	set origIds to {}
 	set flags to {}
 	set names to {}
 	set ownKeywords to {}
-	if (count of input) > 0 then
-		set plan to my planText(item 1 of input)
-		set oldDelims to AppleScript's text item delimiters
-		set AppleScript's text item delimiters to "|"
-		repeat with ln in paragraphs of plan
-			set ln to ln as text
-			if ln is not "" then
-				set parts to text items of ln
-				if (count of parts) < 4 then
-					set problems to problems & "! unexpected result line: " & ln & linefeed
+	set plan to ""
+	try
+		repeat with i from 1 to count of input
+			set plan to plan & (my planText(item i of input)) & linefeed
+		end repeat
+	on error e number errNum
+		set problems to problems & "! could not read the result lines (" & errNum & ": " & e & ")" & linefeed
+		set plan to ""
+	end try
+	set oldDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to "|"
+	repeat with ln in paragraphs of plan
+		set ln to ln as text
+		if ln is not "" then
+			set parts to text items of ln
+			if (count of parts) < 4 then
+				set problems to problems & "! unexpected result line: " & ln & linefeed
+			else
+				set end of theFiles to POSIX file (item 1 of parts)
+				set end of origIds to item 2 of parts
+				set end of flags to item 3 of parts
+				set end of names to item 4 of parts
+				if (count of parts) > 4 then
+					set end of ownKeywords to item 5 of parts
 				else
-					set end of theFiles to POSIX file (item 1 of parts)
-					set end of origIds to item 2 of parts
-					set end of flags to item 3 of parts
-					set end of names to item 4 of parts
-					if (count of parts) > 4 then
-						set end of ownKeywords to item 5 of parts
-					else
-						set end of ownKeywords to ""
-					end if
+					set end of ownKeywords to ""
 				end if
 			end if
-		end repeat
-		set AppleScript's text item delimiters to oldDelims
-	end if
+		end if
+	end repeat
+	set AppleScript's text item delimiters to oldDelims
 	-- Import: all the files in one call; each imported item is matched to its
 	-- line by file name (an import keeps the name, and the names are unique).
 	-- If that call fails, one file at a time, so that one bad file doesn't
@@ -303,11 +312,13 @@ on notSet(got, field, errNum, e)
 	return "! " & («class filn» of got) & ": could not set its " & field & " (" & errNum & ": " & e & ")" & linefeed
 end notSet
 
--- The plan's text, from the run's input. Shortcuts types the shell script's
--- output by its content, and when it takes it for something other than text
--- it passes a file ("stdout") instead: three or more lines with a comma each
--- are CSV to it (Compress Photos' keywords, "jxl,q=83", or names with
--- commas; macOS 26). Its text is then read from the file.
+-- The plan's text from one item of the run's input. Shortcuts types the
+-- shell script's output by its content, and when it takes it for something
+-- other than text it passes a file ("stdout") instead: three or more lines
+-- with a comma each are CSV to it (Compress Photos' keywords, "jxl,q=83", or
+-- names with commas; macOS 26). Its text is then read from the file; an
+-- empty file is no lines, and any other failure to read it is the caller's
+-- to report.
 on planText(v)
 	if class of v is in {alias, «class furl», file} then
 		try

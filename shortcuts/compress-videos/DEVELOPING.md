@@ -61,7 +61,9 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
        path|original id|delete|IMG_1234.mp4
      writes last-settings.txt and vid_skipped.txt
 
-   Run AppleScript (lib/mac/import.applescript, input: those lines) has Photos
+   Run AppleScript (lib/mac/import.applescript, input: those lines, as text
+   or as the file "stdout" once Shortcuts takes three or more lines with a
+   comma each for CSV: see Compress Photos' DEVELOPING.md) has Photos
    import the copies, give each its original's location, title, caption,
    keywords (with "compr") and favorite in Photos, add each to its original's
    albums, and add the originals to the album "Videos already compressed";

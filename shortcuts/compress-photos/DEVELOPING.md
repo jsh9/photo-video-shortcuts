@@ -156,7 +156,8 @@ Compress Photos (macOS)                      (shortcut)
    prints
    "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)";
    Run AppleScript
-   (lib/mac/import.applescript, input: those lines) has Photos import each file,
+   (lib/mac/import.applescript, input: those lines, as text or as the file
+   "stdout": see the notes below) has Photos import each file,
    give it its original's date and location should Photos have read others
    from the file, its original's title and caption, its original's keywords
    with compr and the format and quality (1.5), make it a favorite if its
