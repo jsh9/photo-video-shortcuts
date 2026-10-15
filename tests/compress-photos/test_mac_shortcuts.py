@@ -929,6 +929,23 @@ def test_import_reads_its_plan_from_text_or_a_file(gen, tmp_path):
     ])
     got = run_handlers(gen, 'import', "-- The plan's text from one item", call)
     assert got == f'{plan}#{plan}##a|b'
+    # any other error of the read is left to the run handler: a file
+    # Shortcuts removed before the script read it (a stale alias; a file
+    # reference to a missing file fails the same way) is -1700, "Can't make
+    # alias ... into type file"
+    (tmp_path / 'stale').write_text(plan, encoding='utf-8')
+    call = '\n'.join([
+        f'set s to (POSIX file "{tmp_path / "stale"}") as alias',
+        'do shell script "rm " & quoted form of (POSIX path of s)',
+        'try',
+        '\tmy planText(s)',
+        '\treturn "no error"',
+        'on error number n',
+        '\treturn n',
+        'end try',
+    ])
+    got = run_handlers(gen, 'import', "-- The plan's text from one item", call)
+    assert got == '-1700'
 
     importer = gen.applescript_text('import')
     assert 'my planText(item i of input)' in importer
