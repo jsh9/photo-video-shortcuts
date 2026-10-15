@@ -53,6 +53,10 @@ encoder. Every release includes the current files of all shortcuts.
     them) were converted but none was saved to Photos
     (`! unexpected result line: ...:stdout` in the log), as in Compress Photos
     0.9.0.
+  - A video whose file name has a `|` was converted but not saved to Photos
+    (its result line was read wrongly) and not matched to its original. Its
+    copy is now named with `_` for `|`, `:`, `\` and control characters, as
+    Compress Photos' copies are.
 
 ## [Compress Photos 0.8.0] - 2026-10-12
 

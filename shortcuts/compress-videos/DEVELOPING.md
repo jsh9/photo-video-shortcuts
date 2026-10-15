@@ -43,7 +43,7 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
    tune (H.265), RF, largest size, audio; each sets a variable
 
    Run AppleScript (lib/mac/export.applescript) has Photos export the
-   originals into the work folder's in/ and returns "id|filename" lines
+   originals into the work folder's in/ and returns "id|date|filename" lines
 
    Run Shell Script (/bin/zsh; scripts/mac/common.zsh + selection.zsh, with
    encode.zsh at its @RUN@; the settings and the lines as variables):
@@ -59,6 +59,8 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
        vidmeta copy in/IMG_1234.MOV vid_out_N.mp4   (1.2)
      moves each copy to out/IMG_1234.mp4 and prints
        path|original id|delete|IMG_1234.mp4
+       (a "|", ":", "\" or control character in the original's name is "_"
+       in the copy's, as photobatch names Compress Photos' copies)
      writes last-settings.txt and vid_skipped.txt
 
    Run AppleScript (lib/mac/import.applescript, input: those lines, as text

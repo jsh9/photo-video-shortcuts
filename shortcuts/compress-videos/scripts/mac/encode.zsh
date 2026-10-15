@@ -202,7 +202,14 @@ if (( njobs )); then
     bytes_in=$(( bytes_in + ${J[$n,size]} ))
     bytes_out=$(( bytes_out + size_out ))
     echo "  $(size_text ${J[$n,size]}) → $(size_text $size_out) ($(( 100 * size_out / (${J[$n,size]} > 0 ? ${J[$n,size]} : 1) ))%)${ow:+, ${ow}×${oh}}, $(duration_text $elapsed) at $(printf '%.1f' $(( dur / elapsed )))× real time" >> "$LOG"
-    printf 'vid_out_%d.mp4|%d|delete|%s\n' $n $n "${name:r}.mp4" >> "$WORK/vid_done.txt"
+    # The copy's name: the original's, with "|", ":", "/", "\" and control
+    # characters as "_" (as photobatch's clean_name names Compress Photos'
+    # copies): "|" separates the fields of vid_done.txt and of the result
+    # lines, ":" and "/" are path separators.
+    copy_name=${name:r}
+    copy_name=${copy_name//[|:\\\/]/_}
+    copy_name=${copy_name//[[:cntrl:]]/_}
+    printf 'vid_out_%d.mp4|%d|delete|%s\n' $n $n "$copy_name.mp4" >> "$WORK/vid_done.txt"
     converted=$((converted + 1))
   done
   rm -f "$WORK/vid_err.txt"

@@ -602,6 +602,25 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
     )
 
 
+def test_selection_name_with_field_separators(mac):
+    # A "|" in a photo's name would split the result line: photobatch names
+    # the copy with "_" for it, and for ":", "/", "\" and control characters
+    # (clean_name; test_encoder_cli's test_saved_names_are_safe), and the
+    # exporter's "id|date|filename" line is read past its second "|", so the
+    # photo still gets its id.
+    exported(mac, 'hdr/srgb.heic', 'My|Photo: 1.HEIC')
+    out = mac.batch(
+        'selection', lines='A1|2024-01-01 17:00:00|My|Photo: 1.HEIC\n'
+    )
+    folder = mac.selection_work / 'out'
+    assert out.splitlines() == [
+        f'{folder}/My_Photo_ 1.jxl|A1|delete|My_Photo_ 1.jxl|jxl,q=83'
+    ]
+    assert (mac.selection_work / 'jxl_job.txt').read_text() == (
+        '1|My|Photo: 1.HEIC\n'
+    )
+
+
 def test_selection_unknown_id_and_export_error(mac, gen):
     exported(mac, 'hdr/srgb.heic', 'IMG_0007 (1).HEIC')
     out = mac.batch('selection', lines='ERROR: Photos could not export\n')

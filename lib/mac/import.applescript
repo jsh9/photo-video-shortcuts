@@ -10,7 +10,9 @@
 -- optionally, "|" and the copy's own keywords, separated by commas (Compress
 -- Photos: its format and quality, "jxl,q=83"). The id may be empty when the
 -- exported file could not be matched to an item; the flag is photobatch's
--- and is not acted on here.
+-- and is not acted on here. A "|" in an original's name is "_" in its copy's
+-- (photobatch's clean_name; Compress Videos' encode.zsh), so the path and
+-- the name never hold one and the line splits on "|".
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --

@@ -154,7 +154,9 @@ Compress Photos (macOS)                      (shortcut)
    saving time ends) and jxl_meta.txt (the other lines, by job index), runs
    photobatch, renames each result to out/Name.jxl (or .heic) and
    prints
-   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)";
+   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)"
+   (a "|", ":", "/", "\" or control character in the original's name is
+   "_" in the copy's: photobatch's clean_name, so the line splits on "|");
    Run AppleScript
    (lib/mac/import.applescript, input: those lines, as text or as the file
    "stdout": see the notes below) has Photos import each file,

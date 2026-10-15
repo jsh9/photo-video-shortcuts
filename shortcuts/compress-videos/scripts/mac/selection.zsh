@@ -1,7 +1,8 @@
 # The items selected in Photos: Photos exported their original files into
 # $WORK/in (see export.applescript), and IDS has one "id|date|filename" line
-# (the date unused here; older exporters gave "id|filename") per
-# selected item (or "ERROR: ..."). Only videos are converted. Photos are
+# (the date unused here; older exporters gave "id|filename"; the name may
+# have "|" itself) per selected item (or "ERROR: ..."). Only videos are
+# converted. Photos are
 # skipped, and so are Live Photos (a photo whose .mov of the same name is not
 # an item of its own), videos whose picture this ffmpeg can't decode, and the
 # videos a copy would lose something of: slo-mo, spatial video, log
@@ -22,7 +23,10 @@ esac
 typeset -A ids seen
 for line in "${(@f)IDS}"; do
   case $line in *'|'*) ;; *) continue;; esac
-  name=${line##*|}
+  # the name: what follows the date's "|", "|" and all (an older exporter's
+  # line has no date: what follows the id's)
+  rest=${line#*|}
+  case $rest in *'|'*) name=${rest#*|};; *) name=$rest;; esac
   if (( ${+seen[$name]} )); then
     if [ -n "${ids[$name]}" ]; then
       echo "! two or more selected items are named $name: their copies are saved, but not added to albums, and the originals are not collected" >> "$LOG"
@@ -236,7 +240,8 @@ fi
 [ -f "$WORK/vid_done.txt" ] && { echo; echo "Now Photos imports the videos, adds them to their albums and collects the originals..."; } >> "$LOG"
 # Each result becomes <work>/out/Name.mp4 (never replacing a file), and one
 # output line per result, "path|original id|delete|Name.mp4", for
-# import.applescript. Nothing when nothing was converted.
+# import.applescript; a "|" in the original's name is "_" in the copy's
+# (encode.zsh), so the line splits on "|". Nothing when nothing was converted.
 mkdir -p "$WORK/out"
 if [ -f "$WORK/vid_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
