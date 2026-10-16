@@ -29,6 +29,19 @@ encoder. Every release includes the current files of all shortcuts.
     carries the new version number, which the shortcuts check. The iPhone
     shortcuts and `photobatch.wasm` only carry the new version number; iPhone
     users don't need to update.
+- Fixed
+  - On the Mac, from Photos (the selection), three or more photos were
+    converted but none was saved to Photos, and the log said
+    `! unexpected result line: ...:stdout`: Shortcuts took the script's result
+    lines for a CSV file once each had the same number of commas (the keywords,
+    `jxl,q=83`, on every line; or every name with a comma, which earlier
+    versions failed on too) and handed the import a file instead of text. The
+    import now reads that file.
+  - From the Mac's picker, three or more photos whose names each have a comma
+    (the same number of them) were converted but none was saved to Photos, for
+    the same reason, in earlier versions too. The shortcut now reads the
+    results from `jxl_done.txt` in its work folder, as the iPhone shortcuts do,
+    not from the script's output.
 
 ## [Compress Videos 0.3.0] - 2026-10-14
 
@@ -40,6 +53,15 @@ encoder. Every release includes the current files of all shortcuts.
   - Update the shortcut and `vidmeta-macos` together: `vidmeta` only carries
     the new version number, which the shortcut checks; so do `ffmpeg-macos` and
     `ffprobe-macos`, which you don't need to update.
+- Fixed
+  - Three or more videos whose names each have a comma (the same number of
+    them) were converted but none was saved to Photos
+    (`! unexpected result line: ...:stdout` in the log), as in Compress Photos
+    0.9.0.
+  - A video whose file name has a `|` was converted but not saved to Photos
+    (its result line was read wrongly) and not matched to its original. Its
+    copy is now named with `_` for `|`, `:`, `\` and control characters, as
+    Compress Photos' copies are.
 
 ## [Compress Photos 0.8.0] - 2026-10-12
 

@@ -204,11 +204,20 @@ def photo(folder, fixture, name):
     return shutil.copy(FIXTURES / fixture, folder / name)
 
 
-def test_photos_prints_one_line_per_result_with_the_path(mac):
+def done_lines(mac):
+    """The picker route's results: jxl_done.txt's lines in the work folder."""
+    return (mac.work / 'jxl_done.txt').read_text().splitlines()
+
+
+def test_photos_leaves_one_line_per_result_in_jxl_done(mac):
     # Two library photos; the shortcut passes their names (the first only,
-    # here: the second falls back to the file's name).
+    # here: the second falls back to the file's name, comma and all). The
+    # results are jxl_done.txt's lines, which the shortcut reads with Get
+    # File; the script prints nothing, since Shortcuts types a script's output
+    # by its content and would take three or more lines whose names each have
+    # a comma for a CSV file.
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
-    b = photo(mac.root / 'in', 'hdr/not_iphone_o6.heic', 'IMG_0002.HEIC')
+    b = photo(mac.root / 'in', 'hdr/not_iphone_o6.heic', 'Trip, day 2.HEIC')
     out = mac.batch(
         'photos',
         a,
@@ -216,17 +225,18 @@ def test_photos_prints_one_line_per_result_with_the_path(mac):
         lines='IMG_0001.HEIC',
         skipped='echo "Skipped 1 video(s): only still photos are converted."',
     )
-    assert out.splitlines() == [
+    assert out == ''
+    assert done_lines(mac) == [
         'jxl_out_1.jxl|1|delete|IMG_0001.jxl',
-        'jxl_out_2.jxl|2|delete|IMG_0002.jxl',
+        'jxl_out_2.jxl|2|delete|Trip, day 2.jxl',
     ]
-    for line in out.splitlines():
+    for line in done_lines(mac):
         assert os.path.getsize(mac.work / line.split('|')[0]) > 0
 
     # The work folder stays for the shortcut to read the files; the log has
     # what the shortcut skipped and what photobatch printed.
     assert (mac.work / 'jxl_job.txt').read_text() == (
-        '1|IMG_0001.HEIC\n2|IMG_0002.HEIC\n'
+        '1|IMG_0001.HEIC\n2|Trip, day 2.HEIC\n'
     )
     assert mac.log.startswith('Skipped 1 video(s): only still photos')
     assert 'Done: 2 of 2 converted' in mac.log
@@ -238,13 +248,11 @@ def test_photos_dates_go_to_photobatch(mac):
     # become jxl_dates.txt as they are; photobatch writes them into the copies.
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     b = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0002.HEIC')
-    out = mac.batch('photos', a, b, dates='2|2024-07-01T09:30:00-04:00')
+    mac.batch('photos', a, b, dates='2|2024-07-01T09:30:00-04:00')
     assert (mac.work / 'jxl_dates.txt').read_text() == (
         '2|2024-07-01T09:30:00-04:00\n'
     )
-    first, second = (
-        mac.work / line.split('|')[0] for line in out.splitlines()
-    )
+    first, second = (mac.work / line.split('|')[0] for line in done_lines(mac))
     assert 'ExifIFD:DateTimeOriginal' not in ph.exif_tags(first)
     assert ph.exif_tags(second)['ExifIFD:DateTimeOriginal'] == (
         '2024:07:01 09:30:00'
@@ -262,11 +270,9 @@ def test_photos_locations_go_to_photobatch(mac):
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     b = photo(mac.root / 'in', 'hdr/srgb.heic', 'IMG_0002.HEIC')
     meta = '1|gps|\n2|gps|48.8584,2.2945'
-    out = mac.batch('photos', a, b, meta=meta)
+    mac.batch('photos', a, b, meta=meta)
     assert (mac.work / 'jxl_meta.txt').read_text() == meta + '\n'
-    first, second = (
-        mac.work / line.split('|')[0] for line in out.splitlines()
-    )
+    first, second = (mac.work / line.split('|')[0] for line in done_lines(mac))
     assert not ph.gps_of(first)
     assert ph.gps_of(second)['GPSLatitude'] == pytest.approx(48.8584)
     # none at all: no file
@@ -293,6 +299,7 @@ def test_photos_nothing_converted_prints_nothing(mac, gen):
     bad.parent.mkdir()
     bad.write_text('not a photo')
     assert mac.batch('photos', bad) == ''
+    assert not (mac.work / 'jxl_done.txt').exists()
     assert 'unsupported format' in mac.log
     assert re.search(gen.WARNINGS, mac.log)
 
@@ -305,9 +312,8 @@ def test_photos_without_input(mac, gen):
 def test_photos_notes_a_missing_icloud_folder(mac, gen):
     shutil.rmtree(mac.icloud)
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
-    assert mac.batch('photos', a).strip() == (
-        'jxl_out_1.jxl|1|delete|IMG_0001.jxl'
-    )
+    assert mac.batch('photos', a) == ''
+    assert done_lines(mac) == ['jxl_out_1.jxl|1|delete|IMG_0001.jxl']
     assert "! Shortcuts' iCloud Drive folder not found" in mac.log
     assert re.search(gen.WARNINGS, mac.log)
 
@@ -602,6 +608,25 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
     )
 
 
+def test_selection_name_with_field_separators(mac):
+    # A "|" in a photo's name would split the result line: photobatch names
+    # the copy with "_" for it, and for ":", "/", "\" and control characters
+    # (clean_name; test_encoder_cli's test_saved_names_are_safe), and the
+    # exporter's "id|date|filename" line is read past its second "|", so the
+    # photo still gets its id.
+    exported(mac, 'hdr/srgb.heic', 'My|Photo: 1.HEIC')
+    out = mac.batch(
+        'selection', lines='A1|2024-01-01 17:00:00|My|Photo: 1.HEIC\n'
+    )
+    folder = mac.selection_work / 'out'
+    assert out.splitlines() == [
+        f'{folder}/My_Photo_ 1.jxl|A1|delete|My_Photo_ 1.jxl|jxl,q=83'
+    ]
+    assert (mac.selection_work / 'jxl_job.txt').read_text() == (
+        '1|My|Photo: 1.HEIC\n'
+    )
+
+
 def test_selection_unknown_id_and_export_error(mac, gen):
     exported(mac, 'hdr/srgb.heic', 'IMG_0007 (1).HEIC')
     out = mac.batch('selection', lines='ERROR: Photos could not export\n')
@@ -807,8 +832,8 @@ def test_files_heic_route_writes_heic_next_to_originals(mac):
 
 
 def test_photos_heic_route_names_the_copies_heic(mac):
-    # The picker route's lines for the shortcut end in the copy's name with
-    # the HEIC extension.
+    # The picker route's lines for the shortcut (jxl_done.txt) end in the
+    # copy's name with the HEIC extension.
     a = photo(mac.root / 'in', 'hdr/o1.heic', 'IMG_0001.HEIC')
     result = mac.run(
         mac.main_script(
@@ -816,10 +841,8 @@ def test_photos_heic_route_names_the_copies_heic(mac):
         ),
         a,
     )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().splitlines()[-1] == (
-        'jxl_out_1.heic|1|delete|IMG_0001.heic'
-    )
+    assert (result.returncode, result.stdout) == (0, ''), result.stderr
+    assert done_lines(mac) == ['jxl_out_1.heic|1|delete|IMG_0001.heic']
     assert (mac.work / 'jxl_out_1.heic').exists()
 
 

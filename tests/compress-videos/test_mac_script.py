@@ -767,6 +767,34 @@ def test_result_lines_ids_and_names(mac, fake):
     )
 
 
+def test_names_with_field_separators(mac, fake):
+    # A "|" in a video's name would split vid_done.txt's line and the result
+    # line wrongly, and ":" is a path separator in HFS paths: the copy's name
+    # has "_" for them, and for "\" and control characters, as photobatch
+    # names Compress Photos' copies. The exporter's "id|date|filename" line
+    # is read past its second "|", so each item still gets its id. The names
+    # sort the same way in every locale's collation (the script converts
+    # in/* in glob order; en_US.UTF-8 puts "back" before "My", C after).
+    video(mac, fake, 'My|Clip: 1.MOV')
+    video(mac, fake, 'Slash\\back.mov')
+    lines = mac.convert(
+        'A1|2024-01-01 17:00:00|My|Clip: 1.MOV\nB2||Slash\\back.mov\n'
+    )
+    out = mac.work / 'out'
+    assert lines == [
+        f'{out}/My_Clip_ 1.mp4|A1|delete|My_Clip_ 1.mp4',
+        f'{out}/Slash_back.mp4|B2|delete|Slash_back.mp4',
+    ]
+    assert (mac.work / 'vid_done.txt').read_text() == (
+        'vid_out_1.mp4|1|delete|My_Clip_ 1.mp4\n'
+        'vid_out_2.mp4|2|delete|Slash_back.mp4\n'
+    )
+    assert fake.vidmeta == [
+        f'copy {mac.work}/in/My|Clip: 1.MOV {mac.work}/vid_out_1.mp4',
+        f'copy {mac.work}/in/Slash\\back.mov {mac.work}/vid_out_2.mp4',
+    ]
+
+
 def test_nothing_to_convert(mac, fake, gen):
     (mac.work / 'in' / 'IMG_0001.HEIC').write_bytes(b'photo')
     assert mac.convert('A|IMG_0001.HEIC') == []

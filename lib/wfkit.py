@@ -609,7 +609,17 @@ class Builder:
         """
         Run Shell Script (/bin/zsh): ``script`` is text with variables; the
         input items are passed as files, their paths as arguments ("$@") or on
-        stdin. Returns the script's standard output as text.
+        stdin. Returns the script's standard output, which Shortcuts types by
+        its content: text normally, but three or more newline-terminated lines
+        with the same number of commas each are a CSV file to it (a ``dyn.``
+        type), and the next action then gets a file named "stdout" instead of
+        text. The first line's count is the header's and about nine in ten of
+        the other lines must match it, so an odd line keeps short outputs text
+        and long ones not (macOS 26, WorkflowKit's ``WFFileRepresentation``).
+        Lines a later action reads go through a file the script writes instead
+        (Get File), or the reader accepts a file (``planText`` in
+        lib/mac/import.applescript); see
+        shortcuts/compress-photos/DEVELOPING.md.
         """
         params = {
             'Script': plain_or_text(*script),
@@ -630,8 +640,9 @@ class Builder:
         the script text keeps the script from compiling (it then produces no
         output, without an error). Values go in through ``input_ref``, which
         the script reads as ``input`` in ``on run {input, parameters}`` (a
-        list; a text item arrives as text). The result comes back as text; a
-        file result comes back as nothing (checked on macOS 26).
+        list; a text item arrives as text, a file as an alias). The result
+        comes back as text; a file result comes back as nothing (checked on
+        macOS 26).
         """
         params = {'Script': script}
         if input_ref is not None:
