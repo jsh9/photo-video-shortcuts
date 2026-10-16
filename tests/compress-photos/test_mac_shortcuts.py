@@ -573,6 +573,17 @@ def test_files_passes_real_paths(shortcuts):
         },
     )[0]
     assert "PATHS=$(cat <<'JXL_LINES'\n/a/b.heic\n\n/c\nJXL_LINES\n)" in text
+    # a folder's photos: HEIF, JPEG, PNG and JPEG XL (since 0.10.0)
+    assert '"$f"/*.(#i)(heic|heif|hif|jpg|jpeg|png|jxl)(N.)' in text
+
+
+def test_selection_pairs_live_photo_videos_with_jpeg_xl_too(shortcuts):
+    # A video with a photo of the same name is a Live Photo's: skipped as one,
+    # not counted as a video, whatever the photo's format.
+    texts = ph.shell_scripts(shortcuts[PHOTOS], VALUES)
+    selection = [t for t in texts if 'in/*(.N)' in t]
+    assert len(selection) == 1
+    assert '(#i)(heic|heif|hif|jpg|jpeg|png|jxl|dng)(.N)' in selection[0]
 
 
 def test_surfaces(workflows):

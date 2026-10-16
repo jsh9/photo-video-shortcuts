@@ -318,9 +318,9 @@ def build_compress(sample):
         open_app='close',
     )
 
-    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step. Each photo's date and
-    # location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
+    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG,
+    # PNG and JPEG XL itself, so there is no Convert Image step. Each photo's
+    # date and location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
     # wf.photo_date, wf.photo_location), the location read before Put File
     # fetches the file.
     def per_photo():

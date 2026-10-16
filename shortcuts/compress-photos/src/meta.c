@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "boxes.h"
+#include "jxl.h"
 
 // stb_image's zlib decoder (compiled in pixels.c); returns a malloc'ed buffer.
 char *stbi_zlib_decode_malloc_guesssize_headerflag(const char *buffer, int len,
@@ -40,6 +41,9 @@ static int blob_set(blob_t *b, const uint8_t *p, size_t n) {
 
 file_format_t detect_format(const uint8_t *b, size_t n) {
   if (n >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return FMT_JPEG;
+  // JPEG XL: a bare codestream, or the container's signature box ("JXL ")
+  if (n >= 2 && b[0] == 0xFF && b[1] == 0x0A) return FMT_JXL;
+  if (n >= 12 && memcmp(b, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0) return FMT_JXL;
   if (n >= 8 && memcmp(b, "\x89PNG\r\n\x1a\n", 8) == 0) return FMT_PNG;
   if (n >= 12 && memcmp(b + 4, "ftyp", 4) == 0) {
     // Any ISOBMFF file with a 'meta' box is handled by the HEIF parser; check
@@ -54,6 +58,7 @@ const char *format_name(file_format_t f) {
     case FMT_HEIF: return "HEIF";
     case FMT_JPEG: return "JPEG";
     case FMT_PNG: return "PNG";
+    case FMT_JXL: return "JPEG XL";
     default: return "unknown";
   }
 }
@@ -772,6 +777,7 @@ int meta_extract(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t er
     case FMT_HEIF: rc = parse_heif(buf, len, m); break;
     case FMT_JPEG: rc = parse_jpeg(buf, len, m, err, err_len); break;
     case FMT_PNG: rc = parse_png(buf, len, m); break;
+    case FMT_JXL: rc = jxl_boxes(buf, len, m, err, err_len); break;
     default: break;
   }
   if (rc && err_len && !err[0]) metadata_error(err, err_len, "out of memory reading metadata");

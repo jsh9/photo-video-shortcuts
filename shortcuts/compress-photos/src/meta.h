@@ -1,4 +1,4 @@
-// Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG and PNG files, plus
+// Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG, PNG and JPEG XL files, plus
 // in-place helpers for the EXIF/XMP orientation and pixel-dimension tags, and
 // setting the EXIF capture date, GPS position and caption.
 #ifndef JXLBATCH_META_H
@@ -13,13 +13,13 @@ typedef struct {
   size_t size;
 } blob_t;
 
-typedef enum { FMT_UNKNOWN = 0, FMT_HEIF, FMT_JPEG, FMT_PNG } file_format_t;
+typedef enum { FMT_UNKNOWN = 0, FMT_HEIF, FMT_JPEG, FMT_PNG, FMT_JXL } file_format_t;
 
 typedef struct {
   file_format_t format;
   blob_t exif;           // raw TIFF structure, starts with "II*\0" or "MM\0*"
   blob_t xmp;            // XMP packet
-  blob_t icc;            // ICC profile (PNG iCCP chunk or JPEG APP2 segments)
+  blob_t icc;            // ICC profile (PNG iCCP chunk or JPEG APP2 segments; a JPEG XL's comes with its pixels)
   int png_srgb;          // PNG has an sRGB chunk
   int png_cicp_present;  // PNG has a cICP chunk
   uint8_t png_cicp[4];   // primaries, transfer, matrix, full-range flag

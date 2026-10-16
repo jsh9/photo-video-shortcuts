@@ -2,7 +2,7 @@
 // into JPEG XL, keeping the original EXIF/XMP metadata.
 //
 // For each job line "i|Name" in JOBFILE it reads jxl_in_i.orig (the original
-// photo: HEIF, JPEG or PNG), writes jxl_out_i.jxl, and appends
+// photo: HEIF, JPEG, PNG or JPEG XL), writes jxl_out_i.jxl, and appends
 // "jxl_out_i.jxl|i|delete|Name.jxl" to jxl_done.txt ("keep" instead of
 // "delete" when the JXL lacks the original's HDR). A jxl_in_i.png converted
 // by Shortcuts is used only for other formats (older versions of the shortcut).
@@ -44,6 +44,7 @@
 #include "grain.h"
 #include "heicout.h"
 #include "hevcenc.h"
+#include "jxl.h"
 #include "meta.h"
 #include "pixels.h"
 #include "selftest_hdr_heic.h"
@@ -107,6 +108,9 @@ typedef struct {
 static THREAD_LOCAL textbuf_t *t_out;  // this thread's buffer; NULL: stdout
 #ifdef JXLBATCH_THREADS
 static THREAD_LOCAL void *t_runner;  // this thread's libjxl thread pool; NULL: one thread
+#define DECODE_RUNNER t_runner
+#else
+#define DECODE_RUNNER NULL  // one thread (WebAssembly)
 #endif
 static THREAD_LOCAL int t_threads;  // threads for this thread's photo (HEIC tiles); 0: one
 
@@ -298,33 +302,6 @@ static const char *jxl_error_name(JxlEncoderError e) {
   }
 }
 
-static int color_from_cicp(const uint8_t cicp[4], JxlColorEncoding *c) {
-  memset(c, 0, sizeof *c);
-  c->color_space = JXL_COLOR_SPACE_RGB;
-  c->white_point = JXL_WHITE_POINT_D65;
-  c->rendering_intent = JXL_RENDERING_INTENT_RELATIVE;
-  switch (cicp[0]) {
-    case 1: c->primaries = JXL_PRIMARIES_SRGB; break;
-    case 9: c->primaries = JXL_PRIMARIES_2100; break;
-    case 11:
-      c->primaries = JXL_PRIMARIES_P3;
-      c->white_point = JXL_WHITE_POINT_DCI;
-      break;
-    case 12: c->primaries = JXL_PRIMARIES_P3; break;
-    default: return 0;
-  }
-  switch (cicp[1]) {
-    case 1: case 6: case 14: case 15: c->transfer_function = JXL_TRANSFER_FUNCTION_709; break;
-    case 8: c->transfer_function = JXL_TRANSFER_FUNCTION_LINEAR; break;
-    case 13: c->transfer_function = JXL_TRANSFER_FUNCTION_SRGB; break;
-    case 16: c->transfer_function = JXL_TRANSFER_FUNCTION_PQ; break;
-    case 17: c->transfer_function = JXL_TRANSFER_FUNCTION_DCI; break;
-    case 18: c->transfer_function = JXL_TRANSFER_FUNCTION_HLG; break;
-    default: return 0;
-  }
-  return cicp[2] == 0;  // RGB only
-}
-
 // Chunked input: libjxl reads the pixels in place, a region at a time,
 // instead of first copying the whole image (matters for 48 MP photos). An
 // HDR image is computed a region at a time, as libjxl asks for it.
@@ -506,7 +483,7 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   }
   if (!color_set && color && color->cicp_present && !gray) {
     JxlColorEncoding ce;
-    if (color_from_cicp(color->cicp, &ce) && JxlEncoderSetColorEncoding(enc, &ce) == JXL_ENC_SUCCESS) {
+    if (jxl_color_from_cicp(color->cicp, &ce) && JxlEncoderSetColorEncoding(enc, &ce) == JXL_ENC_SUCCESS) {
       color_set = 1;
     }
   }
@@ -882,6 +859,7 @@ typedef struct {
   size_t kept;         // originals marked "keep": their HDR isn't in the JXL
   size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
   size_t bright_sky;   // HDR photos with much bright sky (Photos may show pink patches)
+  size_t skipped;      // JPEG XL originals left alone: the copy wouldn't be smaller
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -894,6 +872,9 @@ typedef struct {
   char ext[8];  // the output's extension, "jxl" or "heic"
   int keep;     // the original had HDR that the copy lacks: not to be deleted
   int apple_jpeg, not_iphone, bright_sky;
+  // Not converted, and not a failure: a JPEG XL copy that wouldn't be
+  // smaller than its JPEG XL original isn't written.
+  int skipped;
   double bytes_in, bytes_out;
   // The photo's summary, printed once it is in jxl_done.txt: e.g.
   // "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s".
@@ -1157,6 +1138,7 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
   char err[256] = "";
   int ok = 0, transcoded = 0;
   const double t0 = now_seconds();
+  res->skipped = 0;
 
   say("\n[%zu/%zu] %s\n", pos, total, job->name);
   if (!p_orig || !p_out) {
@@ -1169,7 +1151,7 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
   }
   const file_format_t format = detect_format(orig, orig_len);
   if (format == FMT_UNKNOWN) {
-    snprintf(err, sizeof err, "unsupported format: only HEIF, JPEG and PNG photos can be converted");
+    snprintf(err, sizeof err, "unsupported format: only HEIF, JPEG, PNG and JPEG XL photos can be converted");
     goto done;
   }
   if (meta_extract(orig, orig_len, &mo, err, sizeof err) != 0) goto done;
@@ -1220,6 +1202,10 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
     if (format == FMT_HEIF) {
       if (heif_decode(orig, orig_len, 1, &img, &color, &hdr, NULL, err, sizeof err) != 0) goto done;
       if (hdr.has_gain_map && !opt->sdr) say_wrap("  ", "! HDR not kept; saved as SDR");
+    } else if (format == FMT_JXL) {
+      // Upright already; an HDR one (PQ, HLG) is tone-mapped to SDR with
+      // Drop HDR, and refused below otherwise.
+      if (jxl_decode(orig, orig_len, opt->sdr, DECODE_RUNNER, &img, &color, &hdr, NULL, err, sizeof err) != 0) goto done;
     } else {
       if (format == FMT_JPEG && jpeg_has_gain_map(orig, orig_len)) {
         hdr.has_gain_map = 1;
@@ -1249,6 +1235,15 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
       // the SDR HEIC. An HDR transfer curve (PQ, HLG) would band at 8 bits,
       // and such a picture is HDR without a gain map: refused.
       const int transfer = color.icc.size ? gainmap_icc_cicp_transfer(&color.icc) : color.cicp_present ? color.cicp[1] : 0;
+      if ((transfer == 16 || transfer == 18) && format == FMT_JXL) {
+        // A HEIC written here can't hold its HDR (no gain map); Drop HDR
+        // tone-maps it to SDR (the Mac's choice; the iPhone has none).
+        snprintf(err, sizeof err,
+                 opt->mac ? "an HDR JPEG XL can't keep its HDR as HEIC; choose Drop HDR for an SDR HEIC, or JPEG XL"
+                          : "an HDR JPEG XL can't keep its HDR as HEIC; choose JPEG XL for it, or convert it on the "
+                            "Mac with Drop HDR for an SDR HEIC");
+        goto done;
+      }
       if (transfer == 16 || transfer == 18) {
         snprintf(err, sizeof err, "an HDR photo without a gain map (%s) can't be saved as HEIC; choose JPEG XL for it",
                  transfer == 16 ? "PQ" : "HLG");
@@ -1292,7 +1287,7 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
   snprintf(res->ext, sizeof res->ext, "heic");
   // The original is kept (not offered for deletion) when it had HDR that
   // the copy lacks.
-  res->keep = transcoded ? info.had_gain_map && !info.kept_gain_map : hdr.has_gain_map;
+  res->keep = transcoded ? info.had_gain_map && !info.kept_gain_map : hdr.has_gain_map || hdr.tone_mapped;
   res->apple_jpeg = apple_jpeg;
   res->not_iphone = 0;
   res->bright_sky = 0;
@@ -1335,6 +1330,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   snprintf(name_png, sizeof name_png, "jxl_in_%u.png", job->index);
   snprintf(name_out, sizeof name_out, "jxl_out_%u.jxl", job->index);
   snprintf(res->ext, sizeof res->ext, "jxl");
+  res->skipped = 0;
   char *p_orig = path_join(dir, name_orig), *p_png = path_join(dir, name_png);
   char *p_out = path_join(dir, name_out);
   uint8_t *orig = NULL, *png = NULL, *jxl = NULL, *exif = NULL, *xmp = NULL;
@@ -1362,12 +1358,13 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   // used for formats photobatch can't decode, such as DNG.
   const int have_orig = read_file(p_orig, &orig, &orig_len) == 0;
   const file_format_t orig_format = have_orig ? detect_format(orig, orig_len) : FMT_UNKNOWN;
-  const int decode_orig = orig_format == FMT_HEIF || orig_format == FMT_JPEG || orig_format == FMT_PNG;
+  const int decode_orig =
+      orig_format == FMT_HEIF || orig_format == FMT_JPEG || orig_format == FMT_PNG || orig_format == FMT_JXL;
   if (!decode_orig && read_file(p_png, &png, &png_len) != 0) {
     if (!have_orig) {
       snprintf(err, sizeof err, "cannot read %s (%s)", name_orig, strerror(errno));
     } else {
-      snprintf(err, sizeof err, "unsupported format: only HEIF, JPEG and PNG photos can be converted");
+      snprintf(err, sizeof err, "unsupported format: only HEIF, JPEG, PNG and JPEG XL photos can be converted");
     }
     goto done;
   }
@@ -1385,12 +1382,15 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   const int from_orig = mo.exif.size || mo.xmp.size;
   const blob_t *src_exif = from_orig ? &mo.exif : &mp.exif;
   const blob_t *src_xmp = from_orig ? &mo.xmp : &mp.xmp;
-  const int orig_orient = src_exif->size ? exif_orientation(src_exif->data, src_exif->size) : 0;
+  // (A JPEG XL's EXIF orientation doesn't count: its codestream's does.)
+  const int orig_orient =
+      src_exif->size && orig_format != FMT_JXL ? exif_orientation(src_exif->data, src_exif->size) : 0;
   uint32_t orig_w = 0, orig_h = 0;
   const int have_dims = src_exif->size && exif_pixel_dims(src_exif->data, src_exif->size, &orig_w, &orig_h);
 
-  // Decode. HEIF comes out upright, and HDR if it has a gain map; JPEG and
-  // PNG pixels are as stored, with their orientation in EXIF (or XMP).
+  // Decode. HEIF comes out upright, and HDR if it has a gain map; JPEG XL
+  // upright, HDR if it is; JPEG and PNG pixels are as stored, with their
+  // orientation in EXIF (or XMP).
   int orient = 1;
   int transposed = 0;  // the stored pixels are turned by a quarter turn
   grain_opts_t grain = {0, 0};  // the grain added to an HDR output, for the log
@@ -1427,6 +1427,12 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
         goto done;
       }
       if (rc == 0) grain = gopts;
+    }
+  } else if (orig_format == FMT_JXL) {
+    // An HDR one (PQ, HLG) stays HDR, with its peak, unless --sdr; the
+    // grain and the bright-sky check are for gain maps' HDR only.
+    if (jxl_decode(orig, orig_len, opt->sdr, DECODE_RUNNER, &img, &color, &hdr, &transposed, err, sizeof err) != 0) {
+      goto done;
     }
   } else {
     // HDR JPEGs (as Photos sends HDR photos with "Send As: Automatic"): the
@@ -1516,6 +1522,16 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len, hdr.peak * GAINMAP_SDR_WHITE_NITS};
   if (encode_jxl(&img, &em, opt, &jxl, &jxl_len, err, sizeof err) != 0) goto done;
+  if (orig_format == FMT_JXL && (double)jxl_len >= orig_size) {
+    // Converting a JPEG XL again only loses quality then: the original stays
+    // (it isn't in jxl_done.txt, so it isn't collected either).
+    char in_s[32], out_s[32];
+    fmt_bytes(in_s, sizeof in_s, orig_size);
+    fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
+    say_wrap("  ", "! not converted: the copy (%s) would not be smaller than the original (%s)", out_s, in_s);
+    res->skipped = 1;
+    goto done;
+  }
   if (write_file(p_out, jxl, jxl_len) != 0) {
     snprintf(err, sizeof err, "cannot write %s (%s)", name_out, strerror(errno));
     goto done;
@@ -1524,7 +1540,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   // the JXL lacks, except a gain map not labeled as Apple's: the owner's
   // choice.
   snprintf(res->name_out, sizeof res->name_out, "%s", name_out);
-  res->keep = hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone;
+  res->keep = (hdr.has_gain_map && !(hdr.headroom > 0) && !hdr.not_iphone) || hdr.tone_mapped;
   res->apple_jpeg = apple_jpeg;
   res->not_iphone = hdr.not_iphone;
   res->bright_sky = bright_sky;
@@ -1540,6 +1556,8 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
       snprintf(depth, sizeof depth, ", HDR %.1f\u00d7, grain %d+%d", hdr.headroom, grain.fine, grain.coarse);
     } else if (hdr.headroom > 0) {
       snprintf(depth, sizeof depth, ", HDR %.1f\u00d7", hdr.headroom);
+    } else if (hdr.tone_mapped) {
+      snprintf(depth, sizeof depth, ", HDR tone-mapped to SDR");
     } else if (img.bits > 8) {
       snprintf(depth, sizeof depth, ", 10-bit");
     }
@@ -1551,7 +1569,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
 
 done:
-  if (!ok) say_wrap("  ", "FAILED: %s", err);
+  if (!ok && !res->skipped) say_wrap("  ", "FAILED: %s", err);
   image_free(&img);
   color_free(&color);
   meta_free(&mo);
@@ -1605,7 +1623,11 @@ static void serial_batch(const char *dir, const job_t *jobs, size_t count, const
                          batch_t *batch) {
   for (size_t i = 0; i < count; i++) {
     outcome_t res;
-    if (process_job(dir, &jobs[i], i + 1, count, opt, &res)) commit_outcome(batch, dir, &jobs[i], &res);
+    if (process_job(dir, &jobs[i], i + 1, count, opt, &res)) {
+      commit_outcome(batch, dir, &jobs[i], &res);
+    } else {
+      batch->skipped += res.skipped;
+    }
   }
 }
 
@@ -1694,7 +1716,11 @@ static void *pool_worker(void *arg) {
       fflush(stdout);
       free(done->out.data);
       done->out.data = NULL;
-      if (done->ok) commit_outcome(pool->batch, pool->dir, &pool->jobs[pool->committed], &done->res);
+      if (done->ok) {
+        commit_outcome(pool->batch, pool->dir, &pool->jobs[pool->committed], &done->res);
+      } else {
+        pool->batch->skipped += done->res.skipped;
+      }
       pool->committed++;
     }
     pthread_mutex_unlock(&pool->lock);
@@ -1904,8 +1930,13 @@ static int run_batch(const options_t *opt, const char *job_arg) {
       say_wrap("", "%s larger (%.0f%%)", saved_s, -saved_pct);
     }
   }
-  if (batch.done < count) {
-    say_wrap("", "%zu failed; see the messages above.", count - batch.done);
+  if (batch.skipped) {
+    const int one = batch.skipped == 1;
+    say_wrap("", "%zu JPEG XL photo%s not converted: %s would not be smaller.", batch.skipped, one ? "" : "s",
+             one ? "its copy" : "their copies");
+  }
+  if (batch.done + batch.skipped < count) {
+    say_wrap("", "%zu failed; see the messages above.", count - batch.done - batch.skipped);
   }
   if (batch.kept) {
     const int one = batch.kept == 1;
@@ -2037,8 +2068,55 @@ static int selftest_heif(void) {
   return bad ? -1 : 0;
 }
 
+// JPEG XL input: the HDR JPEG XL made from the HDR test photo (`jxl`)
+// decodes again as HDR, with its peak, Apple's HDR profile and pixels close
+// to `want`'s (the photo it was made from), and with --sdr as SDR.
+static int selftest_jxl_input(const uint8_t *jxl, size_t len, const image_t *want, const hdr_info_t *want_hdr) {
+  image_t img;
+  color_t color;
+  hdr_info_t hdr;
+  char err[256] = "";
+  say("\nJPEG XL decoding:\n");
+  if (jxl_decode(jxl, len, 0, DECODE_RUNNER, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
+    say("  FAILED: %s\n", err);
+    return -1;
+  }
+  int bad = img.w != want->w || img.h != want->h || img.bytes_per_sample != 2 ||
+            fabs(hdr.peak - want_hdr->peak) > 0.01 * want_hdr->peak || color.hdr_icc.size != kSelftestHdrProfileSize;
+  if (bad) {
+    say_wrap("  ", "FAILED: decoded as %ux%u, %d-bit, %.0f nits peak, %s", img.w, img.h, img.bits,
+             hdr.peak * GAINMAP_SDR_WHITE_NITS, color.hdr_icc.size ? "a profile" : "no profile");
+  }
+  for (size_t i = 0; !bad && i < sizeof kSelftestHdrPixels / sizeof kSelftestHdrPixels[0]; i++) {
+    const unsigned *at = kSelftestHdrPixels[i];
+    const uint16_t *px = (const uint16_t *)(img.data + at[1] * img.stride + at[0] * pixel_size(&img));
+    for (int c = 0; c < 3 && !bad; c++) {
+      if (abs((int)px[c] - (int)at[2 + c]) > 1500) {  // lossy: within about 2% of PQ's range
+        say_wrap("  ", "FAILED: HDR pixel (%u, %u) is %u/%u/%u, expected about %u/%u/%u", at[0], at[1], px[0], px[1],
+                 px[2], at[2], at[3], at[4]);
+        bad = 1;
+      }
+    }
+  }
+  image_free(&img);
+  color_free(&color);
+  if (!bad && jxl_decode(jxl, len, 1, DECODE_RUNNER, &img, &color, &hdr, NULL, err, sizeof err) != 0) {
+    say("  FAILED (SDR): %s\n", err);
+    return -1;
+  }
+  if (!bad && (!hdr.tone_mapped || img.bytes_per_sample != 1 || img.w != want->w || img.h != want->h)) {
+    say("  FAILED: not tone-mapped to SDR\n");
+    bad = 1;
+  }
+  if (!bad) say("  ok: HDR, and tone-mapped to SDR\n");
+  image_free(&img);
+  color_free(&color);
+  return bad ? -1 : 0;
+}
+
 // Decodes the embedded HDR HEIC (with a gain map and Apple's HDR profile) and
-// checks its HDR pixels, then that the profile is kept in a JPEG XL.
+// checks its HDR pixels, then that the profile is kept in a JPEG XL, which
+// then decodes again (selftest_jxl_input).
 static int selftest_hdr(const options_t *opt) {
   image_t img;
   color_t color;
@@ -2091,6 +2169,7 @@ static int selftest_hdr(const options_t *opt) {
     } else {
       say("  ok: Apple's HDR profile kept\n");
     }
+    if (!bad) bad = selftest_jxl_input(out, out_len, &img, &hdr) != 0;
     free(out);
   }
   image_free(&img);

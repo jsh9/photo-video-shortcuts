@@ -3,6 +3,40 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.10.0] - 2026-10-16
+
+- Added
+  - JPEG XL photos convert too, to HEIC or JPEG XL, on the Mac (from Photos and
+    from Finder) and on the iPhone: this tool's own copies (to turn a JPEG XL
+    copy into a HEIC, for example) and other apps' files. Before, they failed
+    with "unsupported format". The copy keeps the EXIF and XMP (also
+    Brotli-compressed ones, as `cjxl` writes them), gets the date and location
+    from Photos as other photos do, is stored upright (by the JPEG XL's own
+    orientation; its EXIF orientation doesn't count, so a photo is never turned
+    twice), and keeps its color space, also Apple's HDR profile in an HDR copy.
+    A copy of a copy loses quality a second time.
+  - An HDR JPEG XL (PQ or HLG, as this tool's HDR copies are) stays HDR as JPEG
+    XL, with its brightness. With *Drop HDR* (Mac) libjxl tone-maps it to SDR,
+    and its original is marked to keep. As HEIC it needs *Drop HDR*: a new HEIC
+    can't hold HDR without a gain map, so with *Keep HDR*, and on the iPhone,
+    which has no *Drop HDR*, it fails and says why.
+  - A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
+    written
+    (`! not converted: the copy (...) would not be smaller than the original (...)`),
+    and its original isn't collected in *Compressed originals*; it doesn't
+    count as failed.
+  - *Compress Photo Files (macOS)* converts a folder's `.jxl` files too; the
+    copy of `Name.jxl` is `Name 2.jxl`, next to it.
+- Changed
+  - An animated JPEG XL fails (`an animated JPEG XL isn't a still photo`).
+  - The Mac's and the iPhone's copies of a JPEG XL can differ by a level in a
+    few pixels (libjxl's decoder rounds a little differently on the Mac); other
+    photos' copies are still the same bytes on both.
+  - Update `photobatch.wasm` in a-Shell and `photobatch-macos` (they decode
+    JPEG XL now), and the Mac shortcuts (the Finder shortcut's folders; the
+    shortcuts check the encoder's version). The iPhone shortcuts only carry the
+    new version number.
+
 ## [Compress Photos 0.9.0] - 2026-10-14
 
 - Added

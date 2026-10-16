@@ -37,6 +37,7 @@ ______________________________________________________________________
   - [3.1. HDR photos](#31-hdr-photos)
   - [3.2. Dates](#32-dates)
   - [3.3. Location](#33-location)
+  - [3.4. JPEG XL photos](#34-jpeg-xl-photos)
 - [4. Troubleshooting](#4-troubleshooting)
 
 ______________________________________________________________________
@@ -234,9 +235,9 @@ Not kept:
   iCloud Photos the copy then appears on the iPhone too.
 - **IPTC**, which has no standard place in JPEG XL. iPhone photos don't
   normally have any.
-- **RAW/ProRAW (DNG) and other formats** aren't converted; only HEIF, JPEG and
-  PNG are. Other photos fail with "unsupported format" and the rest of the
-  batch continues.
+- **RAW/ProRAW (DNG) and other formats** aren't converted; only HEIF, JPEG, PNG
+  and JPEG XL are (see [JPEG XL photos](#34-jpeg-xl-photos)). Other photos fail
+  with "unsupported format" and the rest of the batch continues.
 
 ### 3.1. HDR photos
 
@@ -305,9 +306,10 @@ are copied into the new file byte for byte, and only the picture's own HEVC
 tiles are re-encoded (the photo's Photographic Styles data, about 0.3 MB, is
 dropped, so a style can't be changed afterwards). Photos shows the copy as it
 shows the original, with none of the JPEG XL issues below. *Drop HDR* on the
-Mac (`--sdr`) leaves the gain map out, for an ordinary SDR HEIC; a JPEG or PNG,
-or a HEIF whose picture isn't 8-bit 4:2:0 HEVC tiles, is written anew as an SDR
-HEIC (the log says so). What follows is about JPEG XL.
+Mac (`--sdr`) leaves the gain map out, for an ordinary SDR HEIC; a JPEG, PNG or
+JPEG XL (see [JPEG XL photos](#34-jpeg-xl-photos)), or a HEIF whose picture
+isn't 8-bit 4:2:0 HEVC tiles, is written anew as an SDR HEIC (the log says so).
+What follows is about JPEG XL.
 
 Grain: up to 0.6.0, an HDR JXL got a little fine grain in its smooth areas
 against the stripes Apple's 8-bit rendering of an HDR JPEG XL shows in a smooth
@@ -402,6 +404,35 @@ keep the file's own (Photos-only ones are lost with the original). A caption
 set in Photos is kept from the share sheet, as Photos writes it into the file
 it shares. This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
 
+### 3.4. JPEG XL photos
+
+Since 0.10.0 a JPEG XL photo converts too, to HEIC or to JPEG XL: one of this
+shortcut's copies (to turn a JPEG XL copy into a HEIC, for example) or one from
+another app. It keeps its EXIF and XMP, gets the date and location from Photos
+as other photos do, and is stored upright (by the JPEG XL's own orientation,
+which a JPEG XL's EXIF orientation doesn't override). Its color space is kept,
+also Apple's HDR profile in an HDR copy. A copy made from a copy loses quality
+a second time: for the best copy, convert the original.
+
+- **To JPEG XL:** an HDR JPEG XL (PQ or HLG, as this shortcut's HDR copies are)
+  stays HDR, with its brightness; a-Shell shows `JPEG XL 4284x5712, HDR 3.5×`.
+  A copy that wouldn't be smaller than its JPEG XL original isn't written:
+  a-Shell says
+  `! not converted: the copy (...) would not be smaller than the original (...)`,
+  and the original stays where it is (it isn't added to *Compressed
+  originals*). Choose a lower quality than the original's.
+- **To HEIC:** an SDR JPEG XL becomes an SDR HEIC. An HDR one fails on the
+  iPhone (`an HDR JPEG XL can't keep its HDR as HEIC`): a new HEIC can't hold
+  HDR without a gain map, and the iPhone shortcut has no *Drop HDR*. Choose
+  JPEG XL for it, or convert it on the Mac with *Drop HDR*, which makes an SDR
+  HEIC (see [Compress Photos on the Mac](README-mac.md)).
+- An animated JPEG XL fails (`an animated JPEG XL isn't a still photo`).
+- The iPhone's and the Mac's copies of a JPEG XL can differ by one level in a
+  few pixels (libjxl's decoder rounds a little differently on the Mac); other
+  photos' copies are the same bytes on both.
+
+This needs `photobatch.wasm` from version 0.10.0.
+
 ## 4. Troubleshooting
 
 | Symptom                                                                                                                                                                     | Fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -415,7 +446,9 @@ it shares. This needs the shortcuts and `photobatch.wasm` from version 0.8.0.
 | A photo fails with an out-of-memory error                                                                                                                                   | Large photos, such as 48 MP, need the most memory. Close other apps and retry, or use `-e 5`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | "Unknown Album: The photo album that was selected does not exist"                                                                                                           | Create an album named *Compressed originals* in Photos (see [Installation](#1-installation)) and run again. From the share sheet nothing was converted yet; from the picker, the copies saved before the error are in Photos.                                                                                                                                                                                                                                                                                                                                                                                     |
 | Notification "Nothing to convert"                                                                                                                                           | The selection had only Live Photos or videos; only still photos are converted (see [Use](#2-use)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| A photo fails with "unsupported format"                                                                                                                                     | It isn't HEIF, JPEG or PNG (for example ProRAW DNG).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| A photo fails with "unsupported format"                                                                                                                                     | It isn't HEIF, JPEG, PNG or JPEG XL (for example ProRAW DNG).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `! not converted: the copy (...) would not be smaller than the original` in a-Shell                                                                                         | A JPEG XL converted to JPEG XL again would only lose quality at that quality setting, so no copy was written and the original stays. Choose a lower quality (see [JPEG XL photos](#34-jpeg-xl-photos)).                                                                                                                                                                                                                                                                                                                                                                                                           |
+| A photo fails with `an HDR JPEG XL can't keep its HDR as HEIC`                                                                                                              | Choose JPEG XL for it, or convert it on the Mac with *Drop HDR* for an SDR HEIC (see [JPEG XL photos](#34-jpeg-xl-photos)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `! HDR gain map not used (...)` in a-Shell                                                                                                                                  | The photo was converted as SDR because its gain map isn't supported, for example with a color profile other than Display P3 or sRGB, or claiming more than 16 stops (`malformed gain map metadata`). Its original is in the album *Compressed originals* like the others; keep it. Please report it with the reason shown.                                                                                                                                                                                                                                                                                        |
 | `! HDR gain map not used (not an iPhone camera photo)` in a-Shell                                                                                                           | The HDR photo's gain map isn't labeled as an iPhone camera's, and the photo is stored turned or cropped, so how they line up isn't known (see [HDR photos](#31-hdr-photos)): it was converted as SDR. Its original is in the album *Compressed originals* like the others; keep it if you want its HDR.                                                                                                                                                                                                                                                                                                           |
 | `! Apple's HDR profile not found` or `not used` in a-Shell                                                                                                                  | The JXL is HDR, but without Apple's tone curve for dimmer screens, so on such screens it may look darker or brighter than the original (at full brightness they match). Photos edited in Photos have no such profile. Please report `not used` with the photo.                                                                                                                                                                                                                                                                                                                                                    |

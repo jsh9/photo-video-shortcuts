@@ -1,5 +1,5 @@
-// Image decoding (HEIF via libheif; JPEG and PNG via stb_image) and pixel
-// transforms (alpha removal, EXIF orientation).
+// Image decoding (HEIF via libheif; JPEG and PNG via stb_image; JPEG XL via
+// libjxl, in jxl.h) and pixel transforms (alpha removal, EXIF orientation).
 #ifndef JXLBATCH_PIXELS_H
 #define JXLBATCH_PIXELS_H
 
@@ -41,6 +41,7 @@ typedef struct {
   char note[128];    // why the photo's gain map wasn't used, if it wasn't
   int not_iphone;    // the gain map isn't labeled as Apple's, so it wasn't used; the original may still be deleted
   char warning[128];  // about an HDR result, e.g. that Apple's HDR profile is missing
+  int tone_mapped;    // an HDR picture without a gain map (a PQ or HLG JPEG XL) became SDR
 } hdr_info_t;
 
 // JPEG or PNG. Pixels are as stored (EXIF orientation not applied).

@@ -770,6 +770,27 @@ def test_files_never_replaces_a_file(mac):
     assert (album / 'a.jxl').read_bytes() == b'mine'
 
 
+def test_files_converts_jpeg_xl_in_folders(mac):
+    # A folder's JPEG XL photos are converted too (0.10.0); the copy of
+    # "x.jxl" can't take its name, so it is "x 2.jxl", and the original stays.
+    album = mac.root / 'Album'
+    album.mkdir()
+    ph.scene(320, 240, seed=5).save(mac.tmp / 'x.png')
+    ph.run(['cjxl', mac.tmp / 'x.png', album / 'x.jxl', '-d', '0'], check=True)
+    original = (album / 'x.jxl').read_bytes()
+    photo(album, 'hdr/srgb.heic', 'b.heic')
+    out = mac.batch('files', album, quality='72', lines=f'{album}\n')
+    assert out.splitlines()[-1] == 'Wrote 2 JPEG XL file(s).'
+    assert 'JPEG XL 320x240' in out
+    assert sorted(p.name for p in album.iterdir()) == [
+        'b.heic',
+        'b.jxl',
+        'x 2.jxl',
+        'x.jxl',
+    ]
+    assert (album / 'x.jxl').read_bytes() == original
+
+
 def test_files_name_and_place_from_the_real_path(mac):
     # Shortcuts may hand the script a renamed copy: the result still takes
     # the original's name and folder.

@@ -167,7 +167,7 @@ build_variant() {
   objdir="$bdir/photobatch-obj"
   mkdir -p "$objdir"
   objs=''  # this build's objects only: an earlier version's may be in the folder
-  for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+  for src in photobatch meta pixels heif jxl gainmap hdr grain hevcenc heifbox heicout; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_HEIC -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
     objs="$objs $objdir/$src.o"

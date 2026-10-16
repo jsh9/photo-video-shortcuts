@@ -125,7 +125,9 @@ shortcut was tested on a device unless it was.
   identifiers or parameter names without evidence from a shortcut built on the
   device.
 - The WebAssembly and macOS encoders must write the same bytes, so the iPhone
-  and the Mac give the same copies; the tests compare them.
+  and the Mac give the same copies; the tests compare them. JPEG XL inputs are
+  the exception: libjxl's decoder rounds a little differently on the Mac (at
+  most a level; `test_jxl_input.py`).
 - The repository is GPL-3.0-or-later (x265 is linked in). A new third-party
   library needs its license in `licenses/`.
 

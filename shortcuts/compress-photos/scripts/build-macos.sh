@@ -154,7 +154,7 @@ objdir="$bdir/photobatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
 objs=''  # this build's objects only: an earlier version's may be in the folder
-for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+for src in photobatch meta pixels heif jxl gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2086
   cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
