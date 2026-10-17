@@ -13,7 +13,7 @@ char *stbi_zlib_decode_malloc_guesssize_headerflag(const char *buffer, int len,
                                                    int *outlen,
                                                    int parse_header);
 
-static int is_tiff(const uint8_t *p, size_t n) {
+int is_tiff(const uint8_t *p, size_t n) {
   if (n < 8) return 0;
   return (p[0] == 'I' && p[1] == 'I' && p[2] == 42 && p[3] == 0) ||
          (p[0] == 'M' && p[1] == 'M' && p[2] == 0 && p[3] == 42);

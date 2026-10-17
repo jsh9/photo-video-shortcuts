@@ -978,9 +978,14 @@ included), so there is no new library. The plan and its spikes:
   `JxlDecoderSetDecompressBoxes`, so the Brotli-compressed (`brob`) boxes
   `cjxl` writes by default are read too. A metadata box cut short, not
   decompressible or over 64 MiB fails the photo; any other problem with the
-  file is left to the picture's decoding, which says what it is. `jbrd`, `jumb`
-  and `jhgm` boxes aren't kept. `cjxl` keeps a JPEG's XMP only when it
-  recompresses the JPEG losslessly; its lossy files have the EXIF only.
+  file is left to the picture's decoding, which says what it is. `jbrd` and
+  `jumb` boxes aren't kept. A `jhgm` box (an ISO 21496-1 gain map, as libjxl's
+  `gain_map.h` defines it) isn't used either, but noted (`m->jxl_gain_map`):
+  the copy is the SDR base, the log says
+  `! HDR not kept (JPEG XL with a gain map)` (not with `--sdr`), and the
+  original is marked `keep`, as for a JPEG with a gain map. `cjxl` keeps a
+  JPEG's XMP only when it recompresses the JPEG losslessly; its lossy files
+  have the EXIF only.
 - **The picture** (`jxl_decode`): the whole picture into one buffer, then the
   decoder is destroyed before the encoder starts, so their memory doesn't add
   up. 8-bit samples for SDR pictures of 8 bits or fewer, else 16-bit, with the
@@ -1007,32 +1012,51 @@ included), so there is no new library. The plan and its spikes:
   which `cjxl` describes as custom primaries and a plain gamma; gray) goes
   through the ICC profile libjxl makes of it, which libjxl stores as the same
   description again (within 0.00002 in the primaries). A stored ICC profile is
-  used as it is, except a PQ or HLG one with a `cicp` tag, such as Apple's HDR
+  used as it is (a lossless file's pixels come out as stored, with no
+  conversion asked for; a lossy, XYB file's are converted into the profile by
+  libjxl's CMS), except a PQ or HLG one with a `cicp` tag, such as Apple's HDR
   profile in this tool's HDR copies: the output is asked for in its code points
   (Display P3 PQ), and a PQ profile goes into `color->hdr_icc`, so `encode_jxl`
-  stores it again, byte for byte, with Apple's tone curve.
+  stores it again, byte for byte, with Apple's tone curve. The transfer curve
+  decides whether the picture is HDR: the code points', else libjxl's
+  description's (PQ or HLG with a white point or primaries CICP can't name,
+  such as `cjxl`'s `RGB_EER_202_Rel_PeQ`), else the profile's `cicp` tag's when
+  its primaries can't be named. A PQ curve in a profile without the tag isn't
+  recognized.
 - **HDR** (PQ or HLG): kept as 16-bit on the JPEG XL route, with the file's
-  `intensity_target` as the copy's (`hdr->peak`, relative to 203 nits; libjxl's
-  10,000 nits when the file has none), and the log's
-  `JPEG XL 4284x5712, HDR 3.5×`. No grain and no bright-sky check: both are for
-  pixels computed from a gain map (`grain_attach` and `grain_bright_sky` leave
-  other images alone). With `--sdr`, libjxl tone-maps it
-  (`JxlDecoderSetDesiredIntensityTarget` 255 nits: Rec. 2408 for PQ, the HLG
-  OOTF for HLG, then the sRGB curve in the same primaries; `JXL_SDR_NITS`),
-  8-bit, `hdr->tone_mapped` set, the log's `HDR tone-mapped to SDR`, and the
-  line marked `keep`. 255 nits, libjxl's own SDR default, was measured on HDR
+  `intensity_target` as the copy's (`hdr->peak`, relative to 203 nits; every
+  file has one, which libjxl's encoder makes 10,000 nits for PQ and 1,000 for
+  HLG when given none), and the log's `JPEG XL 4284x5712, HDR 3.5×`. No grain
+  and no bright-sky check: both are for pixels computed from a gain map
+  (`grain_attach` and `grain_bright_sky` leave other images alone). With
+  `--sdr`, libjxl tone-maps it (`JxlDecoderSetDesiredIntensityTarget` 255 nits:
+  Rec. 2408 for PQ, the HLG OOTF for HLG, then the sRGB curve in the same
+  primaries; `JXL_SDR_NITS`), 8-bit, `hdr->tone_mapped` set, the log's
+  `HDR tone-mapped to SDR`, and the line marked `keep`. A picture CICP can't
+  name is tone-mapped into Rec. 2020 primaries (D65; code points 9, 13), which
+  CICP names and which hold any picture's colors. One HDR by a profile alone
+  can't be (libjxl can't be asked for an SDR version of it): it stays HDR,
+  16-bit, and the log says
+  `! HDR kept: a PQ picture described by its ICC profile alone can't be tone-mapped to SDR`
+  (`hdr->warning`). 255 nits, libjxl's own SDR default, was measured on HDR
   copies of five iPhone photos against the camera's SDR picture (2026-10-16):
   12 levels of 255 apart on average (3 to 29 per photo), against 17 for 203
   nits and 13 for 300; Apple tone-maps the camera's SDR picture locally, which
   no single global curve matches. The HEIC route takes an HDR JPEG XL only so:
   with *Keep HDR* it fails (`an HDR JPEG XL can't keep its HDR as HEIC`, naming
   *Drop HDR* on the Mac, the Mac on the iPhone, which has no *Drop HDR*), as a
-  PQ PNG does, since a new HEIC carries no gain map.
+  PQ PNG does, since a new HEIC carries no gain map; one HDR by a profile alone
+  fails with *Drop HDR* too
+  (`... can't be tone-mapped to SDR, so it can't be saved as HEIC`).
 - **A copy that wouldn't be smaller:** on the JPEG XL route, a copy at least as
   large as its JPEG XL original isn't written
   (`! not converted: the copy (...) would not be smaller than the original (...)`;
-  `res->skipped`). It is left out of `jxl_done.txt`, so the shortcuts don't
-  collect its original, and counted apart from failures:
+  `res->skipped`), unless the copy is another rendition: tone-mapped to SDR
+  (`--sdr`), or given a date or location from Photos the original lacks
+  (`apply_photo_date`, `apply_photos_meta`); the rule is for a copy that only
+  re-encodes the same picture and metadata. A skipped photo is left out of
+  `jxl_done.txt`, so the shortcuts don't collect its original, and counted
+  apart from failures:
   `N JPEG XL photo(s) not converted: ... would not be smaller.` A lossless run
   of a lossy JPEG XL always ends there.
 - **Not the same bytes on the Mac.** The decoder computes in floats with

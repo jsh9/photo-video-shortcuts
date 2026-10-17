@@ -110,10 +110,7 @@ static void box_finish(JxlDecoder *dec, box_read_t *r) {
                                       (uint32_t)r->data[2] << 8 | r->data[3])
                                    : 0;
     start = used >= 4 && off <= used - 4 ? 4 + (size_t)off : used;
-    const uint8_t *t = r->data + start;
-    const int tiff = used - start >= 8 && ((t[0] == 'I' && t[1] == 'I' && t[2] == 42 && t[3] == 0) ||
-                                           (t[0] == 'M' && t[1] == 'M' && t[2] == 0 && t[3] == 42));
-    if (!tiff) start = used;
+    if (!is_tiff(r->data + start, used - start)) start = used;
   }
   if (start < used) {
     memmove(r->data, r->data + start, used - start);
@@ -137,13 +134,22 @@ int jxl_boxes(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_l
     snprintf(err, err_len, "out of memory");
     goto done;
   }
-  JxlDecoderCloseInput(dec);
+  // The input is closed only when libjxl has read all of it: with the input
+  // closed, libjxl fails a box the file ends in as it fails a corrupt one,
+  // and `ended` tells the two apart.
+  int ended = 0;
   for (;;) {
     const JxlDecoderStatus st = JxlDecoderProcessInput(dec);
+    if (st == JXL_DEC_NEED_MORE_INPUT && !ended) {
+      ended = 1;
+      JxlDecoderCloseInput(dec);
+      continue;
+    }
     if (st == JXL_DEC_BOX || st == JXL_DEC_SUCCESS) {
       if (r.dst) box_finish(dec, &r);
       if (st == JXL_DEC_SUCCESS) break;
       if (JxlDecoderGetBoxType(dec, type, JXL_TRUE) != JXL_DEC_SUCCESS) continue;
+      if (!memcmp(type, "jhgm", 4)) m->jxl_gain_map = 1;  // a gain map (ISO 21496-1): noted, not used
       blob_t *dst = !memcmp(type, "Exif", 4) && !m->exif.size ? &m->exif
                     : !memcmp(type, "xml ", 4) && !m->xmp.size ? &m->xmp
                                                                 : NULL;
@@ -167,8 +173,7 @@ int jxl_boxes(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_l
       }
     } else if (r.dst) {
       // within a metadata box: it can't be kept
-      snprintf(err, err_len, st == JXL_DEC_NEED_MORE_INPUT ? "metadata box %.4s cut short" : "unreadable metadata box %.4s",
-               type);
+      snprintf(err, err_len, ended ? "metadata box %.4s cut short" : "unreadable metadata box %.4s", type);
       goto done;
     } else {
       // elsewhere (a codestream box cut short, say): the picture's
@@ -276,11 +281,30 @@ int jxl_decode(const uint8_t *buf, size_t len, int sdr, void *runner, image_t *i
           have_enc = 1;
         }
       }
-      const int hdr_curve = color->cicp_present && (color->cicp[1] == 16 || color->cicp[1] == 18);
+      // The transfer curve, as a CICP code: from the code points; else from
+      // libjxl's description, which CICP may not name in full (another white
+      // point, custom primaries); else from the profile's 'cicp' tag, whose
+      // primaries CICP couldn't name. (A PQ curve in a profile without the
+      // tag isn't recognized.)
+      const int transfer = color->cicp_present ? color->cicp[1]
+                           : have_enc          ? (enc.transfer_function == JXL_TRANSFER_FUNCTION_PQ    ? 16
+                                                  : enc.transfer_function == JXL_TRANSFER_FUNCTION_HLG ? 18
+                                                                                                       : 0)
+                                               : gainmap_icc_cicp_transfer(&color->icc);
+      const int hdr_curve = transfer == 16 || transfer == 18;
       JxlDecoderStatus set;
-      if (hdr_curve && sdr) {
+      if (hdr_curve && sdr && (color->cicp_present || have_enc)) {
         // Tone-mapped by libjxl (Rec. 2408 for PQ, the HLG OOTF for HLG) to
-        // the same primaries with the sRGB curve.
+        // the same primaries with the sRGB curve; when CICP can't name the
+        // picture's primaries or white point, to Rec. 2020 primaries (D65),
+        // which it names and which hold any picture's colors.
+        if (!color->cicp_present) {
+          const uint8_t rec2020[4] = {9, 13, 0, 1};
+          memcpy(color->cicp, rec2020, 4);
+          color->cicp_present = 1;
+          free(color->icc.data);
+          memset(&color->icc, 0, sizeof color->icc);
+        }
         color->cicp[1] = 13;
         free(color->hdr_icc.data);
         memset(&color->hdr_icc, 0, sizeof color->hdr_icc);
@@ -295,18 +319,32 @@ int jxl_decode(const uint8_t *buf, size_t len, int sdr, void *runner, image_t *i
         // described by libjxl, but not by CICP (gray, a plain gamma): its
         // profile goes into the copy
         set = JxlDecoderSetOutputColorProfile(dec, &enc, NULL, 0);
+      } else if (info.uses_original_profile) {
+        // The pixels are stored in the profile's own space (not XYB): they
+        // come out as they are, with no conversion asked for, which libjxl's
+        // CMS can't always do into a profile it reads (a PQ profile's curves
+        // are skipped; see patch_deps.py).
+        set = JXL_DEC_SUCCESS;
       } else {
+        // Lossy (XYB): converted into the profile by libjxl's CMS.
         set = JxlDecoderSetOutputColorProfile(dec, NULL, color->icc.data, color->icc.size);
       }
       if (set != JXL_DEC_SUCCESS) {
         snprintf(err, err_len, "the JPEG XL can't be decoded in its own color space");
         goto done;
       }
-      if (hdr_curve && !sdr) {
-        // How bright it gets: its intensity target (libjxl's default for PQ,
-        // 10,000 nits, if the file has none), relative to SDR white.
-        const double nits = info.intensity_target > 0 ? info.intensity_target : 10000.0;
-        hdr->headroom = hdr->peak = nits / GAINMAP_SDR_WHITE_NITS;
+      if (hdr_curve && sdr && !hdr->tone_mapped) {
+        // HDR by a profile alone (its 'cicp' tag names the curve, not the
+        // primaries): libjxl can't be asked for an SDR version of it.
+        snprintf(hdr->warning, sizeof hdr->warning,
+                 "HDR kept: a %s picture described by its ICC profile alone can't be tone-mapped to SDR",
+                 transfer == 16 ? "PQ" : "HLG");
+      }
+      if (hdr_curve && !hdr->tone_mapped) {
+        // How bright it gets: its intensity target, relative to SDR white.
+        // Every file has one (libjxl refuses a header without; its encoder
+        // writes 10,000 nits for PQ and 1,000 for HLG when given none).
+        hdr->headroom = hdr->peak = info.intensity_target / GAINMAP_SDR_WHITE_NITS;
       }
       // 8 bits for SDR pictures of 8 bits or fewer, else 16 (with the file's
       // own bit depth up to 16, so the copy keeps it).

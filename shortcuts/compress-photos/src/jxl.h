@@ -15,9 +15,10 @@
 
 // The first Exif box (as raw TIFF, without the box's 4-byte offset) and the
 // first "xml " box of a JPEG XL file into `m`, Brotli-compressed ("brob")
-// ones too. Returns 0 (also for a bare codestream, which has no boxes), or
-// -1 with a message when a metadata box can't be read: cut short, not
-// decompressible, or over 64 MiB.
+// ones too; a "jhgm" box (an ISO 21496-1 gain map, which isn't used) sets
+// `m->jxl_gain_map`. Returns 0 (also for a bare codestream, which has no
+// boxes), or -1 with a message when a metadata box can't be read: cut short,
+// not decompressible, or over 64 MiB.
 int jxl_boxes(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_len);
 
 // The picture of a JPEG XL file, upright (the codestream's orientation
@@ -26,10 +27,14 @@ int jxl_boxes(const uint8_t *buf, size_t len, meta_t *m, char *err, size_t err_l
 // the file's color space when it has some, else its ICC profile; an HDR
 // (PQ) picture described by an ICC profile with a 'cicp' tag, as this tool's
 // HDR copies are (Apple's HDR profile), gets the code points and the profile
-// as `color->hdr_icc`. An HDR picture (PQ or HLG) stays HDR, with `hdr`'s
-// headroom and peak from the file's intensity target, unless `sdr`: then
-// libjxl tone-maps it to SDR, 8-bit with the sRGB curve in the same
-// primaries, and `hdr->tone_mapped` says so. `runner`, if not NULL, is a
+// as `color->hdr_icc`. An HDR picture (PQ or HLG: by the code points, by
+// libjxl's description when CICP can't name its primaries or white point,
+// or by a profile's 'cicp' tag alone) stays HDR, with `hdr`'s headroom and
+// peak from the file's intensity target, unless `sdr`: then libjxl tone-maps
+// it to SDR, 8-bit with the sRGB curve in the same primaries (Rec. 2020 when
+// CICP can't name them), and `hdr->tone_mapped` says so; a picture HDR by a
+// profile alone can't be tone-mapped and stays HDR, which `hdr->warning`
+// says. `runner`, if not NULL, is a
 // libjxl thread pool (JxlThreadParallelRunner). `transposed`, if given, is
 // set to 1 when the codestream's orientation turned the picture by a quarter
 // turn. Animated and floating-point files are refused.

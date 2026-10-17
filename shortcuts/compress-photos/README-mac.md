@@ -248,7 +248,11 @@ and may recognize them.
 JPEG XL photos convert too, from Photos and from Finder, as on the iPhone (see
 [JPEG XL photos](README.md#34-jpeg-xl-photos)), with one difference: *Drop HDR*
 makes an SDR HEIC of an HDR JPEG XL (libjxl tone-maps it), where the iPhone can
-only make a JPEG XL of it. With *Keep HDR*, an HDR JPEG XL fails as HEIC. From
+only make a JPEG XL of it. With *Keep HDR*, an HDR JPEG XL fails as HEIC; one
+described by an ICC profile alone, which libjxl can't tone-map, stays HDR as
+JPEG XL (`! HDR kept: ...`) and fails as HEIC either way. A JPEG XL with a gain
+map is converted as its SDR picture
+(`! HDR not kept (JPEG XL with a gain map)`), its original marked to keep. From
 Photos, a JPEG XL copy converted again is collected in *Compressed originals*
 like any original, and its new copy gets only its own format and quality as
 keywords. From Finder, the copy of `Name.jxl` is `Name 2.jxl`, next to it.

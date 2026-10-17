@@ -1,16 +1,23 @@
 """
 JPEG XL photos as input (since 0.10.0): this tool's own copies (SDR, and HDR
-with Apple's HDR profile) and cjxl's files (Brotli-compressed metadata, the
-orientation in both the codestream and the EXIF, a bare codestream, a
-recompressed JPEG, 16 bits, transparency, gray, an Adobe RGB profile, PQ
-without a profile) convert to JPEG XL and to HEIC in every build: upright, with
-their EXIF, XMP and color space, and the date and location from Photos. An HDR
-one stays HDR as JPEG XL, with its peak and its profile; with --sdr (Drop HDR)
-libjxl tone-maps it to SDR, and only so does it become a HEIC. A JPEG XL copy
-that wouldn't be smaller than its JPEG XL original isn't written. Animated and
-cut-short files fail; the rest of the batch goes on. The WebAssembly builds
-decode them alike, and the Mac's within a level (libjxl's decoder computes in
-floats, with fused multiply-adds on the Mac's NEON).
+with Apple's HDR profile, lossy and lossless) and cjxl's files
+(Brotli-compressed metadata, the orientation in both the codestream and the
+EXIF, a bare codestream, a recompressed JPEG, 10 and 16 bits, transparency,
+gray, an Adobe RGB profile, PQ without a profile, PQ with a white point CICP
+can't name, PQ by a profile alone, a gain map box) convert to JPEG XL and to
+HEIC in every build: upright, with their EXIF, XMP and color space (10 bits
+kept as JPEG XL), and the date and location from Photos. An HDR one stays HDR
+as JPEG XL, with its peak and its profile; with --sdr (Drop HDR) libjxl
+tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its own; not
+at all when a profile alone describes it), and only so does it become a HEIC. A
+gain map ('jhgm' box) isn't used: the copy is SDR and the original is kept. A
+JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't written,
+unless it is another rendition (tone-mapped, or with a date or location from
+Photos). Animated and cut-short files fail, and so do metadata boxes cut short
+or not decompressible (an Exif box without a TIFF header is dropped); the rest
+of the batch goes on. The WebAssembly builds decode them alike, and the Mac's
+within a level (libjxl's decoder computes in floats, with fused multiply-adds
+on the Mac's NEON).
 """
 
 import re
@@ -40,14 +47,31 @@ TURNED = {'cjxl_rot6', 'recompressed'}
 HDR = ['copy_hdr', 'pq']
 
 
+def write_ppm(samples, path, maximum):
+    """
+    ``samples`` (rows of RGB values up to ``maximum``) as a PPM of 9 to 16
+    bits, which cjxl reads (PIL writes 8 bits only) with the bit depth
+    ``maximum`` gives: 1023 for 10 bits.
+    """
+    height, width = samples.shape[:2]
+    header = f'P6\n{width} {height}\n{maximum}\n'.encode()
+    path.write_bytes(header + np.asarray(samples).astype('>u2').tobytes())
+
+
 def write_ppm16(image, path, scale=1.0):
-    """
-    ``image`` as a 16-bit PPM, which cjxl reads (PIL writes 8 bits only), its
-    values times ``scale``.
-    """
+    """``image`` as a 16-bit PPM, its values times ``scale``."""
     pixels = np.round(np.asarray(image, dtype=float) * 257 * scale)
-    header = f'P6\n{image.width} {image.height}\n65535\n'.encode()
-    path.write_bytes(header + pixels.astype('>u2').tobytes())
+    write_ppm(pixels, path, 65535)
+
+
+def ten_bit_samples(image):
+    """
+    ``image``'s values as 10-bit samples that use all ten bits: times 4, plus 0
+    to 3 in a diagonal pattern.
+    """
+    pixels = np.asarray(image, dtype=np.uint16)
+    rows, columns = np.indices(pixels.shape[:2])
+    return pixels * 4 + ((rows + columns) % 4)[:, :, None]
 
 
 @pytest.fixture(scope='module')
@@ -78,6 +102,11 @@ def inputs(wasm, photos, batch, tmp_path_factory):
         wasm, folder / 'copies', [photos['heic_rot6'], hdr_heic], ['-q', '93']
     )
     out['copy_sdr'], out['copy_hdr'] = copies[1], copies[2]
+    # and a lossless HDR copy, its samples as stored
+    _, copies = ph.convert(
+        wasm, folder / 'lossless', [hdr_heic], ['-q', '100']
+    )
+    out['lossless_hdr'] = copies[1]
 
     def cjxl(name, source, *args):
         out[name] = folder / f'{name}.jxl'
@@ -86,6 +115,7 @@ def inputs(wasm, photos, batch, tmp_path_factory):
     scene = ph.scene(320, 240, seed=4)
     scene.save(folder / 'scene.png')
     write_ppm16(scene, folder / 'scene16.ppm')
+    write_ppm(ten_bit_samples(scene), folder / 'scene10.ppm', 1023)
     # as PQ: at most 0.75, 983 nits, under its intensity target (1000)
     write_ppm16(scene, folder / 'pq.ppm', scale=0.75)
     scene.convert('L').save(folder / 'gray.png')
@@ -101,6 +131,7 @@ def inputs(wasm, photos, batch, tmp_path_factory):
     cjxl('recompressed', photos['jpeg_rot6'])  # lossless, with jbrd and brob
     cjxl('bare', folder / 'scene.png', '-q', '90', '--container=0')
     cjxl('lossless16', folder / 'scene16.ppm', '-d', '0')
+    cjxl('ten_bit', folder / 'scene10.ppm', '-d', '0')
     cjxl('alpha', photos['png_alpha'], '-q', '90')
     cjxl('gray', folder / 'gray.png', '-q', '90')
     cjxl('adobe_rgb', folder / 'adobe.png', '-q', '90')
@@ -114,6 +145,44 @@ def inputs(wasm, photos, batch, tmp_path_factory):
         '--intensity_target=1000',
     )
     cjxl('animated', folder / 'animated.png', '-q', '90')
+    # PQ with a white point CICP can't name (E): HDR by libjxl's description
+    cjxl(
+        'pq_e',
+        folder / 'pq.ppm',
+        '-q',
+        '90',
+        '-x',
+        'color_space=RGB_EER_202_Rel_PeQ',
+        '--intensity_target=1000',
+    )
+    # PQ by a profile alone: the profile's 'cicp' tag names the curve but
+    # not the primaries (code 2, unspecified); lossless keeps the profile
+    unnamed = bytearray(ph.icc_tags(icc.read_bytes())['cicp'])
+    unnamed[8] = 2
+    scene.save(
+        folder / 'pq_icc.png',
+        icc_profile=ph.add_icc_tag(icc.read_bytes(), 'cicp', bytes(unnamed)),
+    )
+    cjxl('pq_icc', folder / 'pq_icc.png', '-d', '0')
+    # a small lossy HDR file, whose lossless SDR copy is larger
+    cjxl(
+        'pq_small',
+        folder / 'pq.ppm',
+        '-q',
+        '20',
+        '-x',
+        'color_space=RGB_D65_DCI_Rel_PeQ',
+        '--intensity_target=1000',
+    )
+    # an SDR copy with a gain map box ('jhgm', ISO 21496-1) after its
+    # codestream, which photobatch notes but doesn't use
+    out['gain_map'] = folder / 'gain_map.jxl'
+    out['gain_map'].write_bytes(
+        out['copy_sdr'].read_bytes()
+        + struct.pack('>I', 8 + 64)
+        + b'jhgm'
+        + bytes(64)
+    )
     data = out['cjxl_rot6'].read_bytes()
     out['truncated'] = folder / 'truncated.jxl'
     out['truncated'].write_bytes(data[: len(data) * 2 // 3])
@@ -139,12 +208,19 @@ def test_inputs_are_what_they_say(inputs):
     assert inputs['bare'].read_bytes()[:2] == b'\xff\x0a'
     assert 'Uncompressed Exif' in info['copy_sdr']
     assert '16-bit RGB' in info['lossless16']
+    assert 'lossless, 10-bit RGB' in info['ten_bit']
+    assert 'lossless, 16-bit RGB' in info['lossless_hdr']
+    assert 'ICC profile' in info['lossless_hdr']
     assert 'RGB+Alpha' in info['alpha'] or 'alpha' in info['alpha'].lower()
     assert 'Grayscale' in info['gray'] or 'gray' in info['gray'].lower()
     # cjxl describes Adobe RGB itself: custom primaries, a plain gamma
     assert 'Transfer function: gamma' in info['adobe_rgb']
     assert 'ICC profile' in info['copy_hdr']
     assert 'Transfer function: PQ' in info['pq']
+    assert 'White point: E' in info['pq_e']
+    assert 'Transfer function: PQ' in info['pq_e']
+    assert 'ICC profile' in info['pq_icc'] and 'lossless' in info['pq_icc']
+    assert inputs['gain_map'].read_bytes().endswith(b'jhgm' + bytes(64))
     assert 'Have animation: 1' in info['animated']
 
 
@@ -353,6 +429,162 @@ def test_copy_not_smaller_is_not_written(encoder, inputs, tmp_path):
     assert not (tmp_path / 'jxl_out_1.jxl').exists()
 
 
+def test_copy_is_written_when_it_is_another_rendition(
+        encoder, inputs, tmp_path
+):
+    # The skip is for a plain re-encode. An SDR copy of an HDR JPEG XL
+    # (--sdr), or a copy given a date or location from Photos, is written
+    # even when it is larger (lossless here, so it is).
+    _, results = ph.convert(
+        encoder, tmp_path / 'sdr', [inputs['pq_small']], ['-q', '100', '--sdr']
+    )
+    assert results[1].stat().st_size > inputs['pq_small'].stat().st_size
+    assert 'Transfer function: sRGB' in jxl_info(results[1])
+    assert ph.kept_originals(tmp_path / 'sdr') == {1}
+
+    copy = inputs['copy_sdr']
+    output, results = ph.convert(
+        encoder,
+        tmp_path / 'dated',
+        [copy],
+        ['-q', '100'],
+        dates={1: '2024-01-01T17:00:00-05:00'},
+    )
+    assert results[1].stat().st_size > copy.stat().st_size
+    assert 'date from Photos' in ph.photo_output(output, copy.stem)
+    tags = ph.exif_tags(results[1])
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
+
+    _, results = ph.convert(
+        encoder,
+        tmp_path / 'located',
+        [copy],
+        ['-q', '100'],
+        meta=['1|gps|40.758441666667,-73.829766666667'],
+    )
+    assert results[1].stat().st_size > copy.stat().st_size
+    gps = ph.gps_of(results[1])
+    assert gps['GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-5)
+
+
+def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
+    # A JPEG XL with a gain map ('jhgm' box) is converted as its SDR base,
+    # like a JPEG with a gain map: the log says so (not with --sdr, which
+    # asks for SDR) and the original is kept, on both routes.
+    runs = (
+        ('jxl', ['-q', '75'], '.jxl'),
+        ('sdr', ['-q', '75', '--sdr'], '.jxl'),
+        ('heic', ['--heic'], '.heic'),
+    )
+    for label, args, suffix in runs:
+        output, results = ph.convert(
+            encoder, tmp_path / label, [inputs['gain_map']], args
+        )
+        text = ' '.join(ph.photo_output(output, 'gain_map').split())
+        noted = '! HDR not kept (JPEG XL with a gain map)' in text
+        assert noted == (label != 'sdr'), label
+        assert results[1].suffix == suffix, label
+        assert ph.kept_originals(tmp_path / label) == {1}, label
+
+
+def test_hdr_cicp_cannot_name_stays_hdr_and_tone_maps(
+        encoder, inputs, tmp_path
+):
+    # PQ with a white point CICP can't name (E): HDR all the same, kept with
+    # libjxl's description and its brightness; refused as HEIC; with --sdr
+    # tone-mapped into Rec. 2020 primaries (D65), which CICP names, on both
+    # routes.
+    output, results = ph.convert(
+        encoder, tmp_path / 'hdr', [inputs['pq_e']], ['-q', '83']
+    )
+    assert 'HDR 4.9' in ph.photo_output(output, 'pq_e')  # 1000 nits
+    info = jxl_info(results[1])
+    assert 'lossy, 16-bit RGB' in info
+    assert 'White point: E' in info and 'Transfer function: PQ' in info
+    assert ph.jxl_intensity_target(results[1]) == pytest.approx(1000, abs=0.5)
+    assert not ph.kept_originals(tmp_path / 'hdr')
+
+    ph.stage(tmp_path / 'keep', [inputs['pq_e']])
+    result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path / 'keep')
+    assert "an HDR JPEG XL can't keep its HDR as HEIC" in ' '.join(
+        result.stdout.split()
+    )
+    assert not (tmp_path / 'keep' / 'jxl_done.txt').exists()
+
+    output, results = ph.convert(
+        encoder, tmp_path / 'sdr', [inputs['pq_e']], ['-q', '83', '--sdr']
+    )
+    info = jxl_info(results[1])
+    assert 'lossy, 8-bit RGB' in info
+    assert 'White point: D65' in info and 'Primaries: Rec.2100' in info
+    assert 'Transfer function: sRGB' in info
+    assert 'HDR tone-mapped to SDR' in ' '.join(
+        ph.photo_output(output, 'pq_e').split()
+    )
+    assert ph.kept_originals(tmp_path / 'sdr') == {1}
+    mean = np.asarray(decoded(results[1], tmp_path / 'sdr.png')).mean()
+    assert 60 < mean < 200
+
+    output, results = ph.convert(
+        encoder, tmp_path / 'heic', [inputs['pq_e']], ['--heic', '--sdr']
+    )
+    assert results[1].suffix == '.heic'
+    assert 'SDR HEIC' in ph.photo_output(output, 'pq_e')
+    assert ph.kept_originals(tmp_path / 'heic') == {1}
+
+
+def is_pq(jxl, folder):
+    """
+    The JPEG XL is PQ: by libjxl's description, or by its profile's 'cicp' tag
+    (the static builds keep such a profile, Homebrew's libjxl describes it).
+    """
+    profile = ph.jxl_profile(jxl, folder)
+    if profile is None:
+        return 'Transfer function: PQ' in jxl_info(jxl)
+
+    return ph.icc_tags(profile).get('cicp', b'')[9:10] == b'\x10'
+
+
+def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
+    # PQ by an ICC profile whose 'cicp' tag doesn't name the primaries: HDR
+    # (kept by the profile, or libjxl's description of it); with --sdr it
+    # stays HDR and the log says why; as HEIC it is refused either way.
+    output, results = ph.convert(
+        encoder, tmp_path / 'hdr', [inputs['pq_icc']], ['-q', '83']
+    )
+    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    assert 'HDR 49.3' in text  # PQ's peak, 10,000 nits, as cjxl wrote
+    assert 'HDR kept' not in text
+    assert is_pq(results[1], tmp_path / 'hdr')
+    assert not ph.kept_originals(tmp_path / 'hdr')
+
+    output, results = ph.convert(
+        encoder, tmp_path / 'sdr', [inputs['pq_icc']], ['-q', '83', '--sdr']
+    )
+    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    assert (
+        '! HDR kept: a PQ picture described by its ICC profile alone '
+        "can't be tone-mapped to SDR"
+    ) in text
+    assert 'HDR 49.3' in text
+    assert is_pq(results[1], tmp_path / 'sdr')
+    assert not ph.kept_originals(tmp_path / 'sdr')
+
+    refusals = (
+        ('keep', ['--heic'], "can't keep its HDR as HEIC"),
+        (
+            'drop',
+            ['--heic', '--sdr'],
+            "can't be tone-mapped to SDR, so it can't be saved as HEIC",
+        ),
+    )
+    for label, args, message in refusals:
+        ph.stage(tmp_path / label, [inputs['pq_icc']])
+        result = encoder.run([*args, 'jxl_job.txt'], tmp_path / label)
+        assert message in ' '.join(result.stdout.split()), label
+        assert not (tmp_path / label / 'jxl_done.txt').exists(), label
+
+
 def test_animated_and_cut_short_fail(encoder, inputs, tmp_path):
     ph.stage(
         tmp_path, [inputs['animated'], inputs['truncated'], inputs['bare']]
@@ -363,6 +595,87 @@ def test_animated_and_cut_short_fail(encoder, inputs, tmp_path):
     assert 'FAILED: the JPEG XL file is cut short' in text
     assert '2 failed' in text
     assert list(ph.read_done(tmp_path)) == [3]
+
+
+def jxl_box(kind, payload):
+    return struct.pack('>I', 8 + len(payload)) + kind.encode() + payload
+
+
+def container(codestream, before=b'', after=b''):
+    """
+    A JPEG XL container made by hand: the signature and ftyp boxes, then the
+    boxes ``before``, the codestream (a jxlc box) and the boxes ``after``.
+    """
+    return (
+        jxl_box('JXL ', b'\r\n\x87\n')
+        + jxl_box('ftyp', b'jxl \0\0\0\0jxl ')
+        + before
+        + jxl_box('jxlc', codestream)
+        + after
+    )
+
+
+def test_metadata_boxes(encoder, inputs, tmp_path):
+    """
+    Metadata boxes made by hand around the 'bare' input's codestream: one cut
+    short at the end of the file, or a Brotli-compressed one that can't be
+    decompressed, fails its photo (its metadata can't be kept) and the rest of
+    the batch goes on; an Exif box whose TIFF header is further in (its offset
+    skips the 6 bytes a JPEG's EXIF starts with) is read; one without a TIFF
+    header is dropped, and its photo converts without it.
+    """
+    tiff = ph.tiff({0x010F: ph.ascii_value('photobatch')}, exif=ph.TIFF_EXIF)
+    xmp = ph.XMP.format(o=1).encode()
+    code = inputs['bare'].read_bytes()
+    files = {
+        'exif_cut': container(
+            code, after=jxl_box('Exif', bytes(4) + tiff)[:-8]
+        ),
+        'xml_cut': container(code, after=jxl_box('xml ', xmp)[:-8]),
+        # a Brotli stream whose first meta-block sets the reserved bit; at the
+        # end of the file too, it isn't taken for a box cut short
+        'brob_corrupt': container(
+            code, after=jxl_box('brob', b'Exif' + b'\x1c' + bytes(15))
+        ),
+        'exif_offset': container(
+            code,
+            before=jxl_box('Exif', struct.pack('>I', 6) + b'Exif\0\0' + tiff),
+        ),
+        'exif_not_tiff': container(
+            code, before=jxl_box('Exif', bytes(4) + b'not a TIFF header')
+        ),
+    }
+    sources = tmp_path / 'sources'
+    sources.mkdir()
+    for name, data in files.items():
+        (sources / f'{name}.jxl').write_bytes(data)
+
+    ph.stage(tmp_path / 'job', [sources / f'{name}.jxl' for name in files])
+    result = encoder.run(['-q', '75', 'jxl_job.txt'], tmp_path / 'job')
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    def said(name):
+        return ' '.join(ph.photo_output(result.stdout, name).split())
+
+    assert said('exif_cut') == 'FAILED: metadata box Exif cut short'
+    assert said('xml_cut') == 'FAILED: metadata box xml cut short'
+    assert said('brob_corrupt') == 'FAILED: unreadable metadata box Exif'
+    assert '3 failed' in ' '.join(result.stdout.split())
+    done = {i: out for i, (out, _) in ph.read_done(tmp_path / 'job').items()}
+    assert sorted(done) == [4, 5]
+
+    tags = ph.exif_tags(done[4])
+    assert tags['IFD0:Make'] == 'photobatch'
+    assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
+    assert 'no metadata' in said('exif_not_tiff')
+    assert ph.exif_box(done[5]) == b''
+    assert (
+        ph.psnr(
+            decoded(inputs['bare'], tmp_path / 'want.png'),
+            decoded(done[5], tmp_path / 'got.png'),
+        )
+        > ph.MIN_PSNR
+    )
 
 
 def test_dates_and_location_from_photos(encoder, inputs, tmp_path):
@@ -446,3 +759,58 @@ def test_builds_decode_alike(wasm, macos, inputs, tmp_path):
             # samples, 6 of 65535 in 2% of an HDR (16-bit) one's
             tolerance = 16 if a.max() > 255 else 1
             assert np.abs(a - b).max() <= tolerance, (mac_label, name)
+
+
+def test_ten_bits_are_kept(encoder, inputs, tmp_path):
+    """
+    A 10-bit JPEG XL comes out of libjxl as 0 to 1023, its own depth, as a
+    10-bit HEIF's does: the JPEG XL copy is 10-bit, and lossless here, so its
+    samples are the input's exactly. The HEIC gets the 8-bit rendering of them.
+    """
+    source = padded(inputs['ten_bit'], tmp_path)
+    output, results = ph.convert(
+        encoder, tmp_path / 'jxl', [source], ['-q', '100']
+    )
+    assert '10-bit' in ph.photo_output(output, 'ten_bit')
+    assert 'lossless, 10-bit RGB' in jxl_info(results[1])
+    want = djxl_pixels(inputs['ten_bit'], tmp_path / 'want.ppm')
+    assert want.max() > 255 and (want % 4).any()  # all ten bits used
+    assert np.array_equal(djxl_pixels(results[1], tmp_path / 'got.ppm'), want)
+
+    output, results = ph.convert(
+        encoder, tmp_path / 'heic', [inputs['ten_bit']], ['--heic']
+    )
+    assert 'SDR HEIC' in ph.photo_output(output, 'ten_bit')
+    rendering = np.round(want * 255 / 1023)
+    got = ph.apple_render(results[1], tmp_path / 'heic.png').convert('RGB')
+    got = np.asarray(got, dtype=float)
+    # x265 at RF 26 on a noisy scene: a few levels off, no color shift
+    assert np.abs(rendering - got).mean() < 6
+    assert (
+        np.abs(rendering.mean(axis=(0, 1)) - got.mean(axis=(0, 1))).max() < 2
+    )
+
+
+def test_lossless_hdr_copy_is_decoded_as_stored(encoder, inputs, tmp_path):
+    """
+    A lossless HDR copy (16-bit PQ, Apple's HDR profile) converted losslessly
+    again: the same samples and the same profile, byte for byte, on every
+    build. jxl_decode asks for the code points the profile's 'cicp' tag names
+    (Display P3 PQ), which libjxl takes for the profile's own color space (it
+    reads the tag too, the static builds through patch_deps.py's skcms patch),
+    so no color transform changes the samples.
+    """
+    source = padded(inputs['lossless_hdr'], tmp_path)
+    output, results = ph.convert(
+        encoder, tmp_path / 'job', [source], ['-q', '100']
+    )
+    jxl = results[1]
+    peak = ph.jxl_intensity_target(source)
+    assert f'HDR {peak / 203:.1f}' in ph.photo_output(output, source.stem)
+    assert ph.jxl_intensity_target(jxl) == pytest.approx(peak, abs=0.5)
+    profile = ph.jxl_profile(source, tmp_path)
+    assert profile is not None and b'hdgm' in profile
+    assert ph.jxl_profile(jxl, tmp_path) == profile
+    want = djxl_pixels(source, tmp_path / 'want.ppm')
+    assert want.max() > 255
+    assert np.array_equal(djxl_pixels(jxl, tmp_path / 'got.ppm'), want)

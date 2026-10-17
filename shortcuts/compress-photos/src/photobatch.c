@@ -452,11 +452,13 @@ static int encode_attempt(image_t *img, const encode_meta_t *em, const options_t
   // 0.11.2 and 0.12.0 do; test_hdr_profile.py checks it.)
   info.uses_original_profile = lossless || hdr_icc ? JXL_TRUE : JXL_FALSE;
   info.orientation = JXL_ORIENT_IDENTITY;  // pixels are already upright
-  // How bright an HDR photo gets, in nits: at most PQ's peak, 10,000 nits
-  // (its brighter values are clipped there, and libjxl rejects targets above
-  // 65,504). Left at 0 otherwise: libjxl then uses the default for the color
-  // it ends up storing (10,000 nits for PQ, 255 for SDR).
-  if (pq && em->intensity_target > 0) info.intensity_target = (float)fmin(em->intensity_target, 10000);
+  // How bright an HDR photo gets, in nits (by CICP, or by its profile, as a
+  // JPEG XL input's can be): at most PQ's peak, 10,000 nits (its brighter
+  // values are clipped there, and libjxl rejects targets above 65,504). Left
+  // at 0 otherwise (SDR, a tone-mapped picture): libjxl then uses the
+  // default for the color it ends up storing (10,000 nits for PQ, 255 for
+  // SDR).
+  if (em->intensity_target > 0) info.intensity_target = (float)fmin(em->intensity_target, 10000);
   if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
     FAIL("rejected image header (%s)", jxl_error_name(JxlEncoderGetError(enc)));
   }
@@ -1204,8 +1206,13 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
       if (hdr.has_gain_map && !opt->sdr) say_wrap("  ", "! HDR not kept; saved as SDR");
     } else if (format == FMT_JXL) {
       // Upright already; an HDR one (PQ, HLG) is tone-mapped to SDR with
-      // Drop HDR, and refused below otherwise.
+      // Drop HDR, and refused below otherwise. A gain map ('jhgm' box)
+      // isn't used: the SDR base is converted, and the original kept.
       if (jxl_decode(orig, orig_len, opt->sdr, DECODE_RUNNER, &img, &color, &hdr, NULL, err, sizeof err) != 0) goto done;
+      if (mo.jxl_gain_map) {
+        hdr.has_gain_map = 1;
+        if (!opt->sdr) say_wrap("  ", "! HDR not kept (JPEG XL with a gain map)");
+      }
     } else {
       if (format == FMT_JPEG && jpeg_has_gain_map(orig, orig_len)) {
         hdr.has_gain_map = 1;
@@ -1235,18 +1242,23 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
       // the SDR HEIC. An HDR transfer curve (PQ, HLG) would band at 8 bits,
       // and such a picture is HDR without a gain map: refused.
       const int transfer = color.icc.size ? gainmap_icc_cicp_transfer(&color.icc) : color.cicp_present ? color.cicp[1] : 0;
-      if ((transfer == 16 || transfer == 18) && format == FMT_JXL) {
-        // A HEIC written here can't hold its HDR (no gain map); Drop HDR
-        // tone-maps it to SDR (the Mac's choice; the iPhone has none).
-        snprintf(err, sizeof err,
-                 opt->mac ? "an HDR JPEG XL can't keep its HDR as HEIC; choose Drop HDR for an SDR HEIC, or JPEG XL"
-                          : "an HDR JPEG XL can't keep its HDR as HEIC; choose JPEG XL for it, or convert it on the "
-                            "Mac with Drop HDR for an SDR HEIC");
-        goto done;
-      }
-      if (transfer == 16 || transfer == 18) {
-        snprintf(err, sizeof err, "an HDR photo without a gain map (%s) can't be saved as HEIC; choose JPEG XL for it",
-                 transfer == 16 ? "PQ" : "HLG");
+      if (transfer == 16 || transfer == 18 || hdr.headroom > 0) {
+        if (format != FMT_JXL) {
+          snprintf(err, sizeof err, "an HDR photo without a gain map (%s) can't be saved as HEIC; choose JPEG XL for it",
+                   transfer == 16 ? "PQ" : "HLG");
+        } else if (opt->sdr) {
+          // Drop HDR, but jxl_decode couldn't tone-map it (HDR by a profile alone)
+          snprintf(err, sizeof err,
+                   "an HDR JPEG XL described by its ICC profile alone can't be tone-mapped to SDR, so it can't be "
+                   "saved as HEIC; choose JPEG XL for it");
+        } else {
+          // A HEIC written here can't hold its HDR (no gain map); Drop HDR
+          // tone-maps it to SDR (the Mac's choice; the iPhone has none).
+          snprintf(err, sizeof err,
+                   opt->mac ? "an HDR JPEG XL can't keep its HDR as HEIC; choose Drop HDR for an SDR HEIC, or JPEG XL"
+                            : "an HDR JPEG XL can't keep its HDR as HEIC; choose JPEG XL for it, or convert it on the "
+                              "Mac with Drop HDR for an SDR HEIC");
+        }
         goto done;
       }
       if (image_to_8bit(&img) != 0) {
@@ -1430,9 +1442,16 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
     }
   } else if (orig_format == FMT_JXL) {
     // An HDR one (PQ, HLG) stays HDR, with its peak, unless --sdr; the
-    // grain and the bright-sky check are for gain maps' HDR only.
+    // grain and the bright-sky check are for gain maps' HDR only. A gain
+    // map ('jhgm' box) isn't used: the SDR base is converted, and the
+    // original kept, as for a JPEG with one.
     if (jxl_decode(orig, orig_len, opt->sdr, DECODE_RUNNER, &img, &color, &hdr, &transposed, err, sizeof err) != 0) {
       goto done;
+    }
+    if (hdr.warning[0]) say_wrap("  ", "! %s", hdr.warning);
+    if (mo.jxl_gain_map) {
+      hdr.has_gain_map = 1;
+      if (!opt->sdr) say_wrap("  ", "! HDR not kept (JPEG XL with a gain map)");
     }
   } else {
     // HDR JPEGs (as Photos sends HDR photos with "Send As: Automatic"): the
@@ -1514,17 +1533,20 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
 
   // The date and the rest the photo has in Photos, if the shortcut gave them.
-  if (apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len) < 0 ||
-      apply_photos_meta(job, &exif, &exif_len, &xmp, &xmp_len) < 0) {
+  const int dated = apply_photo_date(job, &exif, &exif_len, &xmp, &xmp_len);
+  const int described = dated < 0 ? -1 : apply_photos_meta(job, &exif, &exif_len, &xmp, &xmp_len);
+  if (described < 0) {
     snprintf(err, sizeof err, "out of memory");
     goto done;
   }
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len, hdr.peak * GAINMAP_SDR_WHITE_NITS};
   if (encode_jxl(&img, &em, opt, &jxl, &jxl_len, err, sizeof err) != 0) goto done;
-  if (orig_format == FMT_JXL && (double)jxl_len >= orig_size) {
-    // Converting a JPEG XL again only loses quality then: the original stays
-    // (it isn't in jxl_done.txt, so it isn't collected either).
+  if (orig_format == FMT_JXL && !hdr.tone_mapped && !dated && !described && (double)jxl_len >= orig_size) {
+    // Converting a JPEG XL again only loses quality then, unless the copy is
+    // another rendition: tone-mapped to SDR, or with a date or location from
+    // Photos the original lacks. Otherwise the original stays (it isn't in
+    // jxl_done.txt, so it isn't collected either).
     char in_s[32], out_s[32];
     fmt_bytes(in_s, sizeof in_s, orig_size);
     fmt_bytes(out_s, sizeof out_s, (double)jxl_len);

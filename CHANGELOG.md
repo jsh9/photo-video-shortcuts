@@ -17,14 +17,21 @@ encoder. Every release includes the current files of all shortcuts.
     A copy of a copy loses quality a second time.
   - An HDR JPEG XL (PQ or HLG, as this tool's HDR copies are) stays HDR as JPEG
     XL, with its brightness. With *Drop HDR* (Mac) libjxl tone-maps it to SDR,
-    and its original is marked to keep. As HEIC it needs *Drop HDR*: a new HEIC
-    can't hold HDR without a gain map, so with *Keep HDR*, and on the iPhone,
-    which has no *Drop HDR*, it fails and says why.
+    and its original is marked to keep; one whose color space CICP can't name
+    is tone-mapped into Rec. 2020 primaries, and one described by an ICC
+    profile alone can't be tone-mapped and stays HDR (`! HDR kept: ...`). As
+    HEIC it needs *Drop HDR*: a new HEIC can't hold HDR without a gain map, so
+    with *Keep HDR*, and on the iPhone, which has no *Drop HDR*, it fails and
+    says why (one HDR by a profile alone fails with *Drop HDR* too).
+  - A JPEG XL with a gain map (a `jhgm` box) is converted as its SDR picture,
+    with `! HDR not kept (JPEG XL with a gain map)`, and its original is marked
+    to keep, as a JPEG with a gain map is.
   - A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
     written
     (`! not converted: the copy (...) would not be smaller than the original (...)`),
     and its original isn't collected in *Compressed originals*; it doesn't
-    count as failed.
+    count as failed. A copy that is another rendition (tone-mapped to SDR, or
+    with a date or location from Photos the original lacks) is written even so.
   - *Compress Photo Files (macOS)* converts a folder's `.jxl` files too; the
     copy of `Name.jxl` is `Name 2.jxl`, next to it.
 - Changed
