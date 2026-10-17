@@ -1155,12 +1155,19 @@ python3 scripts/build_mac_shortcuts.py --guess
     gave Brotli the rest of the file and took a stream that the box cuts short
     for the whole box, so a JPEG XL whose compressed EXIF was cut converted
     with its first tags only. Homebrew's libjxl, the native build's, is 0.12.
+  - libjxl's tone mapping of a picture whose color space is an ICC profile
+    (`--icc-fields`): when asked for another output color space, the decoder
+    reads the profile's fields, so it knows the picture is PQ or HLG and
+    tone-maps it, as libjxl 0.12 does in `JxlDecoderSetOutputColorProfile`.
+    0.11.2 kept the profile as it was, added no tone mapping, and an HDR copy
+    with Apple's HDR profile decoded for SDR (`--sdr`) came out with its peak
+    as white.
 - **What `build-macos.sh` does:** the same libraries, the same feature flags
-  and the same skcms and Brotli box edits, built as static arm64 libraries for
-  macOS 14 or later (CMake, in `build/macos/`), from a second libjxl checkout,
-  `.deps/libjxl-native`, since `build-wasm.sh` patches the threads out of
-  `.deps/libjxl` (the libheif edits are guarded by `__wasi__` and
-  `__cpp_exceptions`, so that checkout is shared). `photobatch` is compiled
+  and the same skcms, Brotli box and ICC fields edits, built as static arm64
+  libraries for macOS 14 or later (CMake, in `build/macos/`), from a second
+  libjxl checkout, `.deps/libjxl-native`, since `build-wasm.sh` patches the
+  threads out of `.deps/libjxl` (the libheif edits are guarded by `__wasi__`
+  and `__cpp_exceptions`, so that checkout is shared). `photobatch` is compiled
   with `-DJXLBATCH_THREADS` (libjxl's thread pool; the HEIC route's tiles on
   several threads) and `-DJXLBATCH_HEIC`, linked statically with an 8-bit x265
   built from the same archive (the result depends only on `libc++` and

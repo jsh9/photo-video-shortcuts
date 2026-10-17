@@ -77,10 +77,10 @@ if [ ! -d "$X265" ]; then
   rm -f "$archive"
 fi
 
-# Only the skcms and Brotli box edits: this build has threads and exceptions.
-# (The libheif and x265 checkouts may carry build-wasm.sh's edits; they are
-# guarded by __wasi__ and __cpp_exceptions, so they don't apply here.)
-python3 "$ROOT/scripts/patch_deps.py" --skcms --brob --libjxl "$LIBJXL"
+# Only the skcms, Brotli box and ICC fields edits: this build has threads and
+# exceptions. (The libheif and x265 checkouts may carry build-wasm.sh's edits;
+# they are guarded by __wasi__ and __cpp_exceptions, so they don't apply here.)
+python3 "$ROOT/scripts/patch_deps.py" --skcms --brob --icc-fields --libjxl "$LIBJXL"
 
 bdir="$ROOT/build/macos"
 prefix="$bdir/prefix"

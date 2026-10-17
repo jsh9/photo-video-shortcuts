@@ -66,3 +66,33 @@ def test_brob_fix_applies_to_the_pinned_libjxl(tmp_path):
 
     patch_deps.patch_brob(tmp_path)
     assert path.read_text() == patched
+
+
+def test_icc_fields_fix_applies_to_the_pinned_libjxl(tmp_path):
+    """
+    The ICC fields fix (libjxl 0.12's, see test_jxl_input.py's
+    test_drop_hdr_tone_maps_to_sdr) applies to decode.cc as the pinned libjxl
+    has it: JxlDecoderSetOutputColorProfile reads the original's fields from
+    its ICC profile; a second run leaves the file alone.
+    """
+    libjxl = ph.REPO / '.deps' / 'libjxl'
+    ph.need((libjxl / '.git').exists(), 'the libjxl checkout (build-wasm.sh)')
+    pristine = ph.run([
+        'git',
+        '-C',
+        libjxl,
+        'show',
+        f'HEAD:{patch_deps.DECODE}',
+    ])
+    assert pristine.returncode == 0, pristine.stderr
+    path = tmp_path / patch_deps.DECODE
+    path.parent.mkdir(parents=True)
+    path.write_text(pristine.stdout)
+
+    patch_deps.patch_icc_fields(tmp_path)
+    patched = path.read_text()
+    assert patched.count('orig_encoding.HaveFields()') == 1
+    assert 'output_encoding.orig_color_encoding = orig_encoding;' in patched
+
+    patch_deps.patch_icc_fields(tmp_path)
+    assert path.read_text() == patched
