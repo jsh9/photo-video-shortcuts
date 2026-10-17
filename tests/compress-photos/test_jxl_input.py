@@ -429,6 +429,17 @@ def test_copy_not_smaller_is_not_written(encoder, inputs, tmp_path):
     assert list(ph.read_done(tmp_path)) == [2]
     assert not (tmp_path / 'jxl_out_1.jxl').exists()
 
+    # A batch of such copies alone converts nothing and fails nothing: exit
+    # status 0 (1 says nothing converted and a failure), and no jxl_done.txt,
+    # which the iPhone's shortcuts read as nothing to save.
+    ph.stage(tmp_path / 'all', [inputs['copy_sdr']])
+    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path / 'all')
+    assert result.returncode == 0, result.stdout
+    text = ' '.join(result.stdout.split())
+    assert 'Done: 0 of 1 converted' in text
+    assert 'failed' not in text
+    assert not (tmp_path / 'all' / 'jxl_done.txt').exists()
+
 
 def test_copy_is_written_when_it_is_another_rendition(
         encoder, inputs, tmp_path

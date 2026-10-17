@@ -28,10 +28,12 @@ encoder. Every release includes the current files of all shortcuts.
     to keep, as a JPEG with a gain map is.
   - A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
     written
-    (`! not converted: the copy (...) would not be smaller than the original (...)`),
-    and its original isn't collected in *Compressed originals*; it doesn't
-    count as failed. A copy that is another rendition (tone-mapped to SDR, or
-    with a date or location from Photos the original lacks) is written even so.
+    (`! not converted: the copy (...) would not be smaller than the original (...)`);
+    it doesn't count as failed, and its original is left as it is (from the
+    picker and on the Mac it isn't collected in *Compressed originals*; from
+    the iPhone's share sheet it already is, like every original). A copy that
+    is another rendition (tone-mapped to SDR, or with a date or location from
+    Photos the original lacks) is written even so.
   - *Compress Photo Files (macOS)* converts a folder's `.jxl` files too; the
     copy of `Name.jxl` is `Name 2.jxl`, next to it.
 - Changed
@@ -39,10 +41,15 @@ encoder. Every release includes the current files of all shortcuts.
   - The Mac's and the iPhone's copies of a JPEG XL can differ by a level in a
     few pixels (libjxl's decoder rounds a little differently on the Mac); other
     photos' copies are still the same bytes on both.
+  - On the iPhone, a batch that converts nothing (every photo failed, or every
+    JPEG XL copy would not be smaller) ends with the notification "Nothing to
+    save: ..." instead of the error "File jxl_done.txt not found". a-Shell's
+    files are left for the next run, which now removes staged originals of an
+    earlier run too.
   - Update `photobatch.wasm` in a-Shell and `photobatch-macos` (they decode
-    JPEG XL now), and the Mac shortcuts (the Finder shortcut's folders; the
-    shortcuts check the encoder's version). The iPhone shortcuts only carry the
-    new version number.
+    JPEG XL now), the Mac shortcuts (the Finder shortcut's folders; the
+    shortcuts check the encoder's version) and the iPhone shortcuts (the
+    notification above).
 
 ## [Compress Photos 0.9.0] - 2026-10-14
 

@@ -47,7 +47,8 @@ then, from the share sheet:
    a-Shell starts Compress-Photos-Import (shortcut), which saves each copy
    to Photos under its original name, adds it to the albums listed in
    jxl_albums_N.txt (written by Compress Photos), makes it a favorite if
-   jxl_favorite_N.txt is there (likewise), and cleans up
+   jxl_favorite_N.txt is there (likewise), and cleans up; with no
+   jxl_done.txt (nothing converted) it says "Nothing to save" instead
    (the originals were added to the album "Compressed originals" before
    the hand-off: this shortcut is over once a-Shell is in front)
 or, from the picker:
@@ -1057,10 +1058,15 @@ included), so there is no new library. The plan and its spikes:
   (`--sdr`), or given a date or location from Photos the original lacks
   (`apply_photo_date`, `apply_photos_meta`); the rule is for a copy that only
   re-encodes the same picture and metadata. A skipped photo is left out of
-  `jxl_done.txt`, so the shortcuts don't collect its original, and counted
-  apart from failures:
+  `jxl_done.txt`, so the Mac shortcuts and the iPhone's picker route don't
+  collect its original (the share-sheet route collects every original before
+  photobatch runs), and counted apart from failures:
   `N JPEG XL photo(s) not converted: ... would not be smaller.` A lossless run
-  of a lossy JPEG XL always ends there.
+  of a lossy JPEG XL always ends there. A batch of such copies alone converts
+  nothing: no `jxl_done.txt`, and the exit status is 0 all the same (1 means
+  nothing converted and a failure); the iPhone shortcuts read the missing file
+  as "Nothing to save" (`save_results`, `NOTHING_SAVED`) instead of failing on
+  it as before 0.10.0.
 - **Not the same bytes on the Mac.** The decoder computes in floats with
   Highway's SIMD, most likely rounding differently with NEON's fused
   multiply-adds than with WebAssembly's separate ones: decoded pixels from
@@ -1207,7 +1213,9 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
 
 **Compress-Photos-Import** (build this first; no share sheet):
 
-1. a-Shell **Get File**: `jxl_done.txt`, Error If Not Found on.
+1. a-Shell **Get File**: `jxl_done.txt`, Error If Not Found **off** (there is
+   no file when nothing was converted), then **If** File has any value; steps 2
+   to 7 are inside, step 8 is its Otherwise.
 2. **Get Text from Input**: File.
 3. **Split Text**: Text, by New Lines.
 4. **Repeat with Each** item in Split Text:
@@ -1234,6 +1242,9 @@ Apps ▸ a-Shell. Turn on each action's toggles as listed.
    `rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_favorite_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started`,
    Keep Going on.
 7. **Show Notification**: `Saved <Count> photo(s) to Photos.`
+8. **Otherwise:** **Show Notification**:
+   `Nothing to save: no photo was converted (a-Shell shows why for each), or a-Shell is still converting because Compress Photos was started outside the Shortcuts app.`
+   **End If**.
 
 **Compress Photos** (Details: Show in Share Sheet, receives Images; if there's
 no input: Continue):
@@ -1297,7 +1308,7 @@ no input: Continue):
    6. **Match Text**: `\d+` in Name. Its Matches is the quality.
 
 4. a-Shell **Execute Command**:
-   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started`,
+   `rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started jxl_in_*`,
    Keep Going on.
 
 5. **Repeat with Each** item in `Stills`:
@@ -1372,8 +1383,8 @@ no input: Continue):
            to Photo Album**: the original, to a **Text**
            `Compressed originals`; **Add to Variable** `Collected` (the
            original). **End If**.
-     4. Steps 6–7 of Compress-Photos-Import, the notification also counting
-        `Collected`.
+     4. Steps 6–8 of Compress-Photos-Import, the notification of step 7 also
+        counting `Collected`.
    - **End If**. (In the share-sheet branch, step 4 above runs for each item of
      `Stills` before the Execute Command.)
 

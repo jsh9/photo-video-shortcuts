@@ -1988,7 +1988,11 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   free_jobs(jobs, count);
   free(job_path);
   free(dir);
-  return batch.done > 0 ? 0 : 1;
+  // 1 when nothing was converted and a photo failed. A batch whose JPEG XL
+  // photos were all left alone (their copies wouldn't be smaller) converted
+  // nothing but failed nothing. (The shortcuts don't read the status; the
+  // tests do.)
+  return batch.done > 0 || (batch.skipped > 0 && batch.skipped == count) ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------
