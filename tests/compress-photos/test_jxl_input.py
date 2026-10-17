@@ -4,20 +4,21 @@ with Apple's HDR profile, lossy and lossless) and cjxl's files
 (Brotli-compressed metadata, the orientation in both the codestream and the
 EXIF, a bare codestream, a recompressed JPEG, 10 and 16 bits, transparency,
 gray, an Adobe RGB profile, PQ without a profile, PQ with a white point CICP
-can't name, PQ by a profile alone, a gain map box) convert to JPEG XL and to
-HEIC in every build: upright, with their EXIF, XMP and color space (10 bits
-kept as JPEG XL), and the date and location from Photos. An HDR one stays HDR
-as JPEG XL, with its peak and its profile; with --sdr (Drop HDR) libjxl
-tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its own; not
-at all when a profile alone describes it), and only so does it become a HEIC. A
-gain map ('jhgm' box) isn't used: the copy is SDR and the original is kept. A
-JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't written,
-unless it is another rendition (tone-mapped, or with a date or location from
-Photos). Animated and cut-short files fail, and so do metadata boxes cut short
-or not decompressible (an Exif box without a TIFF header is dropped); the rest
-of the batch goes on. The WebAssembly builds decode them alike, and the Mac's
-within a level (libjxl's decoder computes in floats, with fused multiply-adds
-on the Mac's NEON).
+can't name, PQ by a profile alone, HLG, a gain map box) convert to JPEG XL and
+to HEIC in every build: upright, with their EXIF, XMP and color space (10 bits
+kept as JPEG XL), and the date and location from Photos. An HDR one (PQ or HLG)
+stays HDR as JPEG XL, with its peak and its profile; with --sdr (Drop HDR)
+libjxl tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its
+own; not at all when a profile alone describes it), and only so does it become
+a HEIC. A gain map ('jhgm' box) isn't used: the copy is SDR and the original is
+kept. A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
+written, unless it is another rendition (tone-mapped, or with a date or
+location from Photos). Animated and cut-short files fail, and so do metadata
+boxes cut short or not decompressible (an Exif box without a TIFF header is
+dropped); the rest of the batch goes on. Metadata boxes of 200 KB, raw or
+Brotli-compressed, are kept byte for byte. The WebAssembly builds decode them
+alike, and the Mac's within a level (libjxl's decoder computes in floats, with
+fused multiply-adds on the Mac's NEON).
 """
 
 import re
@@ -45,7 +46,13 @@ SDR = {
 }
 # turned by the codestream's orientation, which cjxl takes from the JPEG
 TURNED = {'cjxl_rot6', 'recompressed'}
-HDR = ['copy_hdr', 'pq']
+# name: its HDR encoding as cjxl and djxl name it (Display P3 PQ, or Rec. 2100
+# HLG), and its primaries as jxlinfo does
+HDR = {
+    'copy_hdr': ('RGB_D65_DCI_Rel_PeQ', 'P3'),
+    'pq': ('RGB_D65_DCI_Rel_PeQ', 'P3'),
+    'hlg': ('RGB_D65_202_Rel_HLG', 'Rec.2100'),
+}
 
 
 def write_ppm(samples, path, maximum):
@@ -145,6 +152,17 @@ def inputs(wasm, photos, batch, tmp_path_factory):
         'color_space=RGB_D65_DCI_Rel_PeQ',
         '--intensity_target=1000',
     )
+    # the same samples as HLG (Rec. 2100 primaries), where 0.75 is reference
+    # white, 203 nits on a 1000-nit display
+    cjxl(
+        'hlg',
+        folder / 'pq.ppm',
+        '-q',
+        '90',
+        '-x',
+        'color_space=RGB_D65_202_Rel_HLG',
+        '--intensity_target=1000',
+    )
     cjxl('animated', folder / 'animated.png', '-q', '90')
     # PQ with a white point CICP can't name (E): HDR by libjxl's description
     cjxl(
@@ -218,6 +236,8 @@ def test_inputs_are_what_they_say(inputs):
     assert 'Transfer function: gamma' in info['adobe_rgb']
     assert 'ICC profile' in info['copy_hdr']
     assert 'Transfer function: PQ' in info['pq']
+    assert 'Transfer function: HLG' in info['hlg']
+    assert 'Primaries: Rec.2100' in info['hlg']
     assert 'White point: E' in info['pq_e']
     assert 'Transfer function: PQ' in info['pq_e']
     assert 'ICC profile' in info['pq_icc'] and 'lossless' in info['pq_icc']
@@ -327,7 +347,32 @@ def test_transparent_jpeg_xl_is_not_written_as_heic(encoder, inputs, tmp_path):
     assert not (tmp_path / 'jxl_done.txt').exists()
 
 
-@pytest.mark.parametrize('name', HDR)
+def hdr_samples(jxl, ppm, space):
+    """
+    A JPEG XL's samples as djxl decodes them into ``space`` (its own HDR
+    encoding, PQ or HLG; asked for explicitly, as a lossy JPEG XL with an ICC
+    profile otherwise decodes to linear sRGB, clipping HDR), 0 to 1.
+    """
+    ph.run(['djxl', jxl, ppm, f'--color_space={space}'], check=True)
+    pixels, maximum = ph.read_ppm(ppm)
+    return pixels / maximum
+
+
+def encoded_psnr(reference, samples):
+    """
+    PSNR (dB) of two pictures' samples as encoded, 0 to 1: PQ or HLG codes,
+    perceptually spaced either way (as pq_psnr compares linear light).
+    """
+    mse = float(np.mean((reference - samples) ** 2))
+    return 99.0 if mse == 0 else 10 * np.log10(1 / mse)
+
+
+def sdr_space(space):
+    """The same primaries with the sRGB curve, as djxl names it."""
+    return space[: space.rindex('_')] + '_SRG'
+
+
+@pytest.mark.parametrize('name', list(HDR))
 def test_hdr_stays_hdr(encoder, inputs, name, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'job', [inputs[name]], ['-q', '83']
@@ -341,10 +386,11 @@ def test_hdr_stays_hdr(encoder, inputs, name, tmp_path):
     assert ph.jxl_profile(jxl, tmp_path) == ph.jxl_profile(
         inputs[name], tmp_path
     )
-    want = ph.jxl_hdr_pixels(inputs[name], tmp_path / 'want.ppm')
-    got = ph.jxl_hdr_pixels(jxl, tmp_path / 'got.ppm')
+    space, _ = HDR[name]
+    want = hdr_samples(inputs[name], tmp_path / 'want.ppm', space)
+    got = hdr_samples(jxl, tmp_path / 'got.ppm', space)
     # as close as cjxl gets from the same pixels at that quality (a noisy
-    # scene in PQ codes compresses worse than a photo)
+    # scene in PQ or HLG codes compresses worse than a photo)
     ref = tmp_path / 'ref.jxl'
     ph.run(
         [
@@ -354,13 +400,13 @@ def test_hdr_stays_hdr(encoder, inputs, name, tmp_path):
             '-q',
             '83',
             '-x',
-            'color_space=RGB_D65_DCI_Rel_PeQ',
+            f'color_space={space}',
             f'--intensity_target={peak}',
         ],
         check=True,
     )
-    floor = ph.pq_psnr(want, ph.jxl_hdr_pixels(ref, tmp_path / 'ref.ppm'))
-    assert ph.pq_psnr(want, got) > min(40, floor - 1)
+    floor = encoded_psnr(want, hdr_samples(ref, tmp_path / 'ref.ppm', space))
+    assert encoded_psnr(want, got) > min(40, floor - 1)
     assert not ph.kept_originals(tmp_path / 'job')
 
 
@@ -370,25 +416,44 @@ def test_apple_hdr_profile_is_kept(inputs, tmp_path):
     assert profile is not None and b'hdgm' in profile
 
 
-@pytest.mark.parametrize('name', HDR)
+@pytest.mark.parametrize('name', list(HDR))
 def test_drop_hdr_tone_maps_to_sdr(encoder, inputs, name, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'job', [inputs[name]], ['-q', '83', '--sdr']
     )
+    space, primaries = HDR[name]
     info = jxl_info(results[1])
     assert 'lossy, 8-bit RGB' in info
     assert 'Transfer function: sRGB' in info
-    assert 'Primaries: P3' in info
+    assert f'Primaries: {primaries}' in info
     assert 'HDR tone-mapped to SDR' in ' '.join(
         ph.photo_output(output, inputs[name].stem).split()
     )
     assert ph.kept_originals(tmp_path / 'job') == {1}
-    # lit like an SDR picture, not like PQ read as sRGB (much darker)
-    mean = np.asarray(decoded(results[1], tmp_path / 'sdr.png')).mean()
-    assert 60 < mean < 200
+    # libjxl's rendering of the picture for an SDR display (255 nits, as
+    # jxl_decode asks: Rec. 2408 for PQ, the HLG OOTF for HLG), which djxl
+    # makes with --display_nits: lit like an SDR picture (means of 161, 119
+    # and 65 of 255 for copy_hdr, pq and hlg), not like the HDR codes read as
+    # sRGB (much darker; nor like the un-tone-mapped rendering, whose white
+    # is the file's peak: 117, 62 and 45)
+    ref = tmp_path / 'ref.png'
+    ph.run(
+        [
+            'djxl',
+            inputs[name],
+            ref,
+            '--bits_per_sample=8',
+            '--display_nits=255',
+            f'--color_space={sdr_space(space)}',
+        ],
+        check=True,
+    )
+    got = decoded(results[1], tmp_path / 'sdr.png')
+    assert ph.psnr(Image.open(ref), got) > ph.MIN_PSNR
+    assert 60 < np.asarray(got).mean() < 200
 
 
-@pytest.mark.parametrize('name', HDR)
+@pytest.mark.parametrize('name', list(HDR))
 def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     ph.stage(tmp_path / 'keep', [inputs[name]])
     result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path / 'keep')
@@ -707,6 +772,59 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
         )
         > ph.MIN_PSNR
     )
+
+
+def test_metadata_boxes_over_64_kb(encoder, inputs, tmp_path):
+    """
+    EXIF and XMP of 200 KB each (a long ImageDescription, a long
+    dc:description), raw or Brotli-compressed, around the 'bare' input's
+    codestream: jxl_boxes reads them into a 64 KB buffer that libjxl asks to
+    grow, twice for each, and the copy gets them byte for byte. (An unknown 1
+    MB box pads each input, as padded() does, so that the copy, which stores
+    the boxes raw, is smaller than the original and is written.)
+    """
+    text = ' '.join(f'{i:06d}' for i in range(30_000))  # 209,999 bytes
+    tiff = ph.tiff(
+        {0x010F: ph.ascii_value('photobatch'), 0x010E: ph.ascii_value(text)},
+        exif=ph.TIFF_EXIF,
+    )
+    exif = bytes(4) + tiff  # the TIFF header at offset 0
+    xmp = ph.XMP.format(o=1).replace('photobatch test', text).encode()
+    assert min(len(exif), len(xmp)) > 2 * 65536
+    code = inputs['bare'].read_bytes()
+    pad = jxl_box('pad ', bytes(1 << 20))
+    files = {
+        'raw': container(
+            code,
+            before=jxl_box('Exif', exif),
+            after=jxl_box('xml ', xmp) + pad,
+        ),
+        'brob': container(
+            code,
+            before=jxl_box('brob', b'Exif' + brotli.compress(exif)),
+            after=jxl_box('brob', b'xml ' + brotli.compress(xmp)) + pad,
+        ),
+    }
+    sources = tmp_path / 'sources'
+    sources.mkdir()
+    for name, data in files.items():
+        (sources / f'{name}.jxl').write_bytes(data)
+
+    _, results = ph.convert(
+        encoder,
+        tmp_path / 'job',
+        [sources / f'{name}.jxl' for name in files],
+        ['-q', '75'],
+    )
+    assert sorted(results) == [1, 2]
+    for i, name in enumerate(files, 1):
+        assert ph.exif_box(results[i]) == exif, name
+        assert ph.xml_box(results[i]) == xmp, name
+
+    tags = ph.exif_tags(results[1])
+    assert tags['IFD0:Make'] == 'photobatch'
+    assert tags['IFD0:ImageDescription'] == text
+    assert ph.xmp_tags(results[2])['Description'] == text
 
 
 def test_dates_and_location_from_photos(encoder, inputs, tmp_path):
