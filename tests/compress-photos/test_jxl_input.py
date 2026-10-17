@@ -435,7 +435,10 @@ def test_drop_hdr_tone_maps_to_sdr(encoder, inputs, name, tmp_path):
     # makes with --display_nits: lit like an SDR picture (means of 161, 119
     # and 65 of 255 for copy_hdr, pq and hlg), not like the HDR codes read as
     # sRGB (much darker; nor like the un-tone-mapped rendering, whose white
-    # is the file's peak: 117, 62 and 45)
+    # is the file's peak: 117, 62 and 45). Compared on a lossless copy: the
+    # lossy one's own loss on the noisy synthetic scenes (about 26 dB at
+    # quality 83) would hide a wrong tone mapping; the lossless copy is that
+    # rendering within a level (the builds' decoders differ by that much).
     ref = tmp_path / 'ref.png'
     ph.run(
         [
@@ -448,9 +451,14 @@ def test_drop_hdr_tone_maps_to_sdr(encoder, inputs, name, tmp_path):
         ],
         check=True,
     )
-    got = decoded(results[1], tmp_path / 'sdr.png')
-    assert ph.psnr(Image.open(ref), got) > ph.MIN_PSNR
-    assert 60 < np.asarray(got).mean() < 200
+    assert (
+        60 < np.asarray(decoded(results[1], tmp_path / 'sdr.png')).mean() < 200
+    )
+    _, lossless = ph.convert(
+        encoder, tmp_path / 'lossless', [inputs[name]], ['-q', '100', '--sdr']
+    )
+    got = decoded(lossless[1], tmp_path / 'lossless.png')
+    assert ph.psnr(Image.open(ref), got) > 40
 
 
 @pytest.mark.parametrize('name', list(HDR))

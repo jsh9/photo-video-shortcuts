@@ -198,18 +198,27 @@ int jxl_decode(const uint8_t *buf, size_t len, int sdr, void *runner, image_t *i
   memset(color, 0, sizeof *color);
   memset(hdr, 0, sizeof *hdr);
   if (transposed) *transposed = 0;
-  JxlDecoder *dec = JxlDecoderCreate(NULL);
   uint8_t *pixels = NULL;
   int rc = -1;
   JxlBasicInfo info;
-  memset(&info, 0, sizeof info);
   JxlPixelFormat format = {3, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
   int have_info = 0, have_pixels = 0;
+  // The brightness an HDR picture is tone-mapped to, once its color encoding
+  // has shown that it is wanted (below). libjxl takes the setting while it
+  // reads the headers, before the color-encoding event, so a call made there
+  // has no effect: the decoding then starts over with it set (the headers
+  // are a few hundred bytes).
+  float target = 0;
+  JxlDecoder *dec;
+start:
+  memset(&info, 0, sizeof info);
+  dec = JxlDecoderCreate(NULL);
   if (!dec || JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE) !=
                   JXL_DEC_SUCCESS ||
       JxlDecoderSetCms(dec, *JxlGetDefaultCms()) != JXL_DEC_SUCCESS ||
       JxlDecoderSetUnpremultiplyAlpha(dec, JXL_TRUE) != JXL_DEC_SUCCESS ||
-      JxlDecoderSetInput(dec, buf, len) != JXL_DEC_SUCCESS) {
+      JxlDecoderSetInput(dec, buf, len) != JXL_DEC_SUCCESS ||
+      (target > 0 && JxlDecoderSetDesiredIntensityTarget(dec, target) != JXL_DEC_SUCCESS)) {
     snprintf(err, err_len, "out of memory");
     goto done;
   }
@@ -298,6 +307,17 @@ int jxl_decode(const uint8_t *buf, size_t len, int sdr, void *runner, image_t *i
         // the same primaries with the sRGB curve; when CICP can't name the
         // picture's primaries or white point, to Rec. 2020 primaries (D65),
         // which it names and which hold any picture's colors.
+        if (target == 0) {
+          // libjxl needs the brightness before the headers (see `target`):
+          // once more from the start, with it set. Not for a picture HDR by a
+          // profile alone (below), which stays HDR: libjxl would tone-map
+          // it all the same, within PQ, were the brightness set.
+          target = JXL_SDR_NITS;
+          JxlDecoderDestroy(dec);
+          color_free(color);
+          have_info = 0;
+          goto start;
+        }
         if (!color->cicp_present) {
           const uint8_t rec2020[4] = {9, 13, 0, 1};
           memcpy(color->cicp, rec2020, 4);
@@ -309,8 +329,7 @@ int jxl_decode(const uint8_t *buf, size_t len, int sdr, void *runner, image_t *i
         free(color->hdr_icc.data);
         memset(&color->hdr_icc, 0, sizeof color->hdr_icc);
         jxl_color_from_cicp(color->cicp, &enc);
-        set = JxlDecoderSetDesiredIntensityTarget(dec, JXL_SDR_NITS);
-        if (set == JXL_DEC_SUCCESS) set = JxlDecoderSetOutputColorProfile(dec, &enc, NULL, 0);
+        set = JxlDecoderSetOutputColorProfile(dec, &enc, NULL, 0);
         hdr->tone_mapped = 1;
       } else if (color->cicp_present) {
         jxl_color_from_cicp(color->cicp, &enc);
