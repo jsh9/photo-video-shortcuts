@@ -4,7 +4,8 @@ default turns its low-memory streaming mode off at effort 7 below quality ~70,
 which took about 2.7 GB for a 24 MP photo; photobatch keeps streaming on. HDR
 photos are computed a region at a time as the encoder reads them, so they take
 about as much memory as SDR ones, rather than an extra 16-bit image (0.3 GB at
-48 MP).
+48 MP). A JPEG XL original is decoded whole, and its decoder freed before the
+encoder starts.
 """
 
 import re
@@ -74,3 +75,30 @@ def test_hdr_photo(wasm, helpers, tmp_path, need_tools, size):
     assert peak < 1.15 * sdr_peak, (
         f'HDR {peak / 1e9:.2f} GB, SDR {sdr_peak / 1e9:.2f} GB'
     )
+
+
+@pytest.mark.parametrize(
+    'progressive', [False, True], ids=['single-pass', 'progressive']
+)
+@pytest.mark.parametrize('route', ['jxl', 'heic'])
+def test_48_mp_jpeg_xl(wasm, tmp_path, need_tools, progressive, route):
+    # JPEG XL input (0.10.0): libjxl's decoder is gone before the encoder
+    # starts, so the two don't add up (measured: about 0.55 GB single pass,
+    # 0.65 GB progressive)
+    tile = ph.scene(1428, 1071, seed=3)
+    big = Image.new('RGB', (8064, 6048))
+    for x in range(0, 8064, 1428):
+        for y in range(0, 6048, 1071):
+            big.paste(tile, (x, y))
+
+    big.save(tmp_path / 'big.png')
+    jxl = tmp_path / 'big.jxl'
+    ph.run(
+        ['cjxl', tmp_path / 'big.png', jxl, '-q', '90']
+        + (['-p'] if progressive else []),
+        check=True,
+    )
+    options = ['--heic'] if route == 'heic' else []
+    output, peak = convert(wasm, jxl, tmp_path / 'job', '70', options)
+    assert 'JPEG XL 8064x6048' in output, output
+    assert peak < LIMIT, f'peak memory {peak / 1e9:.2f} GB'

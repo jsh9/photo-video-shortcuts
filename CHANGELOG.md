@@ -3,6 +3,54 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.10.0] - 2026-10-16
+
+- Added
+  - JPEG XL photos convert too, to HEIC or JPEG XL, on the Mac (from Photos and
+    from Finder) and on the iPhone: this tool's own copies (to turn a JPEG XL
+    copy into a HEIC, for example) and other apps' files. Before, they failed
+    with "unsupported format". The copy keeps the EXIF and XMP (also
+    Brotli-compressed ones, as `cjxl` writes them), gets the date and location
+    from Photos as other photos do, is stored upright (by the JPEG XL's own
+    orientation; its EXIF orientation doesn't count, so a photo is never turned
+    twice), and keeps its color space, also Apple's HDR profile in an HDR copy.
+    A copy of a copy loses quality a second time.
+  - An HDR JPEG XL (PQ or HLG, as this tool's HDR copies are) stays HDR as JPEG
+    XL, with its brightness. With *Drop HDR* (Mac) libjxl tone-maps it to SDR,
+    and its original is marked to keep; one whose color space CICP can't name
+    is tone-mapped into Rec. 2020 primaries, and one described by an ICC
+    profile alone can't be tone-mapped and stays HDR (`! HDR kept: ...`). As
+    HEIC it needs *Drop HDR*: a new HEIC can't hold HDR without a gain map, so
+    with *Keep HDR*, and on the iPhone, which has no *Drop HDR*, it fails and
+    says why (one HDR by a profile alone fails with *Drop HDR* too).
+  - A JPEG XL with a gain map (a `jhgm` box) is converted as its SDR picture,
+    with `! HDR not kept (JPEG XL with a gain map)`, and its original is marked
+    to keep, as a JPEG with a gain map is.
+  - A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
+    written
+    (`! not converted: the copy (...) would not be smaller than the original (...)`);
+    it doesn't count as failed, and its original is left as it is (from the
+    picker and on the Mac it isn't collected in *Compressed originals*; from
+    the iPhone's share sheet it already is, like every original). A copy that
+    is another rendition (tone-mapped to SDR, or with a date or location from
+    Photos the original lacks) is written even so.
+  - *Compress Photo Files (macOS)* converts a folder's `.jxl` files too; the
+    copy of `Name.jxl` is `Name 2.jxl`, next to it.
+- Changed
+  - An animated JPEG XL fails (`an animated JPEG XL isn't a still photo`).
+  - The Mac's and the iPhone's copies of a JPEG XL can differ by a level in a
+    few pixels (libjxl's decoder rounds a little differently on the Mac); other
+    photos' copies are still the same bytes on both.
+  - On the iPhone, a batch that converts nothing (every photo failed, or every
+    JPEG XL copy would not be smaller) ends with the notification "Nothing to
+    save: ..." instead of the error "File jxl_done.txt not found". a-Shell's
+    files are left for the next run, which now removes staged originals of an
+    earlier run too.
+  - Update `photobatch.wasm` in a-Shell and `photobatch-macos` (they decode
+    JPEG XL now), the Mac shortcuts (the Finder shortcut's folders; the
+    shortcuts check the encoder's version) and the iPhone shortcuts (the
+    notification above).
+
 ## [Compress Photos 0.9.0] - 2026-10-14
 
 - Added

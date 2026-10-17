@@ -37,7 +37,7 @@ for f in "$WORK"/in/*(.N); do
   stem=${name:r}
   case ${name:e:l} in
     mov|mp4|m4v)
-      [ -n "$(print -l "$WORK/in/${stem}".(#i)(heic|heif|hif|jpg|jpeg|png|dng)(.N))" ] || videos=$((videos + 1))
+      [ -n "$(print -l "$WORK/in/${stem}".(#i)(heic|heif|hif|jpg|jpeg|png|jxl|dng)(.N))" ] || videos=$((videos + 1))
       continue;;
   esac
   if [ -n "$(print -l "$WORK/in/${stem}".(#i)(mov|mp4|m4v)(.N))" ]; then

@@ -1,7 +1,8 @@
 """
 scripts/patch_deps.py: each edit to a dependency checkout is idempotent, and a
 checkout patched before the encoder's rename (its comments say jxlbatch) is
-recognised and renamed rather than refused.
+recognised and renamed rather than refused. The Brotli box fix applies to the
+pinned libjxl.
 """
 
 import importlib.util
@@ -34,3 +35,64 @@ def test_replace_refuses_other_code(tmp_path):
     (tmp_path / 'x.c').write_text('something else\n')
     with pytest.raises(SystemExit):
         patch_deps.replace(tmp_path, 'x.c', OLD, NEW)
+
+
+def test_brob_fix_applies_to_the_pinned_libjxl(tmp_path):
+    """
+    The Brotli box fix (libjxl 0.12's, see test_jxl_input.py's
+    test_metadata_boxes) applies to box_content_decoder.cc as the pinned libjxl
+    has it: Brotli is given the box only, with an error for a stream that ends
+    after or before it; a second run leaves the file alone.
+    """
+    libjxl = ph.REPO / '.deps' / 'libjxl'
+    ph.need((libjxl / '.git').exists(), 'the libjxl checkout (build-wasm.sh)')
+    pristine = ph.run([
+        'git',
+        '-C',
+        libjxl,
+        'show',
+        f'HEAD:{patch_deps.BOX_CONTENT}',
+    ])
+    assert pristine.returncode == 0, pristine.stderr
+    path = tmp_path / patch_deps.BOX_CONTENT
+    path.parent.mkdir(parents=True)
+    path.write_text(pristine.stdout)
+
+    patch_deps.patch_brob(tmp_path)
+    patched = path.read_text()
+    assert '&avail_in_brotli, &next_in' in patched
+    errors = 'return JXL_DEC_ERROR;'
+    assert patched.count(errors) == pristine.stdout.count(errors) + 2
+
+    patch_deps.patch_brob(tmp_path)
+    assert path.read_text() == patched
+
+
+def test_icc_fields_fix_applies_to_the_pinned_libjxl(tmp_path):
+    """
+    The ICC fields fix (libjxl 0.12's, see test_jxl_input.py's
+    test_drop_hdr_tone_maps_to_sdr) applies to decode.cc as the pinned libjxl
+    has it: JxlDecoderSetOutputColorProfile reads the original's fields from
+    its ICC profile; a second run leaves the file alone.
+    """
+    libjxl = ph.REPO / '.deps' / 'libjxl'
+    ph.need((libjxl / '.git').exists(), 'the libjxl checkout (build-wasm.sh)')
+    pristine = ph.run([
+        'git',
+        '-C',
+        libjxl,
+        'show',
+        f'HEAD:{patch_deps.DECODE}',
+    ])
+    assert pristine.returncode == 0, pristine.stderr
+    path = tmp_path / patch_deps.DECODE
+    path.parent.mkdir(parents=True)
+    path.write_text(pristine.stdout)
+
+    patch_deps.patch_icc_fields(tmp_path)
+    patched = path.read_text()
+    assert patched.count('orig_encoding.HaveFields()') == 1
+    assert 'output_encoding.orig_color_encoding = orig_encoding;' in patched
+
+    patch_deps.patch_icc_fields(tmp_path)
+    assert path.read_text() == patched

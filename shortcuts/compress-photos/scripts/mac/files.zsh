@@ -22,7 +22,7 @@ for f in "$@"; do
     esac
   fi
   if [ -d "$f" ]; then
-    for g in "$f"/*.(#i)(heic|heif|hif|jpg|jpeg|png)(N.); do stage "$g" "$orig" "${g:t}"; done
+    for g in "$f"/*.(#i)(heic|heif|hif|jpg|jpeg|png|jxl)(N.); do stage "$g" "$orig" "${g:t}"; done
   else
     stage "$f" "${orig:+${orig:h}}" "${${orig:-$f}:t}"
   fi

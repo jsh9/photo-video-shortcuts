@@ -1,4 +1,4 @@
-// Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG and PNG files, plus
+// Metadata extraction (EXIF, XMP, ICC) from HEIF, JPEG, PNG and JPEG XL files, plus
 // in-place helpers for the EXIF/XMP orientation and pixel-dimension tags, and
 // setting the EXIF capture date, GPS position and caption.
 #ifndef JXLBATCH_META_H
@@ -13,16 +13,17 @@ typedef struct {
   size_t size;
 } blob_t;
 
-typedef enum { FMT_UNKNOWN = 0, FMT_HEIF, FMT_JPEG, FMT_PNG } file_format_t;
+typedef enum { FMT_UNKNOWN = 0, FMT_HEIF, FMT_JPEG, FMT_PNG, FMT_JXL } file_format_t;
 
 typedef struct {
   file_format_t format;
   blob_t exif;           // raw TIFF structure, starts with "II*\0" or "MM\0*"
   blob_t xmp;            // XMP packet
-  blob_t icc;            // ICC profile (PNG iCCP chunk or JPEG APP2 segments)
+  blob_t icc;            // ICC profile (PNG iCCP chunk or JPEG APP2 segments; a JPEG XL's comes with its pixels)
   int png_srgb;          // PNG has an sRGB chunk
   int png_cicp_present;  // PNG has a cICP chunk
   uint8_t png_cicp[4];   // primaries, transfer, matrix, full-range flag
+  int jxl_gain_map;      // JPEG XL has a 'jhgm' box (an ISO 21496-1 gain map), which isn't used
 } meta_t;
 
 file_format_t detect_format(const uint8_t *buf, size_t len);
@@ -45,6 +46,10 @@ int heif_item_nclx_primaries(const uint8_t *buf, size_t len, uint32_t id);
 // 1 if a JPEG holds a gain map (an HDR photo): a second image (MPF) with
 // gain map metadata.
 int jpeg_has_gain_map(const uint8_t *buf, size_t len);
+
+// 1 if the n bytes at p start with a TIFF header ("II*\0" or "MM\0*", 8
+// bytes with the first IFD's offset), as raw EXIF does.
+int is_tiff(const uint8_t *p, size_t n);
 
 // EXIF helpers; `tiff` points at the TIFF header.
 int exif_orientation(const uint8_t *tiff, size_t len);  // 1..8, 0 if absent

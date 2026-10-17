@@ -204,7 +204,7 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
 - Select files or folders in Finder, right-click ▸ Quick Actions ▸ *Compress
   Photo Files (macOS)*, and pick a format, its quality, how to use the cores
   and whether to keep HDR (as above). For a folder, its image files (HEIF,
-  JPEG, PNG) are converted; subfolders aren't entered.
+  JPEG, PNG, JPEG XL) are converted; subfolders aren't entered.
 - Each result is written next to its original as `Name.heic` or `Name.jxl`. A
   file is never replaced: if `Name.heic` exists, the result is `Name 2.heic`.
   If the folder can't be written, or Shortcuts didn't say where a file came
@@ -244,6 +244,18 @@ differently; the log says when. From the picker, a copy gets the location only,
 as on the iPhone (Shortcuts doesn't give the rest), no keywords, and isn't a
 favorite yet. People (named faces) aren't copied: Photos finds the faces again
 and may recognize them.
+
+JPEG XL photos convert too, from Photos and from Finder, as on the iPhone (see
+[JPEG XL photos](README.md#34-jpeg-xl-photos)), with one difference: *Drop HDR*
+makes an SDR HEIC of an HDR JPEG XL (libjxl tone-maps it), where the iPhone can
+only make a JPEG XL of it. With *Keep HDR*, an HDR JPEG XL fails as HEIC; one
+described by an ICC profile alone, which libjxl can't tone-map, stays HDR as
+JPEG XL (`! HDR kept: ...`) and fails as HEIC either way. A JPEG XL with a gain
+map is converted as its SDR picture
+(`! HDR not kept (JPEG XL with a gain map)`), its original marked to keep. From
+Photos, a JPEG XL copy converted again is collected in *Compressed originals*
+like any original, and its new copy gets only its own format and quality as
+keywords. From Finder, the copy of `Name.jxl` is `Name 2.jxl`, next to it.
 
 ## 5. Updating
 

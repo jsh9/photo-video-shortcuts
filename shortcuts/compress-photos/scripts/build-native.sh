@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 mkdir -p build/native-obj
 VERSION=$(cat VERSION)  # shared by the encoder and the shortcuts
 objs=''  # this build's objects only: an earlier version's may be in the folder
-for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+for src in photobatch meta pixels heif jxl gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2046
   cc -O2 -g -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \

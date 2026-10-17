@@ -592,7 +592,7 @@ def build_files(sample):
     b = wf.Builder(sample)
     b.comment(
         f'{NAME_FILES} {VERSION}. '
-        'Converts image files (HEIF, JPEG, PNG) to HEIC or JPEG XL with photobatch (Run Shell '
+        'Converts image files (HEIF, JPEG, PNG, JPEG XL) to HEIC or JPEG XL with photobatch (Run Shell '
         'Script), keeping their metadata. Select files or folders in Finder ▸ '
         'Quick Actions. Each .heic or .jxl is saved next to its original (never replacing a '
         'file); nothing is deleted, and Photos is not involved. Needs photobatch in '

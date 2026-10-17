@@ -72,10 +72,11 @@ fi
 
 # WASI (the non-threads target) has no threads, no C++ exceptions and no
 # mkstemp. patch_deps.py edits the libraries so they build and decode
-# single-threaded, and lets skcms, libjxl's color engine here, read Apple's
-# HDR profile (shared with build-macos.sh, which applies only the skcms edit).
-# x265 encodes each picture on the calling thread (--x265).
-python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --libjxl "$LIBJXL" --libheif "$LIBHEIF" --x265 "$X265"
+# single-threaded, lets skcms, libjxl's color engine here, read Apple's HDR
+# profile, and gives libjxl 0.12's fixes for Brotli-compressed boxes and for
+# tone-mapping ICC-described pictures (the last three shared with
+# build-macos.sh). x265 encodes each picture on the calling thread (--x265).
+python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --brob --icc-fields --libjxl "$LIBJXL" --libheif "$LIBHEIF" --x265 "$X265"
 
 build_variant() {
   variant=$1   # simd | scalar
@@ -167,7 +168,7 @@ build_variant() {
   objdir="$bdir/photobatch-obj"
   mkdir -p "$objdir"
   objs=''  # this build's objects only: an earlier version's may be in the folder
-  for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+  for src in photobatch meta pixels heif jxl gainmap hdr grain hevcenc heifbox heicout; do
     $cc -O3 $flags -Wall -Wno-unused-function -I"$LIBJXL/lib/include" -I"$bdir/lib/include" \
       -I"$prefix/include" -DJXLBATCH_HEIC -DJXLBATCH_VERSION="\"$VERSION\"" -c "src/$src.c" -o "$objdir/$src.o"
     objs="$objs $objdir/$src.o"

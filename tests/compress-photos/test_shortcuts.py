@@ -141,7 +141,7 @@ def test_import_shortcut_started_by_name(gen, shortcuts):
     )
 
 
-def test_cleanup_removes_every_file(gen):
+def test_cleanup_removes_every_file(gen, shortcuts):
     # Everything the shortcut and photobatch leave in a-Shell's folder.
     for pattern in (
         'jxl_in_*',
@@ -154,6 +154,69 @@ def test_cleanup_removes_every_file(gen):
         'jxl_started',
     ):
         assert pattern in gen.CLEANUP.split()
+
+    # A run starts by removing what an earlier one may have left, the staged
+    # originals included: a run that saved nothing doesn't clean up (below).
+    starts = [
+        ph.params(a)['command']
+        for a in shortcuts['Compress Photos']
+        if ph.ident(a).endswith('ExecuteCommandIntent')
+        and isinstance(ph.params(a)['command'], str)
+        and ph.params(a)['command'].startswith('rm -f jxl_done.txt')
+    ]
+    assert len(starts) == 1
+    assert 'jxl_in_*' in starts[0].split()
+
+
+@pytest.mark.parametrize('name', ['Compress Photos', 'Compress-Photos-Import'])
+def test_nothing_converted_is_a_notification_not_an_error(
+        gen, shortcuts, name
+):
+    # photobatch writes jxl_done.txt once the first photo is converted, so a
+    # batch that converts nothing (every photo failed, or every JPEG XL copy
+    # would not be smaller) leaves none. Get File reads it with Error If Not
+    # Found off, and an If on it saves and cleans up, or says so (NOTHING_SAVED)
+    # and removes nothing: a-Shell may still be converting when Compress
+    # Photos was started outside the Shortcuts app.
+    actions = shortcuts[name]
+    reads = [
+        a
+        for a in actions
+        if ph.ident(a).endswith('GetFileIntent')
+        and ph.params(a)['fileName'] == 'jxl_done.txt'
+    ]
+    assert len(reads) == 1
+    assert ph.params(reads[0])['errorIfNotFound'] is False
+    done = ph.params(reads[0])['UUID']
+    inside = {id(a): on for a, on in ph.inside_if_on(actions, done)}
+    splits = [  # Get Text from Input of the file, which Split Text then reads
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.detect.text'
+        and done in repr(ph.params(a)['WFInput'])
+    ]
+    cleanups = [
+        a
+        for a in actions
+        if ph.ident(a).endswith('ExecuteCommandIntent')
+        and ph.params(a)['command'] == gen.CLEANUP
+    ]
+    notes = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.notification'
+        and gen.NOTHING_SAVED in repr(ph.params(a))
+    ]
+    assert len(splits) == len(cleanups) == len(notes) == 1
+    assert inside[id(splits[0])] and inside[id(cleanups[0])]
+    assert not inside[id(notes[0])]
+    # the notification is the If's Otherwise: right after its lines are read
+    # and saved, before anything else
+    i = actions.index(notes[0])
+    assert ph.ident(actions[i - 1]) == 'is.workflow.actions.conditional'
+    assert ph.params(actions[i - 1])['WFControlFlowMode'] == 1
+    assert ph.ident(actions[i + 1]) == 'is.workflow.actions.conditional'
+    assert ph.params(actions[i + 1])['WFControlFlowMode'] == 2
 
 
 def test_dates_in_photos_go_to_photobatch(gen, shortcuts):

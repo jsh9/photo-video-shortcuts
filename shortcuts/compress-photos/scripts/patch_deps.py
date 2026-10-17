@@ -2,10 +2,11 @@
 """
 Applies photobatch's small source edits to the dependency checkouts in .deps/.
 
-Used by build-wasm.sh (``--wasi --skcms``) and build-macos.sh (``--skcms``).
-Each edit is idempotent: a file that already has it is left alone, and a file
-whose expected code is missing stops the build, so a dependency upgrade can't
-silently skip a patch.
+Used by build-wasm.sh (``--wasi``, ``--skcms``, ``--brob``, ``--icc-fields``)
+and build-macos.sh (``--skcms``, ``--brob``, ``--icc-fields``). Each edit is
+idempotent: a file that already has it is left alone, and a file whose expected
+code is missing stops the build, so a dependency upgrade can't silently skip a
+patch.
 
 - ``--wasi``: WASI (the non-threads target) has no threads, no C++ exceptions
   and no mkstemp. libjxl drops its hard pthreads dependency (the same edit as
@@ -15,10 +16,16 @@ silently skip a patch.
   native build of the same checkout is unaffected.
 - ``--skcms``: lets skcms, libjxl's color engine in these builds, read Apple's
   HDR profile (see DEVELOPING.md, HDR).
+- ``--brob``: libjxl 0.12's fix for Brotli-compressed boxes: a stream that ends
+  before or after its box is an error, not taken for the whole box.
+- ``--icc-fields``: libjxl 0.12's fix for tone-mapping a picture whose color
+  space is an ICC profile: the decoder reads the profile's fields when asked
+  for another output color space, so it knows the picture is PQ or HLG.
 
 Usage::
 
-    patch_deps.py [--wasi] [--skcms] --libjxl DIR [--libheif DIR]
+    patch_deps.py [--wasi] [--skcms] [--brob] [--icc-fields] --libjxl DIR
+                  [--libheif DIR] [--x265 DIR]
 """
 
 import argparse
@@ -186,6 +193,85 @@ def patch_skcms(libjxl):
     )
 
 
+# libjxl 0.11.2 hands Brotli the rest of the file for a 'brob' box, and when the
+# box ends before the stream does, takes what was decompressed so far for the
+# whole box: a cut EXIF loses its last tags. libjxl 0.12 fixed it
+# (libjxl/libjxl#4684; the native build's Homebrew libjxl has the fix): Brotli
+# reads the box only, and a stream that ends after or before its box is an
+# error.
+BOX_CONTENT = 'lib/jxl/box_content_decoder.cc'
+
+
+def patch_brob(libjxl):
+    replace(
+        libjxl,
+        BOX_CONTENT,
+        '    const uint8_t* next_in_before = next_in;\n'
+        '    uint8_t* next_out_before = *next_out;\n'
+        '    msan::MemoryIsInitialized(next_in, avail_in);\n'
+        '    BrotliDecoderResult res = BrotliDecoderDecompressStream(\n'
+        '        brotli_dec, &avail_in, &next_in, avail_out, next_out, nullptr);\n',
+        "    // photobatch: libjxl 0.12's fix (libjxl#4684): Brotli reads the box only\n"
+        '    size_t avail_in_brotli = avail_in;\n'
+        '    if (!box_until_eof_) avail_in_brotli = std::min<size_t>(avail_in_brotli, remaining_);\n'
+        '    const uint8_t* next_in_before = next_in;\n'
+        '    uint8_t* next_out_before = *next_out;\n'
+        '    msan::MemoryIsInitialized(next_in, avail_in_brotli);\n'
+        '    BrotliDecoderResult res = BrotliDecoderDecompressStream(\n'
+        '        brotli_dec, &avail_in_brotli, &next_in, avail_out, next_out, nullptr);\n',
+    )
+    replace(
+        libjxl,
+        BOX_CONTENT,
+        '    if (!box_until_eof_) remaining_ -= consumed;\n',
+        '    if (!box_until_eof_) {\n'
+        '      remaining_ -= consumed;\n'
+        '      if (res == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT && remaining_ == 0) {\n'
+        '        return JXL_DEC_ERROR;  // photobatch: the stream goes on after the box\n'
+        '      }\n'
+        '    }\n',
+    )
+    replace(
+        libjxl,
+        BOX_CONTENT,
+        '    if (res == BROTLI_DECODER_RESULT_SUCCESS) {\n'
+        '      return JXL_DEC_BOX_COMPLETE;\n',
+        '    if (res == BROTLI_DECODER_RESULT_SUCCESS) {\n'
+        '      // photobatch: the stream ends before the box does\n'
+        '      if (!box_until_eof_ && remaining_ != 0) return JXL_DEC_ERROR;\n'
+        '      return JXL_DEC_BOX_COMPLETE;\n',
+    )
+
+
+# libjxl 0.11.2 keeps a picture's ICC profile as it is (no color fields) while
+# it reads the headers, so when the decoder is asked for another output color
+# space, it doesn't know the picture is PQ or HLG and adds no tone mapping: an
+# HDR JPEG XL with Apple's HDR profile decoded for SDR came out with its peak as
+# white. libjxl 0.12 (the native build's) reads the profile's fields at that
+# point, in JxlDecoderSetOutputColorProfile, with the color management system.
+DECODE = 'lib/jxl/decode.cc'
+
+
+def patch_icc_fields(libjxl):
+    replace(
+        libjxl,
+        DECODE,
+        '  auto& output_encoding = dec->passes_state->output_encoding_info;\n'
+        '  if (color_encoding) {\n',
+        '  auto& output_encoding = dec->passes_state->output_encoding_info;\n'
+        "  // photobatch: libjxl 0.12's fix: the original's fields from its ICC\n"
+        '  // profile, so that a PQ or HLG picture is tone-mapped\n'
+        '  jxl::ColorEncoding& orig_encoding = dec->image_metadata.color_encoding;\n'
+        '  if (!orig_encoding.HaveFields() && output_encoding.cms_set) {\n'
+        '    std::vector<uint8_t> tmp_icc = orig_encoding.ICC();\n'
+        '    JXL_API_RETURN_IF_ERROR(orig_encoding.SetICC(\n'
+        '        std::move(tmp_icc), &output_encoding.color_management_system));\n'
+        '    output_encoding.orig_color_encoding = orig_encoding;\n'
+        '  }\n'
+        '  if (color_encoding) {\n',
+    )
+
+
 def patch_x265(x265):
     """
     x265 on WASI (no threads, no shared memory). Every edit is under
@@ -298,6 +384,14 @@ def main():
     )
     ap.add_argument('--wasi', action='store_true', help='the WASI edits')
     ap.add_argument('--skcms', action='store_true', help='the skcms edit')
+    ap.add_argument(
+        '--brob', action='store_true', help="libjxl's Brotli box fix"
+    )
+    ap.add_argument(
+        '--icc-fields',
+        action='store_true',
+        help="libjxl's fix for tone-mapping ICC-described pictures",
+    )
     ap.add_argument('--libjxl', type=pathlib.Path, required=True)
     ap.add_argument('--libheif', type=pathlib.Path)
     ap.add_argument(
@@ -315,6 +409,12 @@ def main():
 
     if args.skcms:
         patch_skcms(args.libjxl)
+
+    if args.brob:
+        patch_brob(args.libjxl)
+
+    if args.icc_fields:
+        patch_icc_fields(args.libjxl)
 
 
 if __name__ == '__main__':

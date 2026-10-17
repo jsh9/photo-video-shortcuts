@@ -221,10 +221,28 @@ def run_photobatch(b, args, then):
     )
 
 
-def save_results(b, originals=None, album=None):
+# The notification when there is no jxl_done.txt (see save_results).
+NOTHING_SAVED = (
+    'Nothing to save: no photo was converted (a-Shell shows why for each), or '
+    'a-Shell is still converting because Compress Photos was started outside '
+    'the Shortcuts app.'
+)
+
+
+def save_results(b, then, originals=None, album=None):
     """
     Saves the HEIC or JPEG XL files listed in jxl_done.txt to Photos, each also
-    to the albums its original is in.
+    to the albums its original is in, then runs ``then(count)`` with the number
+    of photos saved (the cleanup and the notification).
+
+    photobatch writes jxl_done.txt once the first photo is converted, so a
+    batch that converts nothing (every photo failed, or every JPEG XL copy
+    would not be smaller than its original) leaves none. Get File reads it with
+    Error If Not Found off, and an If on its output either saves and runs
+    ``then``, or shows NOTHING_SAVED (before 0.10.0 the shortcut stopped with
+    "File jxl_done.txt not found"). Nothing is removed then: a-Shell may still
+    be converting when Compress Photos was started outside the Shortcuts app,
+    where it can't wait for a-Shell; the next run removes what is left.
 
     Each line is "file|index|delete or keep|name". With ``originals`` (the
     staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the
@@ -235,52 +253,57 @@ def save_results(b, originals=None, album=None):
     are read from jxl_albums_<index>.txt, one album name per line, if that file
     exists. A copy is made a favorite when its original is one: with
     ``originals``, by asking the original (copy_favorite); without, when
-    jxl_favorite_<index>.txt exists. Returns the number of photos saved.
+    jxl_favorite_<index>.txt exists.
     """
-    lines = b.split(b.text_from_input(b.ashell_get_file('jxl_done.txt')), '\n')
+    done = b.ashell_get_file('jxl_done.txt', error_if_missing=False)
 
-    def per_file():
-        parts = b.split(REPEAT_ITEM, '|')
-        file_name = b.item_from_list(parts, 'First Item')
-        photo_name = b.item_from_list(parts, 'Last Item')
-        saved = b.save_to_photos(
-            b.set_name(b.ashell_get_file(file_name), photo_name)
-        )
-        index = b.item_at_index(parts, 2)
+    def save():
+        lines = b.split(b.text_from_input(done), '\n')
 
-        def add_to_albums(albums):
-            copy_to_albums(b, saved, albums)
-
-        if originals:
-            original = b.item_at_index(originals, index)
-            albums = b.photo_albums(original)
-            add_to_albums(albums)
-            favorite = b.photo_details(original, 'Is Favorite')
-            copy_favorite(b, favorite, saved)
-            collect_in_album(b, original, album, albums, favorite)
-        else:
-            albums_file = b.ashell_get_file(
-                'jxl_albums_', index, '.txt', error_if_missing=False
+        def per_file():
+            parts = b.split(REPEAT_ITEM, '|')
+            file_name = b.item_from_list(parts, 'First Item')
+            photo_name = b.item_from_list(parts, 'Last Item')
+            saved = b.save_to_photos(
+                b.set_name(b.ashell_get_file(file_name), photo_name)
             )
-            b.if_has_value(
-                albums_file,
-                lambda: add_to_albums(
-                    b.split(b.text_from_input(albums_file), '\n')
-                ),
-                lambda: None,
-            )
-            b.if_has_value(
-                b.ashell_get_file(
-                    'jxl_favorite_', index, '.txt', error_if_missing=False
-                ),
-                lambda: b.favorite_photos(saved),
-                lambda: None,
-            )
+            index = b.item_at_index(parts, 2)
 
-    b.repeat_each(lines, per_file)
-    # Not the Repeat Results: a photo in no album adds nothing to those. A
-    # failed save stops the shortcut, so every line here was saved.
-    return b.count(lines)
+            def add_to_albums(albums):
+                copy_to_albums(b, saved, albums)
+
+            if originals:
+                original = b.item_at_index(originals, index)
+                albums = b.photo_albums(original)
+                add_to_albums(albums)
+                favorite = b.photo_details(original, 'Is Favorite')
+                copy_favorite(b, favorite, saved)
+                collect_in_album(b, original, album, albums, favorite)
+            else:
+                albums_file = b.ashell_get_file(
+                    'jxl_albums_', index, '.txt', error_if_missing=False
+                )
+                b.if_has_value(
+                    albums_file,
+                    lambda: add_to_albums(
+                        b.split(b.text_from_input(albums_file), '\n')
+                    ),
+                    lambda: None,
+                )
+                b.if_has_value(
+                    b.ashell_get_file(
+                        'jxl_favorite_', index, '.txt', error_if_missing=False
+                    ),
+                    lambda: b.favorite_photos(saved),
+                    lambda: None,
+                )
+
+        b.repeat_each(lines, per_file)
+        # Not the Repeat Results: a photo in no album adds nothing to those. A
+        # failed save stops the shortcut, so every line here was saved.
+        then(b.count(lines))
+
+    b.if_has_value(done, save, lambda: b.notification(TITLE, NOTHING_SAVED))
 
 
 CLEANUP = 'rm -f jxl_in_* jxl_out_* jxl_albums_* jxl_favorite_* jxl_job.txt jxl_dates.txt jxl_meta.txt jxl_done.txt jxl_started'
@@ -310,17 +333,18 @@ def build_compress(sample):
     photos = keep_still_photos(b, variable('Photos'))
     args = choose_args(b)
     # A stale album, dates or metadata file from an unfinished run would put a
-    # photo into the wrong albums or give it a wrong date or location;
-    # jxl_in_* files are overwritten anyway.
+    # photo into the wrong albums or give it a wrong date or location. The
+    # staged originals of a run that saved nothing (which doesn't clean up,
+    # see save_results) go too: this run overwrites jxl_in_1 to jxl_in_N only.
     b.ashell_execute(
-        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started',
+        'rm -f jxl_done.txt jxl_out_* jxl_albums_* jxl_favorite_* jxl_dates.txt jxl_meta.txt jxl_started jxl_in_*',
         keep_going=True,
         open_app='close',
     )
 
-    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG and
-    # PNG itself, so there is no Convert Image step. Each photo's date and
-    # location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
+    # Only the original file goes to a-Shell: photobatch decodes HEIF, JPEG,
+    # PNG and JPEG XL itself, so there is no Convert Image step. Each photo's
+    # date and location in Photos go too (jxl_dates.txt, jxl_meta.txt; see
     # wf.photo_date, wf.photo_location), the location read before Put File
     # fetches the file.
     def per_photo():
@@ -394,23 +418,26 @@ def build_compress(sample):
         run_photobatch(b, args, 'open shortcuts://')
         b.wait_to_return()
         album = b.text(ORIGINALS_ALBUM)
-        count = save_results(b, photos, album)
-        b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
-        # Empty when nothing was saved, or every original was in the album.
-        b.if_has_value(
-            variable('Collected'),
-            lambda: b.notification(
-                TITLE,
-                'Saved ',
-                count,
-                ' photo(s) to Photos. ',
-                b.count(variable('Collected')),
-                f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
-            ),
-            lambda: b.notification(
-                TITLE, 'Saved ', count, ' photo(s) to Photos.'
-            ),
-        )
+
+        def finish(count):
+            b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
+            # Empty when nothing was saved, or every original was in the album.
+            b.if_has_value(
+                variable('Collected'),
+                lambda: b.notification(
+                    TITLE,
+                    'Saved ',
+                    count,
+                    ' photo(s) to Photos. ',
+                    b.count(variable('Collected')),
+                    f' original(s) are in the album "{ORIGINALS_ALBUM}" for you to review.',
+                ),
+                lambda: b.notification(
+                    TITLE, 'Saved ', count, ' photo(s) to Photos.'
+                ),
+            )
+
+        save_results(b, finish, photos, album)
 
     b.if_has_value(SHORTCUT_INPUT, from_share_sheet, from_picker)
     return b.actions
@@ -423,9 +450,12 @@ def build_import(sample):
         'Started by a-Shell when photobatch finishes. Saves the converted HEIC or '
         'JPEG XL files to Photos. Keep this name: a-Shell starts it by name.'
     )
-    count = save_results(b)
-    b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
-    b.notification(TITLE, 'Saved ', count, ' photo(s) to Photos.')
+
+    def finish(count):
+        b.ashell_execute(CLEANUP, keep_going=True, open_app='close')
+        b.notification(TITLE, 'Saved ', count, ' photo(s) to Photos.')
+
+    save_results(b, finish)
     return b.actions
 
 

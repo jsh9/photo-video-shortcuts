@@ -77,10 +77,10 @@ if [ ! -d "$X265" ]; then
   rm -f "$archive"
 fi
 
-# Only the skcms edit: this build has threads and exceptions. (The libheif
-# and x265 checkouts may carry build-wasm.sh's edits; they are guarded by
-# __wasi__ and __cpp_exceptions, so they don't apply here.)
-python3 "$ROOT/scripts/patch_deps.py" --skcms --libjxl "$LIBJXL"
+# Only the skcms, Brotli box and ICC fields edits: this build has threads and
+# exceptions. (The libheif and x265 checkouts may carry build-wasm.sh's edits;
+# they are guarded by __wasi__ and __cpp_exceptions, so they don't apply here.)
+python3 "$ROOT/scripts/patch_deps.py" --skcms --brob --icc-fields --libjxl "$LIBJXL"
 
 bdir="$ROOT/build/macos"
 prefix="$bdir/prefix"
@@ -154,7 +154,7 @@ objdir="$bdir/photobatch-obj"
 mkdir -p "$objdir"
 flags="-arch $ARCH -mmacosx-version-min=$MIN_MACOS -O2"
 objs=''  # this build's objects only: an earlier version's may be in the folder
-for src in photobatch meta pixels heif gainmap hdr grain hevcenc heifbox heicout; do
+for src in photobatch meta pixels heif jxl gainmap hdr grain hevcenc heifbox heicout; do
   # shellcheck disable=SC2086
   cc $flags -Wall -Wextra -Wno-unused-function -DJXLBATCH_THREADS -DJXLBATCH_HEIC \
     -DJXLBATCH_VERSION="\"$VERSION\"" \
