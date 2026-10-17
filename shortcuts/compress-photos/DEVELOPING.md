@@ -977,11 +977,13 @@ included), so there is no new library. The plan and its spikes:
   there is ignored) and the first `xml ` box, through libjxl's box API with
   `JxlDecoderSetDecompressBoxes`, so the Brotli-compressed (`brob`) boxes
   `cjxl` writes by default are read too. A metadata box cut short, not
-  decompressible or over 64 MiB fails the photo; any other problem with the
-  file is left to the picture's decoding, which says what it is. `jbrd` and
-  `jumb` boxes aren't kept. A `jhgm` box (an ISO 21496-1 gain map, as libjxl's
-  `gain_map.h` defines it) isn't used either, but noted (`m->jxl_gain_map`):
-  the copy is the SDR base, the log says
+  decompressible (a `brob` box's Brotli stream must end where the box does,
+  which the static builds' libjxl 0.11.2 is patched for; see
+  [Building](#3-building-mac)) or over 64 MiB fails the photo; any other
+  problem with the file is left to the picture's decoding, which says what it
+  is. `jbrd` and `jumb` boxes aren't kept. A `jhgm` box (an ISO 21496-1 gain
+  map, as libjxl's `gain_map.h` defines it) isn't used either, but noted
+  (`m->jxl_gain_map`): the copy is the SDR base, the log says
   `! HDR not kept (JPEG XL with a gain map)` (not with `--sdr`), and the
   original is marked `keep`, as for a JPEG with a gain map. `cjxl` keeps a
   JPEG's XMP only when it recompresses the JPEG losslessly; its lossy files
@@ -1088,7 +1090,7 @@ included), so there is no new library. The plan and its spikes:
 | `scripts/build-wasm.sh`                               | builds `dist/photobatch.wasm` and `dist/photobatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `scripts/build-macos.sh`                              | builds `dist/photobatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `scripts/build-native.sh`                             | builds `build/photobatch` for the Mac, against Homebrew's libjxl, libheif and x265 (fast tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI, x265 without threads, skcms) and `build-macos.sh` (skcms)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI, x265 without threads, skcms, Brotli boxes) and `build-macos.sh` (skcms, Brotli boxes)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `scripts/wf.py`                                       | what both platforms' shortcuts share: the format question with each format's quality list, the still-photo filter, the photo's date; re-exports `lib/wfkit.py`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `selection.zsh`, `files.zsh`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1118,8 +1120,8 @@ python3 scripts/build_mac_shortcuts.py --guess
   SHA-256, the same folder Compress Videos builds from) into the repository's
   `.deps/` folder, shared with the other tools. WASI has no threads, C++
   exceptions or `mkstemp`, so it applies small edits
-  (`scripts/patch_deps.py --wasi --x265`), and one more for Apple's HDR profile
-  (`--skcms`):
+  (`scripts/patch_deps.py --wasi --x265`), and two more, for Apple's HDR
+  profile (`--skcms`) and Brotli-compressed boxes (`--brob`):
   - x265: its frame encoder runs on its own thread, which WASI can't start, so
     `Thread::start()` runs the thread body on the calling thread,
     `FrameEncoder::threadMain()` only sets up its thread-local data and
@@ -1141,9 +1143,15 @@ python3 scripts/build_mac_shortcuts.py --guess
     profile (see [HDR](#12-hdr)). Profiles without a PQ `cicp` tag parse as
     before. The native build uses Homebrew's libjxl, with lcms2, which needs no
     patch.
+  - libjxl's Brotli-compressed (`brob`) boxes: Brotli is given the box alone,
+    and a stream that doesn't end where its box does is an error, as in libjxl
+    0.12 ([libjxl#4684](https://github.com/libjxl/libjxl/pull/4684)). 0.11.2
+    gave Brotli the rest of the file and took a stream that the box cuts short
+    for the whole box, so a JPEG XL whose compressed EXIF was cut converted
+    with its first tags only. Homebrew's libjxl, the native build's, is 0.12.
 - **What `build-macos.sh` does:** the same libraries, the same feature flags
-  and the same skcms edit, built as static arm64 libraries for macOS 14 or
-  later (CMake, in `build/macos/`), from a second libjxl checkout,
+  and the same skcms and Brotli box edits, built as static arm64 libraries for
+  macOS 14 or later (CMake, in `build/macos/`), from a second libjxl checkout,
   `.deps/libjxl-native`, since `build-wasm.sh` patches the threads out of
   `.deps/libjxl` (the libheif edits are guarded by `__wasi__` and
   `__cpp_exceptions`, so that checkout is shared). `photobatch` is compiled

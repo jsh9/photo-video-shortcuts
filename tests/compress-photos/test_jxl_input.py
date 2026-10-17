@@ -24,6 +24,7 @@ import re
 import struct
 from pathlib import Path
 
+import brotli
 import numpy as np
 import photo_helpers as ph
 import pytest
@@ -619,13 +620,15 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     """
     Metadata boxes made by hand around the 'bare' input's codestream: one cut
     short at the end of the file, or a Brotli-compressed one that can't be
-    decompressed, fails its photo (its metadata can't be kept) and the rest of
-    the batch goes on; an Exif box whose TIFF header is further in (its offset
-    skips the 6 bytes a JPEG's EXIF starts with) is read; one without a TIFF
-    header is dropped, and its photo converts without it.
+    decompressed or whose stream doesn't end where the box does, fails its
+    photo (its metadata can't be kept) and the rest of the batch goes on; an
+    Exif box whose TIFF header is further in (its offset skips the 6 bytes a
+    JPEG's EXIF starts with) is read; one without a TIFF header is dropped, and
+    its photo converts without it.
     """
     tiff = ph.tiff({0x010F: ph.ascii_value('photobatch')}, exif=ph.TIFF_EXIF)
     xmp = ph.XMP.format(o=1).encode()
+    brotli_exif = brotli.compress(bytes(4) + tiff)
     code = inputs['bare'].read_bytes()
     files = {
         'exif_cut': container(
@@ -636,6 +639,20 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
         # end of the file too, it isn't taken for a box cut short
         'brob_corrupt': container(
             code, after=jxl_box('brob', b'Exif' + b'\x1c' + bytes(15))
+        ),
+        # a Brotli stream that the box cuts short, at the end of the file or
+        # before the codestream, or one with other bytes after it in its box:
+        # libjxl 0.11.2 without patch_deps.py --brob took what it had
+        # decompressed for the whole box, read on into the next box, and
+        # ignored the bytes
+        'brob_cut': container(
+            code, after=jxl_box('brob', b'Exif' + brotli_exif[:-3])
+        ),
+        'brob_cut_first': container(
+            code, before=jxl_box('brob', b'Exif' + brotli_exif[:-3])
+        ),
+        'brob_extra': container(
+            code, after=jxl_box('brob', b'Exif' + brotli_exif + bytes(3))
         ),
         'exif_offset': container(
             code,
@@ -660,19 +677,22 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     assert said('exif_cut') == 'FAILED: metadata box Exif cut short'
     assert said('xml_cut') == 'FAILED: metadata box xml cut short'
     assert said('brob_corrupt') == 'FAILED: unreadable metadata box Exif'
-    assert '3 failed' in ' '.join(result.stdout.split())
-    done = {i: out for i, (out, _) in ph.read_done(tmp_path / 'job').items()}
-    assert sorted(done) == [4, 5]
+    for name in ('brob_cut', 'brob_cut_first', 'brob_extra'):
+        assert said(name) == 'FAILED: unreadable metadata box Exif', name
 
-    tags = ph.exif_tags(done[4])
+    assert '6 failed' in ' '.join(result.stdout.split())
+    done = {i: out for i, (out, _) in ph.read_done(tmp_path / 'job').items()}
+    assert sorted(done) == [7, 8]
+
+    tags = ph.exif_tags(done[7])
     assert tags['IFD0:Make'] == 'photobatch'
     assert tags['ExifIFD:DateTimeOriginal'] == '2024:05:06 07:08:09'
     assert 'no metadata' in said('exif_not_tiff')
-    assert ph.exif_box(done[5]) == b''
+    assert ph.exif_box(done[8]) == b''
     assert (
         ph.psnr(
             decoded(inputs['bare'], tmp_path / 'want.png'),
-            decoded(done[5], tmp_path / 'got.png'),
+            decoded(done[8], tmp_path / 'got.png'),
         )
         > ph.MIN_PSNR
     )

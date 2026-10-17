@@ -72,10 +72,11 @@ fi
 
 # WASI (the non-threads target) has no threads, no C++ exceptions and no
 # mkstemp. patch_deps.py edits the libraries so they build and decode
-# single-threaded, and lets skcms, libjxl's color engine here, read Apple's
-# HDR profile (shared with build-macos.sh, which applies only the skcms edit).
+# single-threaded, lets skcms, libjxl's color engine here, read Apple's HDR
+# profile, and gives libjxl 0.12's fix for Brotli-compressed boxes (the last
+# two shared with build-macos.sh).
 # x265 encodes each picture on the calling thread (--x265).
-python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --libjxl "$LIBJXL" --libheif "$LIBHEIF" --x265 "$X265"
+python3 "$ROOT/scripts/patch_deps.py" --wasi --skcms --brob --libjxl "$LIBJXL" --libheif "$LIBHEIF" --x265 "$X265"
 
 build_variant() {
   variant=$1   # simd | scalar
