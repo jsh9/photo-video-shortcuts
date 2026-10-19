@@ -173,10 +173,10 @@ def test_nothing_converted_is_a_notification_not_an_error(
         gen, shortcuts, name
 ):
     # photobatch writes jxl_done.txt once the first photo is converted, so a
-    # batch that converts nothing (every photo failed) leaves none. Get File reads it with Error If Not
-    # Found off, and an If on it saves and cleans up, or says so (NOTHING_SAVED)
-    # and removes nothing: a-Shell may still be converting when Compress
-    # Photos was started outside the Shortcuts app.
+    # batch that converts nothing (every photo failed) leaves none. Get File
+    # reads it with Error If Not Found off, and an If on it saves and cleans
+    # up, or says so (NOTHING_SAVED) and removes nothing: a-Shell may still be
+    # converting when Compress Photos was started outside the Shortcuts app.
     actions = shortcuts[name]
     reads = [
         a

@@ -483,9 +483,8 @@ def test_larger_copy_is_written(encoder, inputs, tmp_path):
     copy = inputs['copy_sdr']
     output, results = ph.convert(encoder, tmp_path, [copy], ['-q', '100'])
     assert results[1].stat().st_size > copy.stat().st_size
-    assert '! the copy is larger than the original' in ph.photo_output(
-        output, copy.stem
-    )
+    said = ' '.join(ph.photo_output(output, copy.stem).split())
+    assert '! the copy is larger than the original' in said
     text = ' '.join(output.split())
     assert 'Done: 1 of 1 converted' in text
     summary = '1 copy is larger than its original; it was saved all the same.'
