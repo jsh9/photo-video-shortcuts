@@ -120,11 +120,12 @@ as stored (the result's, transposed if the HEIF transforms turned it), since an
 edited photo's EXIF keeps the size from before the edit (Photos does so, also
 for a photo it stores upright). 10-bit HEIF photos are kept at 10 bits.
 
-A copy larger than its original is written and listed in `jxl_done.txt` like
-any other, on both routes and whatever the formats: `commit_outcome` prints
-`! the copy is larger than the original` below the photo's sizes, and the
+A copy not smaller than its original (`bytes_out >= bytes_in`: one of the same
+size gains nothing either) is written and listed in `jxl_done.txt` like any
+other, on both routes and whatever the formats: `commit_outcome` prints
+`! the copy is not smaller than the original` below the photo's sizes, and the
 summary counts such copies
-(`N copies are larger than their originals; they were saved all the same.`);
+(`N copies are not smaller than their originals; they were saved all the same.`);
 the owner decides about the original. (0.10.0 left a JPEG XL alone when its
 JPEG XL copy wouldn't be smaller, `res->skipped`; 0.11.0 dropped that.)
 
@@ -1059,8 +1060,8 @@ included), so there is no new library. The plan and its spikes:
   PQ PNG does, since a new HEIC carries no gain map; one HDR by a profile alone
   fails with *Drop HDR* too
   (`... can't be tone-mapped to SDR, so it can't be saved as HEIC`).
-- **A copy larger than its original** (a lossless run of a lossy JPEG XL always
-  makes one) is written with a warning, as from any format (see
+- **A copy not smaller than its original** (a lossless run of a lossy JPEG XL
+  always makes one) is written with a warning, as from any format (see
   [How it works](#1-how-it-works)). A batch that converts nothing (every photo
   failed) leaves no `jxl_done.txt` and exits with 1; the iPhone shortcuts read
   the missing file as "Nothing to save" (`save_results`, `NOTHING_SAVED`)

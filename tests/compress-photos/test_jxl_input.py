@@ -11,13 +11,13 @@ stays HDR as JPEG XL, with its peak and its profile; with --sdr (Drop HDR)
 libjxl tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its
 own; not at all when a profile alone describes it), and only so does it become
 a HEIC. A gain map ('jhgm' box) isn't used: the copy is SDR and the original is
-kept. A JPEG XL copy larger than its JPEG XL original is written all the same,
-with a warning. Animated and cut-short files fail, and so do metadata boxes cut
-short or not decompressible (an Exif box without a TIFF header is dropped); the
-rest of the batch goes on. Metadata boxes of 200 KB, raw or Brotli-compressed,
-are kept byte for byte. The WebAssembly builds decode them alike, and the Mac's
-within a level (libjxl's decoder computes in floats, with fused multiply-adds
-on the Mac's NEON).
+kept. A JPEG XL copy not smaller than its JPEG XL original is written all the
+same, with a warning. Animated and cut-short files fail, and so do metadata
+boxes cut short or not decompressible (an Exif box without a TIFF header is
+dropped); the rest of the batch goes on. Metadata boxes of 200 KB, raw or
+Brotli-compressed, are kept byte for byte. The WebAssembly builds decode them
+alike, and the Mac's within a level (libjxl's decoder computes in floats, with
+fused multiply-adds on the Mac's NEON).
 """
 
 import re
@@ -505,14 +505,16 @@ def test_larger_copy_is_written(
     output, results = ph.convert(encoder, tmp_path, [photo], args)
     assert results[1].stat().st_size > photo.stat().st_size
     said = ' '.join(ph.photo_output(output, photo.stem).split())
-    assert '! the copy is larger than the original' in said
+    assert '! the copy is not smaller than the original' in said
     if original == 'keep':
         assert 'HDR tone-mapped to SDR' in said
         assert 'Transfer function: sRGB' in jxl_info(results[1])
 
     text = ' '.join(output.split())
     assert 'Done: 1 of 1 converted' in text
-    summary = '1 copy is larger than its original; it was saved all the same.'
+    summary = (
+        '1 copy is not smaller than its original; it was saved all the same.'
+    )
     assert summary in text
     [line] = ph.done_lines(tmp_path)
     assert line[1:3] == ['1', original]

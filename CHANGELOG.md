@@ -6,15 +6,15 @@ encoder. Every release includes the current files of all shortcuts.
 ## [Compress Photos 0.11.0] - 2026-10-19
 
 - Changed
-  - A copy larger than its original is always saved, whatever the formats, on
-    the iPhone and the Mac. a-Shell and the Mac's log say
-    `! the copy is larger than the original` below the photo's sizes, and the
-    summary counts such copies
-    (`1 copy is larger than its original; it was saved all the same.`); on the
-    Mac the log opens in Quick Look, as for other notes. Their originals are
-    collected in *Compressed originals* like any other, so read the log before
-    deleting them. Before, a JPEG XL whose JPEG XL copy wouldn't be smaller was
-    left alone
+  - A copy that isn't smaller than its original is always saved, whatever the
+    formats, on the iPhone and the Mac. a-Shell and the Mac's log say
+    `! the copy is not smaller than the original` below the photo's sizes, and
+    the summary counts such copies
+    (`1 copy is not smaller than its original; it was saved all the same.`); on
+    the Mac the log opens in Quick Look, as for other notes. Their originals
+    are collected in *Compressed originals* like any other, so read the log
+    before deleting them. Before, a JPEG XL whose JPEG XL copy wouldn't be
+    smaller was left alone
     (`! not converted: the copy (...) would not be smaller than the original (...)`),
     and other formats' larger copies were saved without a warning.
   - Update `photobatch.wasm` in a-Shell and `photobatch-macos`, and the Mac

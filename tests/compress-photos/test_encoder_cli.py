@@ -120,11 +120,11 @@ def test_summary_says_how_much_space_was_saved(encoder, tmp_path):
 
 @pytest.mark.parametrize('args', [['-q', '100'], ['--heic', '--rf', '1']])
 def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
-    # A copy larger than its original is written and listed for the shortcuts
-    # like any other, on both routes and from any format: only the log says
-    # so, on the photo's lines and in the summary. 1: noise as a JPEG at
-    # quality 5, which no near-lossless copy undercuts; 2: a PNG stored
-    # without compression, which every copy halves.
+    # A copy not smaller than its original (larger here) is written and listed
+    # for the shortcuts like any other, on both routes and from any format:
+    # only the log says so, on the photo's lines and in the summary. 1: noise
+    # as a JPEG at quality 5, which no near-lossless copy undercuts; 2: a PNG
+    # stored without compression, which every copy halves.
     noise = np.random.default_rng(1).integers(0, 256, (240, 320, 3), np.uint8)
     Image.fromarray(noise).save(tmp_path / 'noise.jpg', quality=5)
     ph.scene(320, 240).save(tmp_path / 'scene.png', compress_level=0)
@@ -145,11 +145,13 @@ def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
     def said(stem):
         return ' '.join(ph.photo_output(result.stdout, stem).split())
 
-    warning = '! the copy is larger than the original'
+    warning = '! the copy is not smaller than the original'
     assert warning in said('noise')
     assert warning not in said('scene')
     text = ' '.join(result.stdout.split())
-    summary = '1 copy is larger than its original; it was saved all the same.'
+    summary = (
+        '1 copy is not smaller than its original; it was saved all the same.'
+    )
     assert summary in text
     assert 'failed' not in text
 

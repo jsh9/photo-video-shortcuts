@@ -85,7 +85,7 @@ Decided by the owner (2026-10-16): the first option, (a), of each.
   it: `! not converted: the copy would not be smaller`, the original stays and
   isn't collected. (b) Write it, as for the other formats today (the batch
   summary already says "larger"). Changed by the owner (2026-10-19, 0.11.0):
-  (b), for every format, with `! the copy is larger than the original`.
+  (b), for every format, with `! the copy is not smaller than the original`.
 - **D3. An animated JPEG XL**: (a) fails, "an animated JPEG XL isn't a still
   photo". (b) Its first frame is converted.
 

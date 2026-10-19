@@ -157,10 +157,10 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   photo as an ordinary SDR file, smaller, and shown correctly by viewers that
   can't tone-map HDR (XnView MP, for example). The originals keep their HDR
   either way until you delete them.
-- If the encoder noted anything (an HDR photo converted as SDR, a copy larger
-  than its original, a photo that failed, an error), its log opens in a Quick
-  Look window first, so you can read it before deciding about the originals.
-  Close it to continue.
+- If the encoder noted anything (an HDR photo converted as SDR, a copy not
+  smaller than its original, a photo that failed, an error), its log opens in a
+  Quick Look window first, so you can read it before deciding about the
+  originals. Close it to continue.
 - The converted originals are collected in the album *Compressed originals*
   (from Photos, found by their photo id; from the picker, by the photos
   themselves), whether or not their JPEG XL has their HDR: the log says which

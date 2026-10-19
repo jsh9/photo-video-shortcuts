@@ -861,7 +861,7 @@ typedef struct {
   size_t kept;         // originals marked "keep": their HDR isn't in the JXL
   size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
   size_t bright_sky;   // HDR photos with much bright sky (Photos may show pink patches)
-  size_t larger;       // copies larger than their originals, written all the same
+  size_t not_smaller;  // copies not smaller than their originals, written all the same
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -1620,11 +1620,12 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
   batch->bytes_out += res->bytes_out;
   say_wrap("  ", "%s", res->info);
   say_wrap("  ", "%s", res->sizes);
-  // A larger copy is written and saved like any other, whatever the formats:
-  // only the log says so, and the owner decides about the original.
-  if (res->bytes_out > res->bytes_in) {
-    say_wrap("  ", "! the copy is larger than the original");
-    batch->larger++;
+  // A copy that isn't smaller is written and saved like any other, whatever
+  // the formats: only the log says so, and the owner decides about the
+  // original. One of the same size gains nothing either, hence >=.
+  if (res->bytes_out >= res->bytes_in) {
+    say_wrap("  ", "! the copy is not smaller than the original");
+    batch->not_smaller++;
   }
   return 1;
 }
@@ -1933,9 +1934,9 @@ static int run_batch(const options_t *opt, const char *job_arg) {
       say_wrap("", "%s larger (%.0f%%)", saved_s, -saved_pct);
     }
   }
-  if (batch.larger) {
-    const int one = batch.larger == 1;
-    say_wrap("", "%zu %s larger than %s; %s saved all the same.", batch.larger,
+  if (batch.not_smaller) {
+    const int one = batch.not_smaller == 1;
+    say_wrap("", "%zu %s not smaller than %s; %s saved all the same.", batch.not_smaller,
              one ? "copy is" : "copies are", one ? "its original" : "their originals", one ? "it was" : "they were");
   }
   if (batch.done < count) {
