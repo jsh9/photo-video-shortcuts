@@ -120,6 +120,14 @@ as stored (the result's, transposed if the HEIF transforms turned it), since an
 edited photo's EXIF keeps the size from before the edit (Photos does so, also
 for a photo it stores upright). 10-bit HEIF photos are kept at 10 bits.
 
+A copy larger than its original is written and listed in `jxl_done.txt` like
+any other, on both routes and whatever the formats: `commit_outcome` prints
+`! the copy is larger than the original` below the photo's sizes, and the
+summary counts such copies
+(`N copies are larger than their originals; they were saved all the same.`);
+the owner decides about the original. (0.10.0 left a JPEG XL alone when its
+JPEG XL copy wouldn't be smaller, `res->skipped`; 0.11.0 dropped that.)
+
 Encoding settings match `cjxl -q Q -e E`, with one difference: libjxl's
 streaming mode is always on, and the image is handed to it in chunks rather
 than copied. libjxl reads those chunks region by region only when it also
@@ -1051,22 +1059,12 @@ included), so there is no new library. The plan and its spikes:
   PQ PNG does, since a new HEIC carries no gain map; one HDR by a profile alone
   fails with *Drop HDR* too
   (`... can't be tone-mapped to SDR, so it can't be saved as HEIC`).
-- **A copy that wouldn't be smaller:** on the JPEG XL route, a copy at least as
-  large as its JPEG XL original isn't written
-  (`! not converted: the copy (...) would not be smaller than the original (...)`;
-  `res->skipped`), unless the copy is another rendition: tone-mapped to SDR
-  (`--sdr`), or given a date or location from Photos the original lacks
-  (`apply_photo_date`, `apply_photos_meta`); the rule is for a copy that only
-  re-encodes the same picture and metadata. A skipped photo is left out of
-  `jxl_done.txt`, so the Mac shortcuts and the iPhone's picker route don't
-  collect its original (the share-sheet route collects every original before
-  photobatch runs), and counted apart from failures:
-  `N JPEG XL photo(s) not converted: ... would not be smaller.` A lossless run
-  of a lossy JPEG XL always ends there. A batch of such copies alone converts
-  nothing: no `jxl_done.txt`, and the exit status is 0 all the same (1 means
-  nothing converted and a failure); the iPhone shortcuts read the missing file
-  as "Nothing to save" (`save_results`, `NOTHING_SAVED`) instead of failing on
-  it as before 0.10.0.
+- **A copy larger than its original** (a lossless run of a lossy JPEG XL always
+  makes one) is written with a warning, as from any format (see
+  [How it works](#1-how-it-works)). A batch that converts nothing (every photo
+  failed) leaves no `jxl_done.txt` and exits with 1; the iPhone shortcuts read
+  the missing file as "Nothing to save" (`save_results`, `NOTHING_SAVED`)
+  instead of failing on it as before 0.10.0.
 - **Not the same bytes on the Mac.** The decoder computes in floats with
   Highway's SIMD, most likely rounding differently with NEON's fused
   multiply-adds than with WebAssembly's separate ones: decoded pixels from

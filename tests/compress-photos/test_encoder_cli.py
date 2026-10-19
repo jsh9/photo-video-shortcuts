@@ -6,6 +6,7 @@ WebAssembly, native).
 import re
 import zlib
 
+import numpy as np
 import photo_helpers as ph
 import pytest
 from PIL import Image
@@ -115,6 +116,37 @@ def test_summary_says_how_much_space_was_saved(encoder, tmp_path):
     m = re.fullmatch(r'Saved (\S+ \S+) \((\d+)%\)', lines[sizes + 1])
     assert m, lines[sizes + 1]
     assert int(m.group(2)) == round(100 * (size_in - size_out) / size_in)
+
+
+@pytest.mark.parametrize('args', [['-q', '100'], ['--heic', '--rf', '1']])
+def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
+    # A copy larger than its original is written and listed for the shortcuts
+    # like any other, on both routes and from any format: only the log says
+    # so, on the photo's lines and in the summary. 1: noise as a JPEG at
+    # quality 5, which no near-lossless copy undercuts; 2: a PNG, which
+    # shrinks.
+    noise = np.random.default_rng(1).integers(0, 256, (240, 320, 3), np.uint8)
+    Image.fromarray(noise).save(tmp_path / 'noise.jpg', quality=5)
+    ph.scene(320, 240).save(tmp_path / 'scene.png')
+    staged = ph.stage(
+        tmp_path / 'job', [tmp_path / 'noise.jpg', tmp_path / 'scene.png']
+    )
+    result = encoder.run([*args, 'jxl_job.txt'], tmp_path / 'job')
+    assert result.returncode == 0, result.stdout
+    done = ph.read_done(tmp_path / 'job')
+    assert sorted(done) == [1, 2]
+    grew = {
+        i: out.stat().st_size > staged[i].stat().st_size
+        for i, (out, _) in done.items()
+    }
+    assert grew == {1: True, 2: False}
+    warning = '! the copy is larger than the original'
+    assert warning in ph.photo_output(result.stdout, 'noise')
+    assert warning not in ph.photo_output(result.stdout, 'scene')
+    text = ' '.join(result.stdout.split())
+    summary = '1 copy is larger than its original; it was saved all the same.'
+    assert summary in text
+    assert 'failed' not in text
 
 
 def test_nothing_converted(encoder, tmp_path):

@@ -236,13 +236,13 @@ def save_results(b, then, originals=None, album=None):
     of photos saved (the cleanup and the notification).
 
     photobatch writes jxl_done.txt once the first photo is converted, so a
-    batch that converts nothing (every photo failed, or every JPEG XL copy
-    would not be smaller than its original) leaves none. Get File reads it with
-    Error If Not Found off, and an If on its output either saves and runs
-    ``then``, or shows NOTHING_SAVED (before 0.10.0 the shortcut stopped with
-    "File jxl_done.txt not found"). Nothing is removed then: a-Shell may still
-    be converting when Compress Photos was started outside the Shortcuts app,
-    where it can't wait for a-Shell; the next run removes what is left.
+    batch that converts nothing (every photo failed) leaves none. Get File
+    reads it with Error If Not Found off, and an If on its output either saves
+    and runs ``then``, or shows NOTHING_SAVED (before 0.10.0 the shortcut
+    stopped with "File jxl_done.txt not found"). Nothing is removed then:
+    a-Shell may still be converting when Compress Photos was started outside
+    the Shortcuts app, where it can't wait for a-Shell; the next run removes
+    what is left.
 
     Each line is "file|index|delete or keep|name". With ``originals`` (the
     staged photos) and ``album`` (a text ref holding ORIGINALS_ALBUM), the

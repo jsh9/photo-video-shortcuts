@@ -11,14 +11,13 @@ stays HDR as JPEG XL, with its peak and its profile; with --sdr (Drop HDR)
 libjxl tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its
 own; not at all when a profile alone describes it), and only so does it become
 a HEIC. A gain map ('jhgm' box) isn't used: the copy is SDR and the original is
-kept. A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
-written, unless it is another rendition (tone-mapped, or with a date or
-location from Photos). Animated and cut-short files fail, and so do metadata
-boxes cut short or not decompressible (an Exif box without a TIFF header is
-dropped); the rest of the batch goes on. Metadata boxes of 200 KB, raw or
-Brotli-compressed, are kept byte for byte. The WebAssembly builds decode them
-alike, and the Mac's within a level (libjxl's decoder computes in floats, with
-fused multiply-adds on the Mac's NEON).
+kept. A JPEG XL copy larger than its JPEG XL original is written all the same,
+with a warning. Animated and cut-short files fail, and so do metadata boxes cut
+short or not decompressible (an Exif box without a TIFF header is dropped); the
+rest of the batch goes on. Metadata boxes of 200 KB, raw or Brotli-compressed,
+are kept byte for byte. The WebAssembly builds decode them alike, and the Mac's
+within a level (libjxl's decoder computes in floats, with fused multiply-adds
+on the Mac's NEON).
 """
 
 import re
@@ -183,16 +182,6 @@ def inputs(wasm, photos, batch, tmp_path_factory):
         icc_profile=ph.add_icc_tag(icc.read_bytes(), 'cicp', bytes(unnamed)),
     )
     cjxl('pq_icc', folder / 'pq_icc.png', '-d', '0')
-    # a small lossy HDR file, whose lossless SDR copy is larger
-    cjxl(
-        'pq_small',
-        folder / 'pq.ppm',
-        '-q',
-        '20',
-        '-x',
-        'color_space=RGB_D65_DCI_Rel_PeQ',
-        '--intensity_target=1000',
-    )
     # an SDR copy with a gain map box ('jhgm', ISO 21496-1) after its
     # codestream, which photobatch notes but doesn't use
     out['gain_map'] = folder / 'gain_map.jxl'
@@ -486,70 +475,22 @@ def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     )
 
 
-def test_copy_not_smaller_is_not_written(encoder, inputs, tmp_path):
-    # Lossless, a lossy JPEG XL only grows: left alone, not a failure. The
-    # JPEG converted alongside is written.
-    ph.stage(tmp_path, [inputs['copy_sdr'], ph.HERE / 'fixtures/hdr/o1.heic'])
-    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path)
-    assert result.returncode == 0, result.stdout
-    text = ' '.join(result.stdout.split())
-    assert '! not converted: the copy' in text
-    assert 'would not be smaller than the original' in text
-    assert '1 JPEG XL photo not converted: its copy would not be smaller.' in (
-        text
-    )
-    assert 'failed' not in text
-    assert list(ph.read_done(tmp_path)) == [2]
-    assert not (tmp_path / 'jxl_out_1.jxl').exists()
-
-    # A batch of such copies alone converts nothing and fails nothing: exit
-    # status 0 (1 says nothing converted and a failure), and no jxl_done.txt,
-    # which the iPhone's shortcuts read as nothing to save.
-    ph.stage(tmp_path / 'all', [inputs['copy_sdr']])
-    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path / 'all')
-    assert result.returncode == 0, result.stdout
-    text = ' '.join(result.stdout.split())
-    assert 'Done: 0 of 1 converted' in text
-    assert 'failed' not in text
-    assert not (tmp_path / 'all' / 'jxl_done.txt').exists()
-
-
-def test_copy_is_written_when_it_is_another_rendition(
-        encoder, inputs, tmp_path
-):
-    # The skip is for a plain re-encode. An SDR copy of an HDR JPEG XL
-    # (--sdr), or a copy given a date or location from Photos, is written
-    # even when it is larger (lossless here, so it is).
-    _, results = ph.convert(
-        encoder, tmp_path / 'sdr', [inputs['pq_small']], ['-q', '100', '--sdr']
-    )
-    assert results[1].stat().st_size > inputs['pq_small'].stat().st_size
-    assert 'Transfer function: sRGB' in jxl_info(results[1])
-    assert ph.kept_originals(tmp_path / 'sdr') == {1}
-
+def test_larger_copy_is_written(encoder, inputs, tmp_path):
+    # Lossless, a lossy JPEG XL only grows; its copy is written and collected
+    # like any other, with a warning (0.10.0 left such a JPEG XL alone;
+    # test_encoder_cli.py has the other formats). A batch of such copies alone
+    # exits with 0 and leaves a jxl_done.txt for the shortcuts.
     copy = inputs['copy_sdr']
-    output, results = ph.convert(
-        encoder,
-        tmp_path / 'dated',
-        [copy],
-        ['-q', '100'],
-        dates={1: '2024-01-01T17:00:00-05:00'},
-    )
+    output, results = ph.convert(encoder, tmp_path, [copy], ['-q', '100'])
     assert results[1].stat().st_size > copy.stat().st_size
-    assert 'date from Photos' in ph.photo_output(output, copy.stem)
-    tags = ph.exif_tags(results[1])
-    assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
-
-    _, results = ph.convert(
-        encoder,
-        tmp_path / 'located',
-        [copy],
-        ['-q', '100'],
-        meta=['1|gps|40.758441666667,-73.829766666667'],
+    assert '! the copy is larger than the original' in ph.photo_output(
+        output, copy.stem
     )
-    assert results[1].stat().st_size > copy.stat().st_size
-    gps = ph.gps_of(results[1])
-    assert gps['GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-5)
+    text = ' '.join(output.split())
+    assert 'Done: 1 of 1 converted' in text
+    summary = '1 copy is larger than its original; it was saved all the same.'
+    assert summary in text
+    assert ph.kept_originals(tmp_path) == set()
 
 
 def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
