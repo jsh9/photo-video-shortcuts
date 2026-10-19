@@ -182,6 +182,16 @@ def inputs(wasm, photos, batch, tmp_path_factory):
         icc_profile=ph.add_icc_tag(icc.read_bytes(), 'cicp', bytes(unnamed)),
     )
     cjxl('pq_icc', folder / 'pq_icc.png', '-d', '0')
+    # a small lossy HDR file, whose lossless SDR copy is larger
+    cjxl(
+        'pq_small',
+        folder / 'pq.ppm',
+        '-q',
+        '20',
+        '-x',
+        'color_space=RGB_D65_DCI_Rel_PeQ',
+        '--intensity_target=1000',
+    )
     # an SDR copy with a gain map box ('jhgm', ISO 21496-1) after its
     # codestream, which photobatch notes but doesn't use
     out['gain_map'] = folder / 'gain_map.jxl'
@@ -475,21 +485,37 @@ def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     )
 
 
-def test_larger_copy_is_written(encoder, inputs, tmp_path):
-    # Lossless, a lossy JPEG XL only grows; its copy is written and collected
-    # like any other, with a warning (0.10.0 left such a JPEG XL alone;
-    # test_encoder_cli.py has the other formats). A batch of such copies alone
-    # exits with 0 and leaves a jxl_done.txt for the shortcuts.
-    copy = inputs['copy_sdr']
-    output, results = ph.convert(encoder, tmp_path, [copy], ['-q', '100'])
-    assert results[1].stat().st_size > copy.stat().st_size
-    said = ' '.join(ph.photo_output(output, copy.stem).split())
+@pytest.mark.parametrize(
+    'name, args, original',
+    [
+        ('copy_sdr', ['-q', '100'], 'delete'),
+        ('pq_small', ['-q', '100', '--sdr'], 'keep'),
+    ],
+)
+def test_larger_copy_is_written(
+        encoder, inputs, name, args, original, tmp_path
+):
+    # Lossless, a lossy JPEG XL only grows; its copy is written and listed in
+    # jxl_done.txt like any other, with a warning (0.10.0 left such a JPEG XL
+    # alone; test_encoder_cli.py has the other formats), and its original is
+    # marked "delete" or "keep" by the usual rule: kept when the copy lacks
+    # its HDR (pq_small, tone-mapped to SDR). A batch of such copies alone
+    # exits with 0.
+    photo = inputs[name]
+    output, results = ph.convert(encoder, tmp_path, [photo], args)
+    assert results[1].stat().st_size > photo.stat().st_size
+    said = ' '.join(ph.photo_output(output, photo.stem).split())
     assert '! the copy is larger than the original' in said
+    if original == 'keep':
+        assert 'HDR tone-mapped to SDR' in said
+        assert 'Transfer function: sRGB' in jxl_info(results[1])
+
     text = ' '.join(output.split())
     assert 'Done: 1 of 1 converted' in text
     summary = '1 copy is larger than its original; it was saved all the same.'
     assert summary in text
-    assert ph.kept_originals(tmp_path) == set()
+    [line] = ph.done_lines(tmp_path)
+    assert line[1:3] == ['1', original]
 
 
 def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
