@@ -123,11 +123,14 @@ for a photo it stores upright). 10-bit HEIF photos are kept at 10 bits.
 A copy not smaller than its original (`bytes_out >= bytes_in`: one of the same
 size gains nothing either) is written and listed in `jxl_done.txt` like any
 other, on both routes and whatever the formats: `commit_outcome` prints
-`! the copy is not smaller than the original` below the photo's sizes, and the
-summary counts such copies
+`! the copy is not smaller than the original: larger by 12 KB` (or
+`: the same size`; the difference in bytes, since the sizes above are rounded)
+below the photo's sizes, and the summary counts such copies
 (`N copies are not smaller than their originals; they were saved all the same.`);
-the owner decides about the original. (0.10.0 left a JPEG XL alone when its
-JPEG XL copy wouldn't be smaller, `res->skipped`; 0.11.0 dropped that.)
+the owner decides about the original. On the Mac the note opens the log in
+Quick Look from Photos (`WARNINGS`), not from Finder (`FILE_WARNINGS`), where
+no original is touched. (0.10.0 left a JPEG XL alone when its JPEG XL copy
+wouldn't be smaller, `res->skipped`; 0.11.0 dropped that.)
 
 Encoding settings match `cjxl -q Q -e E`, with one difference: libjxl's
 streaming mode is always on, and the image is handed to it in chunks rather
@@ -234,7 +237,9 @@ Compress Photo Files (macOS)                 (shortcut, Finder Quick Action)
    HEIF/JPEG/PNG/JPEG XL files), runs photobatch, moves each jxl_out_N.jxl next to its
    original as Name.jxl (or .heic) (never replacing: "Name 2.jxl"; ~/Pictures/JPEG XL
    when the original's folder is unknown or not writable), prints the log and
-   "Wrote N JPEG XL file(s)."; Quick Look of the log on notes, a notification
+   "Wrote N JPEG XL file(s)."; Quick Look of the log on notes (`FILE_WARNINGS`:
+   not on a copy not smaller than its original, which this route leaves nothing
+   to decide about), a notification
 ```
 
 Run Shell Script waits for the script, so there is no handoff, no helper

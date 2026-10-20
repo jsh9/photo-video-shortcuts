@@ -503,19 +503,17 @@ def test_larger_copy_is_written(
     # exits with 0.
     photo = inputs[name]
     output, results = ph.convert(encoder, tmp_path, [photo], args)
-    assert results[1].stat().st_size > photo.stat().st_size
-    said = ' '.join(ph.photo_output(output, photo.stem).split())
-    assert '! the copy is not smaller than the original' in said
+    size_in, size_out = photo.stat().st_size, results[1].stat().st_size
+    assert size_out > size_in
+    said = ph.unwrapped(ph.photo_output(output, photo.stem))
+    assert ph.not_smaller_note(size_in, size_out) in said
     if original == 'keep':
         assert 'HDR tone-mapped to SDR' in said
         assert 'Transfer function: sRGB' in jxl_info(results[1])
 
-    text = ' '.join(output.split())
+    text = ph.unwrapped(output)
     assert 'Done: 1 of 1 converted' in text
-    summary = (
-        '1 copy is not smaller than its original; it was saved all the same.'
-    )
-    assert summary in text
+    assert ph.NOT_SMALLER_ONE in text
     [line] = ph.done_lines(tmp_path)
     assert line[1:3] == ['1', original]
 

@@ -497,6 +497,36 @@ def photo_output(output, stem):
     return match.group(1)
 
 
+def unwrapped(output):
+    """photobatch's output as words, since it wraps lines to the window."""
+    return ' '.join(output.split())
+
+
+# photobatch's note below a copy not smaller than its original, and the
+# summary line of a batch with one such copy.
+NOT_SMALLER = '! the copy is not smaller than the original'
+NOT_SMALLER_ONE = (
+    '1 copy is not smaller than its original; it was saved all the same.'
+)
+
+
+def not_smaller_note(bytes_in, bytes_out):
+    """The note for a copy of bytes_out from an original of bytes_in."""
+    diff = bytes_out - bytes_in
+    assert diff >= 0
+    if diff == 0:
+        return f'{NOT_SMALLER}: the same size'
+
+    if diff >= 1e6:  # as photobatch's fmt_bytes
+        size = f'{diff / 1e6:.1f} MB'
+    elif diff >= 1e3:
+        size = f'{diff / 1e3:.0f} KB'
+    else:
+        size = f'{diff} B'
+
+    return f'{NOT_SMALLER}: larger by {size}'
+
+
 def boxes(path):
     """exiftool's dump of the JPEG XL container boxes."""
     return run(['exiftool', '-v2', path]).stdout

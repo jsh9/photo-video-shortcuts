@@ -124,6 +124,14 @@ FALLBACK_FOLDER = (
 )
 # A log line worth showing: photobatch's "!" notes, errors, failed photos.
 WARNINGS = r'(^|\n) *(!|ERROR|[0-9]+ failed)'
+# The same for the Finder shortcut, which never touches an original: a copy
+# not smaller than its original leaves nothing to decide, so its note alone
+# doesn't open the log (a screenshot's copy is usually larger). The log still
+# has the note, and its summary counts such copies.
+FILE_WARNINGS = (
+    r'(^|\n) *(!(?! the copy is not smaller than the original)'
+    r'|ERROR|[0-9]+ failed)'
+)
 # The question after the quality: how the Mac's cores are used, as a menu
 # (two short choices; the first is the usual one). Each title's value is what
 # the script reads in CORES (run.zsh): "all" converts several photos at a
@@ -642,7 +650,7 @@ def build_files(sample):
     )
     # The output is the log and, last, "Wrote N HEIC file(s)." (or JPEG XL).
     b.if_has_value(
-        b.match_text(result, WARNINGS),
+        b.match_text(result, FILE_WARNINGS),
         lambda: b.quick_look(result),
         lambda: None,
     )

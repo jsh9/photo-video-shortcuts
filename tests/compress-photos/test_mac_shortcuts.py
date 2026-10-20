@@ -6,6 +6,7 @@ share with photobatch. The script itself runs for real in test_mac_script.py.
 """
 
 import pathlib
+import re
 
 import photo_helpers as ph
 import pytest
@@ -538,6 +539,51 @@ def test_photos_log_shown_only_with_warnings(gen, shortcuts):
         assert flags[look]
 
     del idents
+
+
+def test_files_log_shown_only_with_warnings_to_act_on(gen, shortcuts):
+    # The Finder shortcut's Quick Look runs inside "If (log matches
+    # FILE_WARNINGS) has any value": the WARNINGS lines, except the note of a
+    # copy not smaller than its original, which that route gives the user
+    # nothing to decide about (the originals are never touched).
+    actions = shortcuts[FILES]
+    matches = {
+        ph.params(a)['WFMatchTextPattern']: ph.params(a)['UUID']
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+    }
+    assert gen.WARNINGS not in matches
+    warn = matches[gen.FILE_WARNINGS]
+    [look] = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.previewdocument'
+    ]
+    assert [inside for _, inside in ph.inside_if_on(actions, warn)][look]
+    pattern = re.compile(gen.FILE_WARNINGS)
+    for line in (
+        '  ! HDR gain map not used (malformed gain map metadata)',
+        'ERROR: cannot read jxl_job.txt',
+        'Done: 1 of 2 converted in 3 s\n1 failed; see the messages above.',
+        "x\n  ! Apple's HDR profile not found",
+        # the note in a line of its own, and with another note after it
+        'x\n  ! the copy is not smaller than the original: larger by 2 KB'
+        '\n  ! HDR gain map not used (malformed gain map metadata)',
+    ):
+        assert pattern.search(line), line
+
+    for line in (
+        '  ! the copy is not smaller than the original: larger by 2 KB',
+        'x\n  ! the copy is not smaller than the original: the same size',
+        '1 copy is not smaller than its original; it was saved all the same.',
+        'Done: 2 of 2 converted in 3 s',
+    ):
+        assert not pattern.search(line), line
+    # The Photos shortcut shows the note too: the album is to be reviewed.
+    assert re.search(
+        gen.WARNINGS,
+        '  ! the copy is not smaller than the original: larger by 2 KB',
+    )
 
 
 def test_files_shortcut_never_touches_photos(shortcuts):

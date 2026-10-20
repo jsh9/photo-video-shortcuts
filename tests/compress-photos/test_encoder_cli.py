@@ -118,13 +118,16 @@ def test_summary_says_how_much_space_was_saved(encoder, tmp_path):
     assert int(m.group(2)) == round(100 * (size_in - size_out) / size_in)
 
 
-@pytest.mark.parametrize('args', [['-q', '100'], ['--heic', '--rf', '1']])
+@pytest.mark.parametrize(
+    'args', [['-q', '100'], ['--heic', '--rf', '1']], ids=['jxl', 'heic']
+)
 def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
     # A copy not smaller than its original (larger here) is written and listed
     # for the shortcuts like any other, on both routes and from any format:
-    # only the log says so, on the photo's lines and in the summary. 1: noise
-    # as a JPEG at quality 5, which no near-lossless copy undercuts; 2: a PNG
-    # stored without compression, which every copy halves.
+    # only the log says so, on the photo's lines (by how much, since the
+    # sizes are rounded) and in the summary. 1: noise as a JPEG at quality 5,
+    # which no near-lossless copy undercuts; 2: a PNG stored without
+    # compression, which every copy halves.
     noise = np.random.default_rng(1).integers(0, 256, (240, 320, 3), np.uint8)
     Image.fromarray(noise).save(tmp_path / 'noise.jpg', quality=5)
     ph.scene(320, 240).save(tmp_path / 'scene.png', compress_level=0)
@@ -135,24 +138,20 @@ def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
     assert result.returncode == 0, result.stdout
     done = ph.read_done(tmp_path / 'job')
     assert sorted(done) == [1, 2]
-    grew = {
-        i: out.stat().st_size > staged[i].stat().st_size
+    sizes = {
+        i: (staged[i].stat().st_size, out.stat().st_size)
         for i, (out, _) in done.items()
     }
-    assert grew == {1: True, 2: False}
-
-    # (words compared, since photobatch wraps lines to the window's width)
-    def said(stem):
-        return ' '.join(ph.photo_output(result.stdout, stem).split())
-
-    warning = '! the copy is not smaller than the original'
-    assert warning in said('noise')
-    assert warning not in said('scene')
-    text = ' '.join(result.stdout.split())
-    summary = (
-        '1 copy is not smaller than its original; it was saved all the same.'
-    )
-    assert summary in text
+    assert sizes[1][1] > sizes[1][0]
+    assert sizes[2][1] < sizes[2][0]
+    said = {
+        stem: ph.unwrapped(ph.photo_output(result.stdout, stem))
+        for stem in ('noise', 'scene')
+    }
+    assert ph.not_smaller_note(*sizes[1]) in said['noise']
+    assert ph.NOT_SMALLER not in said['scene']
+    text = ph.unwrapped(result.stdout)
+    assert ph.NOT_SMALLER_ONE in text
     assert 'failed' not in text
 
 

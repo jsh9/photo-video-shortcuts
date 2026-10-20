@@ -211,8 +211,12 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   If the folder can't be written, or Shortcuts didn't say where a file came
   from, the result goes to `~/Pictures/HEIC` or `~/Pictures/JPEG XL`.
 - A Terminal window follows the progress (as above); the log opens in Quick
-  Look when something was noted or failed; a notification says how many files
-  were written. The originals are never touched.
+  Look when something was noted or failed, except for a copy not smaller than
+  its original (a screenshot's usually is), which is written like any other:
+  the log notes it
+  (`! the copy is not smaller than the original: larger by 12 KB`) and its
+  summary counts such copies, but it opens no window, since the originals are
+  never touched. A notification says how many files were written.
 
 ## 4. What is and isn't kept
 
