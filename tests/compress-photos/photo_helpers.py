@@ -497,6 +497,53 @@ def photo_output(output, stem):
     return match.group(1)
 
 
+def unwrapped(output):
+    """photobatch's output as words, since it wraps lines to the window."""
+    return ' '.join(output.split())
+
+
+# photobatch's note below a copy not smaller than its original, and the
+# summary line of a batch with one such copy.
+NOT_SMALLER = '! the copy is not smaller than the original'
+NOT_SMALLER_ONE = (
+    '1 copy is not smaller than its original; it was saved all the same.'
+)
+
+
+def check_not_smaller_note(said, bytes_in, bytes_out):
+    """
+    Asserts that ``said`` (a photo's output, unwrapped) has the note for a copy
+    of bytes_out from an original of bytes_in: "the same size", or "larger by"
+    the difference as photobatch prints sizes (whole B or KB, MB to a tenth).
+    """
+    m = re.search(
+        re.escape(NOT_SMALLER)
+        + r': (?:the same size|larger by ([0-9.]+) (B|KB|MB))',
+        said,
+    )
+    assert m, said
+    diff = bytes_out - bytes_in
+    if m.group(1) is None:
+        assert diff == 0, said
+        return
+
+    value, unit = float(m.group(1)), m.group(2)
+    scale = {'B': 1, 'KB': 1e3, 'MB': 1e6}[unit]
+    assert diff > 0, said
+    assert abs(value - diff / scale) <= (0.05 if unit == 'MB' else 0.5), said
+
+
+def noise_jpeg(path, width=320, height=240, quality=5, seed=1):
+    """
+    A JPEG of noise at a low quality: a copy of it at any near-lossless setting
+    is larger than it, in every format.
+    """
+    rng = np.random.default_rng(seed)
+    noise = rng.integers(0, 256, (height, width, 3), np.uint8)
+    Image.fromarray(noise).save(path, quality=quality)
+    return path
+
+
 def boxes(path):
     """exiftool's dump of the JPEG XL container boxes."""
     return run(['exiftool', '-v2', path]).stdout

@@ -117,6 +117,42 @@ def test_summary_says_how_much_space_was_saved(encoder, tmp_path):
     assert int(m.group(2)) == round(100 * (size_in - size_out) / size_in)
 
 
+@pytest.mark.parametrize(
+    'args', [['-q', '100'], ['--heic', '--rf', '1']], ids=['jxl', 'heic']
+)
+def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
+    # A copy not smaller than its original (larger here) is written and listed
+    # for the shortcuts like any other, on both routes and from any format:
+    # only the log says so, on the photo's lines (by how much, since the
+    # sizes are rounded) and in the summary. 1: noise as a JPEG at quality 5,
+    # which no near-lossless copy undercuts; 2: a PNG stored without
+    # compression, which every copy halves.
+    ph.noise_jpeg(tmp_path / 'noise.jpg')
+    ph.scene(320, 240).save(tmp_path / 'scene.png', compress_level=0)
+    staged = ph.stage(
+        tmp_path / 'job', [tmp_path / 'noise.jpg', tmp_path / 'scene.png']
+    )
+    result = encoder.run([*args, 'jxl_job.txt'], tmp_path / 'job')
+    assert result.returncode == 0, result.stdout
+    done = ph.read_done(tmp_path / 'job')
+    assert sorted(done) == [1, 2]
+    sizes = {
+        i: (staged[i].stat().st_size, out.stat().st_size)
+        for i, (out, _) in done.items()
+    }
+    assert sizes[1][1] > sizes[1][0]
+    assert sizes[2][1] < sizes[2][0]
+    said = {
+        stem: ph.unwrapped(ph.photo_output(result.stdout, stem))
+        for stem in ('noise', 'scene')
+    }
+    ph.check_not_smaller_note(said['noise'], *sizes[1])
+    assert ph.NOT_SMALLER not in said['scene']
+    text = ph.unwrapped(result.stdout)
+    assert ph.NOT_SMALLER_ONE in text
+    assert 'failed' not in text
+
+
 def test_nothing_converted(encoder, tmp_path):
     gif = tmp_path / 'b.gif'
     Image.new('RGB', (8, 8)).save(gif)
@@ -231,7 +267,7 @@ def header_and_body(output):
     """
     header, body = output.split('\n\n', 1)
     body = re.sub(r'(, [0-9.]+ s|in [0-9]+ s)(?=\n|$)', '', body)
-    return ' '.join(header.split()), body
+    return ph.unwrapped(header), body
 
 
 def test_parallel_batch_matches_sequential(encoder, photos, tmp_path):

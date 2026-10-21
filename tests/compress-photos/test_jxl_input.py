@@ -11,9 +11,8 @@ stays HDR as JPEG XL, with its peak and its profile; with --sdr (Drop HDR)
 libjxl tone-maps it to SDR (into Rec. 2020 primaries when CICP can't name its
 own; not at all when a profile alone describes it), and only so does it become
 a HEIC. A gain map ('jhgm' box) isn't used: the copy is SDR and the original is
-kept. A JPEG XL copy that wouldn't be smaller than its JPEG XL original isn't
-written, unless it is another rendition (tone-mapped, or with a date or
-location from Photos). Animated and cut-short files fail, and so do metadata
+kept. A JPEG XL copy not smaller than its JPEG XL original is written all the
+same, with a warning. Animated and cut-short files fail, and so do metadata
 boxes cut short or not decompressible (an Exif box without a TIFF header is
 dropped); the rest of the batch goes on. Metadata boxes of 200 KB, raw or
 Brotli-compressed, are kept byte for byte. The WebAssembly builds decode them
@@ -465,7 +464,7 @@ def test_drop_hdr_tone_maps_to_sdr(encoder, inputs, name, tmp_path):
 def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     ph.stage(tmp_path / 'keep', [inputs[name]])
     result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path / 'keep')
-    text = ' '.join(result.stdout.split())
+    text = ph.unwrapped(result.stdout)
     assert "FAILED: an HDR JPEG XL can't keep its HDR as HEIC" in text
     assert 'convert it on the Mac with Drop HDR' in text  # the iPhone's
     assert not (tmp_path / 'keep' / 'jxl_done.txt').exists()
@@ -486,70 +485,37 @@ def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     )
 
 
-def test_copy_not_smaller_is_not_written(encoder, inputs, tmp_path):
-    # Lossless, a lossy JPEG XL only grows: left alone, not a failure. The
-    # JPEG converted alongside is written.
-    ph.stage(tmp_path, [inputs['copy_sdr'], ph.HERE / 'fixtures/hdr/o1.heic'])
-    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path)
-    assert result.returncode == 0, result.stdout
-    text = ' '.join(result.stdout.split())
-    assert '! not converted: the copy' in text
-    assert 'would not be smaller than the original' in text
-    assert '1 JPEG XL photo not converted: its copy would not be smaller.' in (
-        text
-    )
-    assert 'failed' not in text
-    assert list(ph.read_done(tmp_path)) == [2]
-    assert not (tmp_path / 'jxl_out_1.jxl').exists()
-
-    # A batch of such copies alone converts nothing and fails nothing: exit
-    # status 0 (1 says nothing converted and a failure), and no jxl_done.txt,
-    # which the iPhone's shortcuts read as nothing to save.
-    ph.stage(tmp_path / 'all', [inputs['copy_sdr']])
-    result = encoder.run(['-q', '100', 'jxl_job.txt'], tmp_path / 'all')
-    assert result.returncode == 0, result.stdout
-    text = ' '.join(result.stdout.split())
-    assert 'Done: 0 of 1 converted' in text
-    assert 'failed' not in text
-    assert not (tmp_path / 'all' / 'jxl_done.txt').exists()
-
-
-def test_copy_is_written_when_it_is_another_rendition(
-        encoder, inputs, tmp_path
+@pytest.mark.parametrize(
+    'name, args, original',
+    [
+        ('copy_sdr', ['-q', '100'], 'delete'),
+        ('pq_small', ['-q', '100', '--sdr'], 'keep'),
+    ],
+)
+def test_larger_copy_is_written(
+        encoder, inputs, name, args, original, tmp_path
 ):
-    # The skip is for a plain re-encode. An SDR copy of an HDR JPEG XL
-    # (--sdr), or a copy given a date or location from Photos, is written
-    # even when it is larger (lossless here, so it is).
-    _, results = ph.convert(
-        encoder, tmp_path / 'sdr', [inputs['pq_small']], ['-q', '100', '--sdr']
-    )
-    assert results[1].stat().st_size > inputs['pq_small'].stat().st_size
-    assert 'Transfer function: sRGB' in jxl_info(results[1])
-    assert ph.kept_originals(tmp_path / 'sdr') == {1}
+    # Lossless, a lossy JPEG XL only grows; its copy is written and listed in
+    # jxl_done.txt like any other, with a warning (0.10.0 left such a JPEG XL
+    # alone; test_encoder_cli.py has the other formats), and its original is
+    # marked "delete" or "keep" by the usual rule: kept when the copy lacks
+    # its HDR (pq_small, tone-mapped to SDR). A batch of such copies alone
+    # exits with 0.
+    photo = inputs[name]
+    output, results = ph.convert(encoder, tmp_path, [photo], args)
+    size_in, size_out = photo.stat().st_size, results[1].stat().st_size
+    assert size_out > size_in
+    said = ph.unwrapped(ph.photo_output(output, photo.stem))
+    ph.check_not_smaller_note(said, size_in, size_out)
+    if original == 'keep':
+        assert 'HDR tone-mapped to SDR' in said
+        assert 'Transfer function: sRGB' in jxl_info(results[1])
 
-    copy = inputs['copy_sdr']
-    output, results = ph.convert(
-        encoder,
-        tmp_path / 'dated',
-        [copy],
-        ['-q', '100'],
-        dates={1: '2024-01-01T17:00:00-05:00'},
-    )
-    assert results[1].stat().st_size > copy.stat().st_size
-    assert 'date from Photos' in ph.photo_output(output, copy.stem)
-    tags = ph.exif_tags(results[1])
-    assert tags['ExifIFD:DateTimeOriginal'] == '2024:01:01 17:00:00'
-
-    _, results = ph.convert(
-        encoder,
-        tmp_path / 'located',
-        [copy],
-        ['-q', '100'],
-        meta=['1|gps|40.758441666667,-73.829766666667'],
-    )
-    assert results[1].stat().st_size > copy.stat().st_size
-    gps = ph.gps_of(results[1])
-    assert gps['GPSLatitude'] == pytest.approx(40.758441666667, abs=1e-5)
+    text = ph.unwrapped(output)
+    assert 'Done: 1 of 1 converted' in text
+    assert ph.NOT_SMALLER_ONE in text
+    [line] = ph.done_lines(tmp_path)
+    assert line[1:3] == ['1', original]
 
 
 def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
@@ -565,7 +531,7 @@ def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
         output, results = ph.convert(
             encoder, tmp_path / label, [inputs['gain_map']], args
         )
-        text = ' '.join(ph.photo_output(output, 'gain_map').split())
+        text = ph.unwrapped(ph.photo_output(output, 'gain_map'))
         noted = '! HDR not kept (JPEG XL with a gain map)' in text
         assert noted == (label != 'sdr'), label
         assert results[1].suffix == suffix, label
@@ -637,7 +603,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'hdr', [inputs['pq_icc']], ['-q', '83']
     )
-    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    text = ph.unwrapped(ph.photo_output(output, 'pq_icc'))
     assert 'HDR 49.3' in text  # PQ's peak, 10,000 nits, as cjxl wrote
     assert 'HDR kept' not in text
     assert is_pq(results[1], tmp_path / 'hdr')
@@ -646,7 +612,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'sdr', [inputs['pq_icc']], ['-q', '83', '--sdr']
     )
-    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    text = ph.unwrapped(ph.photo_output(output, 'pq_icc'))
     assert (
         '! HDR kept: a PQ picture described by its ICC profile alone '
         "can't be tone-mapped to SDR"
@@ -666,7 +632,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     for label, args, message in refusals:
         ph.stage(tmp_path / label, [inputs['pq_icc']])
         result = encoder.run([*args, 'jxl_job.txt'], tmp_path / label)
-        assert message in ' '.join(result.stdout.split()), label
+        assert message in ph.unwrapped(result.stdout), label
         assert not (tmp_path / label / 'jxl_done.txt').exists(), label
 
 
@@ -675,7 +641,7 @@ def test_animated_and_cut_short_fail(encoder, inputs, tmp_path):
         tmp_path, [inputs['animated'], inputs['truncated'], inputs['bare']]
     )
     result = encoder.run(['-q', '83', 'jxl_job.txt'], tmp_path)
-    text = ' '.join(result.stdout.split())
+    text = ph.unwrapped(result.stdout)
     assert "FAILED: an animated JPEG XL isn't a still photo" in text
     assert 'FAILED: the JPEG XL file is cut short' in text
     assert '2 failed' in text
@@ -756,7 +722,7 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
     def said(name):
-        return ' '.join(ph.photo_output(result.stdout, name).split())
+        return ph.unwrapped(ph.photo_output(result.stdout, name))
 
     assert said('exif_cut') == 'FAILED: metadata box Exif cut short'
     assert said('xml_cut') == 'FAILED: metadata box xml cut short'
@@ -764,7 +730,7 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     for name in ('brob_cut', 'brob_cut_first', 'brob_extra'):
         assert said(name) == 'FAILED: unreadable metadata box Exif', name
 
-    assert '6 failed' in ' '.join(result.stdout.split())
+    assert '6 failed' in ph.unwrapped(result.stdout)
     done = {i: out for i, (out, _) in ph.read_done(tmp_path / 'job').items()}
     assert sorted(done) == [7, 8]
 

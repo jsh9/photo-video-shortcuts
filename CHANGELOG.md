@@ -3,6 +3,26 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.11.0] - 2026-10-19
+
+- Changed
+  - A copy that isn't smaller than its original is always saved, whatever the
+    formats, on the iPhone and the Mac. a-Shell and the Mac's log say
+    `! the copy is not smaller than the original: larger by 12 KB` (or
+    `: the same size`) below the photo's sizes, and the summary counts such
+    copies
+    (`1 copy is not smaller than its original; it was saved all the same.`).
+    From Photos on the Mac the log opens in Quick Look, as for other notes;
+    from Finder it doesn't for this note alone, since no original is touched
+    there. Their originals from Photos are collected in *Compressed originals*
+    like any other, so read the log before deleting them. Before, a JPEG XL
+    whose JPEG XL copy wouldn't be smaller was left alone
+    (`! not converted: the copy (...) would not be smaller than the original (...)`),
+    and other formats' larger copies were saved without a warning.
+  - Update `photobatch.wasm` in a-Shell and `photobatch-macos`, and the Mac
+    shortcuts with it (they check the encoder's version). The iPhone shortcuts
+    only carry the new version number; iPhone users don't need to update them.
+
 ## [Compress Photos 0.10.0] - 2026-10-16
 
 - Added

@@ -861,7 +861,7 @@ typedef struct {
   size_t kept;         // originals marked "keep": their HDR isn't in the JXL
   size_t not_iphone;   // HDR photos saved as SDR, gain map not labeled as Apple's
   size_t bright_sky;   // HDR photos with much bright sky (Photos may show pink patches)
-  size_t skipped;      // JPEG XL originals left alone: the copy wouldn't be smaller
+  size_t not_smaller;  // copies not smaller than their originals, written all the same
   double bytes_in, bytes_out;
   FILE *done_file;
 } batch_t;
@@ -874,9 +874,6 @@ typedef struct {
   char ext[8];  // the output's extension, "jxl" or "heic"
   int keep;     // the original had HDR that the copy lacks: not to be deleted
   int apple_jpeg, not_iphone, bright_sky;
-  // Not converted, and not a failure: a JPEG XL copy that wouldn't be
-  // smaller than its JPEG XL original isn't written.
-  int skipped;
   double bytes_in, bytes_out;
   // The photo's summary, printed once it is in jxl_done.txt: e.g.
   // "HEIF 3024x4032, HDR 3.5×" and "2.4 MB -> 1.2 MB (50%), 4.1 s".
@@ -1140,7 +1137,6 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
   char err[256] = "";
   int ok = 0, transcoded = 0;
   const double t0 = now_seconds();
-  res->skipped = 0;
 
   say("\n[%zu/%zu] %s\n", pos, total, job->name);
   if (!p_orig || !p_out) {
@@ -1342,7 +1338,6 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   snprintf(name_png, sizeof name_png, "jxl_in_%u.png", job->index);
   snprintf(name_out, sizeof name_out, "jxl_out_%u.jxl", job->index);
   snprintf(res->ext, sizeof res->ext, "jxl");
-  res->skipped = 0;
   char *p_orig = path_join(dir, name_orig), *p_png = path_join(dir, name_png);
   char *p_out = path_join(dir, name_out);
   uint8_t *orig = NULL, *png = NULL, *jxl = NULL, *exif = NULL, *xmp = NULL;
@@ -1542,18 +1537,6 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
 
   encode_meta_t em = {&color, exif, exif_len, xmp, xmp_len, hdr.peak * GAINMAP_SDR_WHITE_NITS};
   if (encode_jxl(&img, &em, opt, &jxl, &jxl_len, err, sizeof err) != 0) goto done;
-  if (orig_format == FMT_JXL && !hdr.tone_mapped && !dated && !described && (double)jxl_len >= orig_size) {
-    // Converting a JPEG XL again only loses quality then, unless the copy is
-    // another rendition: tone-mapped to SDR, or with a date or location from
-    // Photos the original lacks. Otherwise the original stays (it isn't in
-    // jxl_done.txt, so it isn't collected either).
-    char in_s[32], out_s[32];
-    fmt_bytes(in_s, sizeof in_s, orig_size);
-    fmt_bytes(out_s, sizeof out_s, (double)jxl_len);
-    say_wrap("  ", "! not converted: the copy (%s) would not be smaller than the original (%s)", out_s, in_s);
-    res->skipped = 1;
-    goto done;
-  }
   if (write_file(p_out, jxl, jxl_len) != 0) {
     snprintf(err, sizeof err, "cannot write %s (%s)", name_out, strerror(errno));
     goto done;
@@ -1591,7 +1574,7 @@ static int process_job(const char *dir, const job_t *job, size_t pos, size_t tot
   }
 
 done:
-  if (!ok && !res->skipped) say_wrap("  ", "FAILED: %s", err);
+  if (!ok) say_wrap("  ", "FAILED: %s", err);
   image_free(&img);
   color_free(&color);
   meta_free(&mo);
@@ -1637,6 +1620,20 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
   batch->bytes_out += res->bytes_out;
   say_wrap("  ", "%s", res->info);
   say_wrap("  ", "%s", res->sizes);
+  // A copy that isn't smaller is written and saved like any other, whatever
+  // the formats: only the log says so, and the owner decides about the
+  // original. One of the same size gains nothing either, hence >=. The note
+  // says by how much, since the sizes above are rounded.
+  if (res->bytes_out >= res->bytes_in) {
+    char how[48] = "the same size";
+    if (res->bytes_out > res->bytes_in) {
+      char diff_s[32];
+      fmt_bytes(diff_s, sizeof diff_s, res->bytes_out - res->bytes_in);
+      snprintf(how, sizeof how, "larger by %s", diff_s);
+    }
+    say_wrap("  ", "! the copy is not smaller than the original: %s", how);
+    batch->not_smaller++;
+  }
   return 1;
 }
 
@@ -1645,11 +1642,7 @@ static void serial_batch(const char *dir, const job_t *jobs, size_t count, const
                          batch_t *batch) {
   for (size_t i = 0; i < count; i++) {
     outcome_t res;
-    if (process_job(dir, &jobs[i], i + 1, count, opt, &res)) {
-      commit_outcome(batch, dir, &jobs[i], &res);
-    } else {
-      batch->skipped += res.skipped;
-    }
+    if (process_job(dir, &jobs[i], i + 1, count, opt, &res)) commit_outcome(batch, dir, &jobs[i], &res);
   }
 }
 
@@ -1738,11 +1731,7 @@ static void *pool_worker(void *arg) {
       fflush(stdout);
       free(done->out.data);
       done->out.data = NULL;
-      if (done->ok) {
-        commit_outcome(pool->batch, pool->dir, &pool->jobs[pool->committed], &done->res);
-      } else {
-        pool->batch->skipped += done->res.skipped;
-      }
+      if (done->ok) commit_outcome(pool->batch, pool->dir, &pool->jobs[pool->committed], &done->res);
       pool->committed++;
     }
     pthread_mutex_unlock(&pool->lock);
@@ -1952,13 +1941,13 @@ static int run_batch(const options_t *opt, const char *job_arg) {
       say_wrap("", "%s larger (%.0f%%)", saved_s, -saved_pct);
     }
   }
-  if (batch.skipped) {
-    const int one = batch.skipped == 1;
-    say_wrap("", "%zu JPEG XL photo%s not converted: %s would not be smaller.", batch.skipped, one ? "" : "s",
-             one ? "its copy" : "their copies");
+  if (batch.not_smaller) {
+    const int one = batch.not_smaller == 1;
+    say_wrap("", "%zu %s not smaller than %s; %s saved all the same.", batch.not_smaller,
+             one ? "copy is" : "copies are", one ? "its original" : "their originals", one ? "it was" : "they were");
   }
-  if (batch.done + batch.skipped < count) {
-    say_wrap("", "%zu failed; see the messages above.", count - batch.done - batch.skipped);
+  if (batch.done < count) {
+    say_wrap("", "%zu failed; see the messages above.", count - batch.done);
   }
   if (batch.kept) {
     const int one = batch.kept == 1;
@@ -1988,11 +1977,9 @@ static int run_batch(const options_t *opt, const char *job_arg) {
   free_jobs(jobs, count);
   free(job_path);
   free(dir);
-  // 1 when nothing was converted and a photo failed. A batch whose JPEG XL
-  // photos were all left alone (their copies wouldn't be smaller) converted
-  // nothing but failed nothing. (The shortcuts don't read the status; the
+  // 1 when nothing was converted. (The shortcuts don't read the status; the
   // tests do.)
-  return batch.done > 0 || (batch.skipped > 0 && batch.skipped == count) ? 0 : 1;
+  return batch.done > 0 ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------
