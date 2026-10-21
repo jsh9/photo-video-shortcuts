@@ -1624,13 +1624,14 @@ static int commit_outcome(batch_t *batch, const char *dir, const job_t *job, con
   // the formats: only the log says so, and the owner decides about the
   // original. One of the same size gains nothing either, hence >=. The note
   // says by how much, since the sizes above are rounded.
-  if (res->bytes_out > res->bytes_in) {
-    char diff_s[32];
-    fmt_bytes(diff_s, sizeof diff_s, res->bytes_out - res->bytes_in);
-    say_wrap("  ", "! the copy is not smaller than the original: larger by %s", diff_s);
-    batch->not_smaller++;
-  } else if (res->bytes_out == res->bytes_in) {
-    say_wrap("  ", "! the copy is not smaller than the original: the same size");
+  if (res->bytes_out >= res->bytes_in) {
+    char how[48] = "the same size";
+    if (res->bytes_out > res->bytes_in) {
+      char diff_s[32];
+      fmt_bytes(diff_s, sizeof diff_s, res->bytes_out - res->bytes_in);
+      snprintf(how, sizeof how, "larger by %s", diff_s);
+    }
+    say_wrap("  ", "! the copy is not smaller than the original: %s", how);
     batch->not_smaller++;
   }
   return 1;

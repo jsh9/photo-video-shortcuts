@@ -510,21 +510,38 @@ NOT_SMALLER_ONE = (
 )
 
 
-def not_smaller_note(bytes_in, bytes_out):
-    """The note for a copy of bytes_out from an original of bytes_in."""
+def check_not_smaller_note(said, bytes_in, bytes_out):
+    """
+    Asserts that ``said`` (a photo's output, unwrapped) has the note for a copy
+    of bytes_out from an original of bytes_in: "the same size", or "larger by"
+    the difference as photobatch prints sizes (whole B or KB, MB to a tenth).
+    """
+    m = re.search(
+        re.escape(NOT_SMALLER)
+        + r': (?:the same size|larger by ([0-9.]+) (B|KB|MB))',
+        said,
+    )
+    assert m, said
     diff = bytes_out - bytes_in
-    assert diff >= 0
-    if diff == 0:
-        return f'{NOT_SMALLER}: the same size'
+    if m.group(1) is None:
+        assert diff == 0, said
+        return
 
-    if diff >= 1e6:  # as photobatch's fmt_bytes
-        size = f'{diff / 1e6:.1f} MB'
-    elif diff >= 1e3:
-        size = f'{diff / 1e3:.0f} KB'
-    else:
-        size = f'{diff} B'
+    value, unit = float(m.group(1)), m.group(2)
+    scale = {'B': 1, 'KB': 1e3, 'MB': 1e6}[unit]
+    assert diff > 0, said
+    assert abs(value - diff / scale) <= (0.05 if unit == 'MB' else 0.5), said
 
-    return f'{NOT_SMALLER}: larger by {size}'
+
+def noise_jpeg(path, width=320, height=240, quality=5, seed=1):
+    """
+    A JPEG of noise at a low quality: a copy of it at any near-lossless setting
+    is larger than it, in every format.
+    """
+    rng = np.random.default_rng(seed)
+    noise = rng.integers(0, 256, (height, width, 3), np.uint8)
+    Image.fromarray(noise).save(path, quality=quality)
+    return path
 
 
 def boxes(path):

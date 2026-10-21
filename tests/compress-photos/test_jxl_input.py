@@ -464,7 +464,7 @@ def test_drop_hdr_tone_maps_to_sdr(encoder, inputs, name, tmp_path):
 def test_hdr_becomes_heic_only_with_drop_hdr(encoder, inputs, name, tmp_path):
     ph.stage(tmp_path / 'keep', [inputs[name]])
     result = encoder.run(['--heic', 'jxl_job.txt'], tmp_path / 'keep')
-    text = ' '.join(result.stdout.split())
+    text = ph.unwrapped(result.stdout)
     assert "FAILED: an HDR JPEG XL can't keep its HDR as HEIC" in text
     assert 'convert it on the Mac with Drop HDR' in text  # the iPhone's
     assert not (tmp_path / 'keep' / 'jxl_done.txt').exists()
@@ -506,7 +506,7 @@ def test_larger_copy_is_written(
     size_in, size_out = photo.stat().st_size, results[1].stat().st_size
     assert size_out > size_in
     said = ph.unwrapped(ph.photo_output(output, photo.stem))
-    assert ph.not_smaller_note(size_in, size_out) in said
+    ph.check_not_smaller_note(said, size_in, size_out)
     if original == 'keep':
         assert 'HDR tone-mapped to SDR' in said
         assert 'Transfer function: sRGB' in jxl_info(results[1])
@@ -531,7 +531,7 @@ def test_gain_map_box_is_noted_and_original_kept(encoder, inputs, tmp_path):
         output, results = ph.convert(
             encoder, tmp_path / label, [inputs['gain_map']], args
         )
-        text = ' '.join(ph.photo_output(output, 'gain_map').split())
+        text = ph.unwrapped(ph.photo_output(output, 'gain_map'))
         noted = '! HDR not kept (JPEG XL with a gain map)' in text
         assert noted == (label != 'sdr'), label
         assert results[1].suffix == suffix, label
@@ -603,7 +603,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'hdr', [inputs['pq_icc']], ['-q', '83']
     )
-    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    text = ph.unwrapped(ph.photo_output(output, 'pq_icc'))
     assert 'HDR 49.3' in text  # PQ's peak, 10,000 nits, as cjxl wrote
     assert 'HDR kept' not in text
     assert is_pq(results[1], tmp_path / 'hdr')
@@ -612,7 +612,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     output, results = ph.convert(
         encoder, tmp_path / 'sdr', [inputs['pq_icc']], ['-q', '83', '--sdr']
     )
-    text = ' '.join(ph.photo_output(output, 'pq_icc').split())
+    text = ph.unwrapped(ph.photo_output(output, 'pq_icc'))
     assert (
         '! HDR kept: a PQ picture described by its ICC profile alone '
         "can't be tone-mapped to SDR"
@@ -632,7 +632,7 @@ def test_hdr_by_profile_alone_cannot_be_tone_mapped(encoder, inputs, tmp_path):
     for label, args, message in refusals:
         ph.stage(tmp_path / label, [inputs['pq_icc']])
         result = encoder.run([*args, 'jxl_job.txt'], tmp_path / label)
-        assert message in ' '.join(result.stdout.split()), label
+        assert message in ph.unwrapped(result.stdout), label
         assert not (tmp_path / label / 'jxl_done.txt').exists(), label
 
 
@@ -641,7 +641,7 @@ def test_animated_and_cut_short_fail(encoder, inputs, tmp_path):
         tmp_path, [inputs['animated'], inputs['truncated'], inputs['bare']]
     )
     result = encoder.run(['-q', '83', 'jxl_job.txt'], tmp_path)
-    text = ' '.join(result.stdout.split())
+    text = ph.unwrapped(result.stdout)
     assert "FAILED: an animated JPEG XL isn't a still photo" in text
     assert 'FAILED: the JPEG XL file is cut short' in text
     assert '2 failed' in text
@@ -722,7 +722,7 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
     def said(name):
-        return ' '.join(ph.photo_output(result.stdout, name).split())
+        return ph.unwrapped(ph.photo_output(result.stdout, name))
 
     assert said('exif_cut') == 'FAILED: metadata box Exif cut short'
     assert said('xml_cut') == 'FAILED: metadata box xml cut short'
@@ -730,7 +730,7 @@ def test_metadata_boxes(encoder, inputs, tmp_path):
     for name in ('brob_cut', 'brob_cut_first', 'brob_extra'):
         assert said(name) == 'FAILED: unreadable metadata box Exif', name
 
-    assert '6 failed' in ' '.join(result.stdout.split())
+    assert '6 failed' in ph.unwrapped(result.stdout)
     done = {i: out for i, (out, _) in ph.read_done(tmp_path / 'job').items()}
     assert sorted(done) == [7, 8]
 

@@ -6,7 +6,6 @@ WebAssembly, native).
 import re
 import zlib
 
-import numpy as np
 import photo_helpers as ph
 import pytest
 from PIL import Image
@@ -128,8 +127,7 @@ def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
     # sizes are rounded) and in the summary. 1: noise as a JPEG at quality 5,
     # which no near-lossless copy undercuts; 2: a PNG stored without
     # compression, which every copy halves.
-    noise = np.random.default_rng(1).integers(0, 256, (240, 320, 3), np.uint8)
-    Image.fromarray(noise).save(tmp_path / 'noise.jpg', quality=5)
+    ph.noise_jpeg(tmp_path / 'noise.jpg')
     ph.scene(320, 240).save(tmp_path / 'scene.png', compress_level=0)
     staged = ph.stage(
         tmp_path / 'job', [tmp_path / 'noise.jpg', tmp_path / 'scene.png']
@@ -148,7 +146,7 @@ def test_larger_copy_is_saved_with_a_warning(encoder, tmp_path, args):
         stem: ph.unwrapped(ph.photo_output(result.stdout, stem))
         for stem in ('noise', 'scene')
     }
-    assert ph.not_smaller_note(*sizes[1]) in said['noise']
+    ph.check_not_smaller_note(said['noise'], *sizes[1])
     assert ph.NOT_SMALLER not in said['scene']
     text = ph.unwrapped(result.stdout)
     assert ph.NOT_SMALLER_ONE in text
@@ -269,7 +267,7 @@ def header_and_body(output):
     """
     header, body = output.split('\n\n', 1)
     body = re.sub(r'(, [0-9.]+ s|in [0-9]+ s)(?=\n|$)', '', body)
-    return ' '.join(header.split()), body
+    return ph.unwrapped(header), body
 
 
 def test_parallel_batch_matches_sequential(encoder, photos, tmp_path):

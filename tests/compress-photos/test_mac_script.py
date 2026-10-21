@@ -879,6 +879,29 @@ def test_files_unwritable_folder_falls_back(mac):
     assert (mac.home / 'Pictures' / 'JPEG XL' / 'a.jxl').exists()
 
 
+def test_files_larger_copy_is_written_and_opens_no_log(mac, gen):
+    # A copy not smaller than its original (a JPEG at lossless) is written
+    # next to it like any other. The log has photobatch's note on one line
+    # (run.zsh's COLUMNS=100 keeps it from wrapping, which FILE_WARNINGS's
+    # lookahead needs: at photobatch's default width it would break after
+    # "the") and the summary line; it matches WARNINGS, so the Photos
+    # shortcut opens Quick Look, but not FILE_WARNINGS, so the Finder
+    # shortcut doesn't.
+    album = mac.root / 'My Photos'
+    album.mkdir()
+    a = ph.noise_jpeg(album / 'noise.jpg')
+    out = mac.batch('files', a, quality='100', lines=f'{a}\n')
+    assert out.splitlines()[-1] == 'Wrote 1 JPEG XL file(s).'
+    size_in, size_out = a.stat().st_size, (album / 'noise.jxl').stat().st_size
+    assert size_out > size_in
+    log = mac.log_file('files').read_text()
+    [note] = [line for line in log.splitlines() if ph.NOT_SMALLER in line]
+    ph.check_not_smaller_note(note, size_in, size_out)
+    assert ph.NOT_SMALLER_ONE in log.splitlines()
+    assert re.search(gen.WARNINGS, log)
+    assert not re.search(gen.FILE_WARNINGS, log)
+
+
 def test_macos_encoder_output_identical_to_wasm(wasm, macos, tmp_path):
     """
     Same libraries, same settings: the Mac shortcuts' encoder writes the same
