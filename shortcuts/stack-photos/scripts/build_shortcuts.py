@@ -72,6 +72,7 @@ CROP = 'Crop: cut the sides, keep the center'
 # writes JPEG for Convert Image on both iPhone and Mac.
 QUALITY = 0.9
 SUFFIX = '-stack'  # the stack's name: the first photo's, with this
+NO_STACK = 'The photos could not be combined; nothing was saved.'
 DELAY = 5  # seconds after the latest photo's date
 
 # The Mac's route from Photos (choose_photos). On the Mac, Photos' Share menu
@@ -717,6 +718,14 @@ def build(sample):
         ),
     )
     stack = variable('Stack')
+
+    def no_stack():
+        clean_up(b)
+        fail(b, NO_STACK)
+
+    # Combine Images gives nothing for images of no size: say so rather than
+    # report a stack that wasn't saved.
+    b.if_has_value(stack, lambda: None, no_stack)
     jpeg = b.convert_image(stack, 'JPEG', QUALITY)
 
     def date_from_details():

@@ -75,9 +75,9 @@ def test_mac_only_actions_run_only_on_a_mac(actions):
     mac_only = [
         a for a in actions if sh.ident(a).removeprefix(BUILT_IN) in MAC_ONLY
     ]
-    # probe, the work folder, export, stage, and the cleanup after saving and
-    # before "Nothing to stack"
-    assert len(mac_only) == 6
+    # probe, the work folder, export, stage, and the cleanup after saving,
+    # before "Nothing to stack" and when nothing could be combined
+    assert len(mac_only) == 7
     for action in mac_only:
         assert on_mac[id(action)] or from_photos[id(action)], action
 
@@ -110,6 +110,53 @@ def test_applescripts_compile(gen, tmp_path):
             timeout=120,
         )
         assert result.returncode == 0, (name, result.stderr)
+
+
+# Each action's input, as shortcuts built on a device store it (shortcut files
+# shared in suliveevil/My-Siri-Shortcuts, Shortcuts 1050; this repository's
+# own for the rest): the key, and whether it is a text field (a
+# WFTextTokenString holding the variable) or the variable itself. Shortcuts
+# ignores a key it doesn't know: Calculate Statistics' input under "WFInput"
+# reached it as nothing, and so did every size after it (Stack Photos'
+# first Mac run, macOS 27).
+INPUTS = {
+    'statistics': ('Input', 'WFTextTokenAttachment'),
+    'count': ('Input', 'WFTextTokenAttachment'),
+    'math': ('WFInput', 'WFTextTokenAttachment'),
+    'round': ('WFInput', 'WFTextTokenAttachment'),
+    'image.resize': ('WFImage', 'WFTextTokenAttachment'),
+    'image.crop': ('WFInput', 'WFTextTokenAttachment'),
+    'overlayimageonimage': ('WFInput', 'WFTextTokenAttachment'),
+    'image.combine': ('WFInput', 'WFTextTokenAttachment'),
+    'image.convert': ('WFInput', 'WFTextTokenAttachment'),
+    'base64encode': ('WFInput', 'WFTextTokenAttachment'),
+    'text.replace': ('WFInput', 'WFTextTokenString'),
+    'gettimebetweendates': ('WFInput', 'WFTextTokenString'),
+    'adjustdate': ('WFDate', 'WFTextTokenString'),
+    'format.date': ('WFDate', 'WFTextTokenString'),
+    'properties.images': ('WFInput', 'WFTextTokenAttachment'),
+    'getitemfromlist': ('WFInput', 'WFTextTokenAttachment'),
+    'text.match': ('text', 'WFTextTokenString'),
+    'text.split': ('text', 'WFTextTokenAttachment'),
+    'detect.text': ('WFInput', 'WFTextTokenAttachment'),
+    'savetocameraroll': ('WFInput', 'WFTextTokenAttachment'),
+    'setitemname': ('WFInput', 'WFTextTokenAttachment'),
+    'getitemname': ('WFInput', 'WFTextTokenAttachment'),
+}
+
+
+@pytest.mark.parametrize('kind', sorted(INPUTS))
+def test_inputs_as_shortcuts_store_them(actions, kind):
+    key, serialization = INPUTS[kind]
+    found = of(actions, kind)
+    assert found, kind
+    for action in found:
+        p = sh.params(action)
+        assert key in p, (kind, sorted(p))
+        assert p[key]['WFSerializationType'] == serialization, kind
+        others = {'WFInput', 'Input', 'WFImage', 'WFDate', 'text'} - {key}
+        if kind != 'overlayimageonimage':  # its overlay is WFImage
+            assert not others & set(p), (kind, sorted(p))
 
 
 def test_note(gen, actions):

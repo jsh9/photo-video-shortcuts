@@ -123,6 +123,17 @@ shortcut on the Mac takes a click. So:
   store variables and constants, and Combine Images' current mode names.
 - `tests/stack-photos/` runs the whole shortcut on a model of these actions.
 
+The first run on the Mac (2026-10-22, traced in the unified log: each action's
+"finished with output of N items") found what none of this could: Calculate
+Statistics' input is stored as `Input` (as Count's), not `WFInput`. Shortcuts
+ignores a key it doesn't know, so the action got nothing, every size after it
+was empty, Combine Images gave nothing, and nothing was saved, with no error.
+WorkflowKit's parameter states parse values, not key names. So
+`test_shortcuts.py` now checks each action's input key and form against
+shortcuts built on a device (Get Time Between Dates' input is a text field
+there too), and the shortcut stops with a message when Combine Images gives
+nothing rather than report a stack.
+
 ## 5. To check on a device
 
 - The Mac route from Photos' Share menu: no picker; Photos' export of each

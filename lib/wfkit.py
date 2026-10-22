@@ -636,10 +636,15 @@ class Builder:
         return output_of(a, 'Calculation Result')
 
     def statistics(self, ref, operation):
-        """Calculate Statistics: Minimum, Maximum... of the numbers ``ref``."""
+        """
+        Calculate Statistics: Minimum, Maximum... of the numbers ``ref``. Its
+        input is "Input", as Count's (shortcuts built on a device); under
+        "WFInput" it is ignored, the action gets nothing and gives nothing
+        (seen on macOS 27).
+        """
         a = self.add(
             'is.workflow.actions.statistics',
-            {'WFInput': attachment(ref), 'WFStatisticsOperation': operation},
+            {'Input': attachment(ref), 'WFStatisticsOperation': operation},
         )
         return output_of(a, 'Statistics')
 
@@ -661,13 +666,13 @@ class Builder:
     def time_between(self, start_ref, end_ref):
         """
         Get Time Between Dates in seconds: ``end_ref`` minus ``start_ref``
-        (negative when it is earlier), a whole number. The first date goes in
-        as a text field, as the Shortcuts app writes it.
+        (negative when it is earlier), a whole number. Both dates go in as text
+        fields, as the Shortcuts app writes them.
         """
         a = self.add(
             'is.workflow.actions.gettimebetweendates',
             {
-                'WFInput': attachment(end_ref),
+                'WFInput': text(end_ref),
                 'WFTimeUntilFromDate': text(start_ref),
                 'WFTimeUntilUnit': 'Seconds',
             },

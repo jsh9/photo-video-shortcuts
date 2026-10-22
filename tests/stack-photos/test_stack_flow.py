@@ -387,3 +387,14 @@ def test_rounding_never_enlarges(gen, actions, jpeg):
             if image.name != 'canvas':
                 original = next(p for p in odd if p.name == image.name)
                 assert width <= original.width and height <= original.height
+
+
+def test_no_stack_says_so(gen, actions, jpeg, monkeypatch):
+    # Should Combine Images give nothing, nothing is reported as saved.
+    monkeypatch.setattr(
+        sm.Shortcuts, 'do_image_combine', lambda self, p, r: None
+    )
+    result, s = run(actions, gen, [gen.HORIZONTAL, gen.KEEP], jpeg=jpeg)
+    assert result == 'stopped'
+    assert s.notifications == [gen.NO_STACK]
+    assert not s.saved

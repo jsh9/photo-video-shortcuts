@@ -231,7 +231,7 @@ class Shortcuts:
 
     def do_statistics(self, p, repeats):
         numbers = [
-            Decimal(n) for n in as_list(self.value(p['WFInput'], repeats))
+            Decimal(n) for n in as_list(self.value(p['Input'], repeats))
         ]
         assert numbers
         operation = {'Minimum': min, 'Maximum': max}[
@@ -266,7 +266,7 @@ class Shortcuts:
     def do_gettimebetweendates(self, p, repeats):
         assert p['WFTimeUntilUnit'] == 'Seconds'
         start = self.field(p['WFTimeUntilFromDate'], repeats)
-        end = one(self.value(p['WFInput'], repeats))
+        end = self.field(p['WFInput'], repeats)
         return Decimal(int((end - start).total_seconds()))
 
     def do_adjustdate(self, p, repeats):
