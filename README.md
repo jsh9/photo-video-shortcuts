@@ -6,7 +6,7 @@ the heavy lifting runs in [a-Shell](https://holzschu.github.io/a-Shell_iOS/), a
 free terminal app, because iOS has no JPEG XL encoder or quality-controlled
 video encoder of its own. On the Mac, Shortcuts runs the same encoder itself
 (Run Shell Script). One more, Stack Photos, puts photos side by side with
-Shortcuts' own actions alone, on both.
+Shortcuts' own actions, on both (no a-Shell).
 
 | Shortcut                                               | What it does                                                                                                                                                                              | iPhone             | Mac                                                                       |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
@@ -173,8 +173,11 @@ The iPhone's shortcut, unchanged: with iCloud sync on for Shortcuts, adding it
 on the iPhone adds it on the Mac too. Otherwise download
 `stack-photos-shortcuts-v<version>.zip` from the latest
 [release](https://github.com/jsh9/photo-video-shortcuts/releases), unzip it,
-and double-click *Stack Photos* → Add Shortcut. No tools and no scripts to
-allow.
+and double-click *Stack Photos* → Add Shortcut. No tools to install, but turn
+on Shortcuts ▸ Settings ▸ Advanced ▸ **Allow Running Scripts**: on the Mac it
+asks Photos for the photos you selected with AppleScript (Photos' Share menu
+gives a shortcut none there). The first time you run it from Photos, allow
+Shortcuts to control Photos.
 
 How to use it: [Stack Photos](shortcuts/stack-photos/README.md).
 

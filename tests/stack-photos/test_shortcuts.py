@@ -1,9 +1,10 @@
 """
 The generated shortcut (scripts/build_shortcuts.py), checked without a device:
-its blocks and variables, that it uses only Shortcuts' own actions that the
-iPhone and the Mac both have (no a-Shell, no scripts), its note and surfaces,
-the image steps' settings, and the EXIF segment's layout. What it does is run
-on a model in test_stack_flow.py.
+its blocks and variables, that it uses only Shortcuts' own actions (no
+a-Shell), its note and surfaces, the image steps' settings, and the EXIF
+segment's layout; on the Mac, its AppleScripts compiling against Photos'
+dictionary and its scripts running only on a Mac. What it does is run on a
+model in test_stack_flow.py and test_mac_route.py.
 """
 
 import base64
@@ -50,10 +51,65 @@ def test_repeat_variables_in_scope(actions):
                 assert depth == 1, sh.ident(action)  # no nested repeats
 
 
-def test_only_built_in_actions_both_platforms_have(actions):
-    kinds = {sh.ident(a) for a in actions}
-    assert all(k.startswith(BUILT_IN) for k in kinds), kinds
-    assert not {k.removeprefix(BUILT_IN) for k in kinds} & MAC_ONLY
+def test_only_built_in_actions(actions):
+    assert all(sh.ident(a).startswith(BUILT_IN) for a in actions)
+
+
+def test_mac_only_actions_run_only_on_a_mac(actions):
+    # Run AppleScript and Run Shell Script (the Mac's route from Photos) sit
+    # in the branch of the If on Device Model "^Mac", or in the cleanup that
+    # only that route reaches (From Photos); the iPhone never runs them.
+    (mac,) = [
+        a
+        for a in of(actions, 'text.match')
+        if sh.params(a)['WFMatchTextPattern'] == '^Mac'
+    ]
+    on_mac = dict(
+        (id(a), inside)
+        for a, inside in sh.inside_if_on(actions, sh.params(mac)['UUID'])
+    )
+    from_photos = dict(
+        (id(a), inside)
+        for a, inside in sh.inside_if_on(actions, 'From Photos')
+    )
+    mac_only = [
+        a for a in actions if sh.ident(a).removeprefix(BUILT_IN) in MAC_ONLY
+    ]
+    # probe, the work folder, export, stage, and the cleanup after saving and
+    # before "Nothing to stack"
+    assert len(mac_only) == 6
+    for action in mac_only:
+        assert on_mac[id(action)] or from_photos[id(action)], action
+
+
+def test_applescripts_are_plain_text(gen, actions):
+    # A Shortcuts variable inside a Run AppleScript's text keeps it from
+    # compiling; the export's input is the work folder.
+    scripts = of(actions, 'runapplescript')
+    assert [sh.params(a)['Script'] for a in scripts] == [
+        gen.applescript('probe'),
+        gen.applescript('export'),
+    ]
+    assert 'Input' not in sh.params(scripts[0])
+    assert 'Input' in sh.params(scripts[1])
+
+
+def test_applescripts_compile(gen, tmp_path):
+    # osacompile reads Photos' dictionary without launching it.
+    import shutil
+    import subprocess
+
+    sh.need(shutil.which('osacompile'), 'osacompile is needed')
+    for name in ('probe', 'export'):
+        src = tmp_path / f'{name}.applescript'
+        src.write_text(gen.applescript(name))
+        result = subprocess.run(
+            ['osacompile', '-o', str(src.with_suffix('.scpt')), str(src)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, (name, result.stderr)
 
 
 def test_note(gen, actions):
@@ -73,12 +129,16 @@ def test_surfaces(gen, actions):
 
 
 def test_picker_shows_images_only(actions):
-    (picker,) = of(actions, 'selectphoto')
-    assert sh.params(picker) == {
-        'WFSelectMultiplePhotos': True,
-        'WFPhotoPickerTypes': ['Images'],
-        'UUID': sh.params(picker)['UUID'],
-    }
+    # with no input on an iPhone, or on a Mac with nothing selected in Photos
+    pickers = of(actions, 'selectphoto')
+    assert len(pickers) == 2
+    for picker in pickers:
+        p = dict(sh.params(picker))
+        del p['UUID']
+        assert p == {
+            'WFSelectMultiplePhotos': True,
+            'WFPhotoPickerTypes': ['Images'],
+        }
 
 
 def test_photos_resized_only_as_png(actions):

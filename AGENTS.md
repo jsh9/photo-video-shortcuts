@@ -39,9 +39,11 @@ Apple Shortcuts that compress photos and videos, with the encoders they run:
 - **Compress Videos** (`shortcuts/compress-videos/`): Mac only for now; ffmpeg
   plus `vidmeta` (C) for the metadata.
 - **Stack Photos** (`shortcuts/stack-photos/`): one shortcut for iPhone and Mac
-  made of Shortcuts' own actions only (no encoder, no a-Shell, no scripts). It
-  stacks photos and writes the stack's date into its JPEG's EXIF through Base64
-  Encode, Replace Text and Base64 Decode.
+  made of Shortcuts' own actions (no encoder, no a-Shell). It stacks photos and
+  writes the stack's date into its JPEG's EXIF through Base64 Encode, Replace
+  Text and Base64 Decode. On the Mac only, Run AppleScript and Run Shell Script
+  get the photos selected in Photos (`scripts/mac/`), which Photos' Share menu
+  doesn't hand to a shortcut there.
 
 The `.shortcut` files are **generated** by Python
 (`shortcuts/<name>/scripts/build_*.py`, on top of `lib/wfkit.py`), never edited

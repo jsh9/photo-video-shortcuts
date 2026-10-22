@@ -14,6 +14,7 @@ ______________________________________________________________________
 - [1. How it works](#1-how-it-works)
   - [1.1. The image steps](#11-the-image-steps)
   - [1.2. The date](#12-the-date)
+  - [1.3. On the Mac: Photos' selection](#13-on-the-mac-photos-selection)
 - [2. Layout](#2-layout)
 - [3. Building](#3-building)
 - [4. Releasing a new version](#4-releasing-a-new-version)
@@ -27,7 +28,9 @@ ______________________________________________________________________
 ```
 Stack Photos                                 (shortcut, iPhone and Mac)
    photos: the shortcut's input (share sheet; Finder Quick Action or Services
-   on the Mac), else its photo picker (images only)
+   on the Mac); with none, on a Mac (Get Device Details: Device Model "Mac")
+   whose Photos is in front with a selection, that selection (1.3); else its
+   photo picker (images only)
    keeps the images: an item whose Media Type is Video or Audio goes into
    Skipped; none left: "Nothing to stack" and stop
    three menus: direction, aspect ratio (A:B, or Keep), and Pad or Crop
@@ -46,16 +49,22 @@ Stack Photos                                 (shortcut, iPhone and Mac)
            ((TW-w')/2, (TH-h')/2), rounded down
    Combine Images (Horizontally or Vertically, no spacing) → a PNG
    Convert Image to JPEG, quality 0.9
-   the date: each photo's Date Taken; the latest = the first + the largest
-   Get Time Between Dates (seconds) from the first; + 5 s (Adjust Date);
-   none: Current Date. Format Date, ISO 8601 with the time
+   the date (the Mac route's ISO, if it has one; else): each photo's Date
+   Taken; the latest = the first + the largest Get Time Between Dates
+   (seconds) from the first; + 5 s (Adjust Date); none: Current Date. Format
+   Date, ISO 8601 with the time
    the EXIF segment with that date written into the JPEG (1.2)
    Set Name "<first photo's name>-stack.jpg", Save to Photo Album (Recents)
+   the Mac route's copies removed from iCloud Drive
    a notification: how many photos, the stack's size, what was skipped
 ```
 
-Only built-in actions that the iPhone and the Mac both have are used; no Run
-Shell Script, no AppleScript, no a-Shell.
+Only built-in actions, and no a-Shell. Run AppleScript and Run Shell Script
+(the Mac route, 1.3) run only on a Mac: an If on Get Device Details' Device
+Model ("Mac" on the Mac in every language checked; "iPhone" on an iPhone) comes
+first. iOS has no such actions, and an action it doesn't have fails only when
+it runs (WorkflowKit's `WFMissingAction`); the iPhone's editor shows them as
+Unknown Action.
 
 ### 1.1. The image steps
 
@@ -130,12 +139,51 @@ The latest date: Get Time Between Dates from the first photo's date to each in
 seconds, the largest, plus 5, added to the first date. The first date's own
 precision cancels out.
 
+### 1.3. On the Mac: Photos' selection
+
+On the Mac, Photos' Share menu hands a shortcut its photos as files in a folder
+the Shortcuts extension may not read, so Shortcut Input is empty (Compress
+Photos' spike S5; seen again on macOS 27 in the unified log: the run request
+has input, 4 items, and the If finds none). No input class changes that. So,
+with no input on a Mac:
+
+```
+Run AppleScript lib/mac/probe.applescript: Photos in front with a selection?
+   "SELECTION n" → the route below; "ERROR: ..." → a notification, stop;
+   "NONE" → the photo picker
+Run Shell Script: an empty ~/Pictures/.stack-photos-macos (Photos' sandbox
+   reaches ~/Pictures), its path printed without a newline
+Run AppleScript scripts/mac/export.applescript (input: that path): Photos
+   exports each selected item, as it shows it (no "using originals": edits
+   applied, a JPEG for a photo), into in/<n>, one folder per item in the
+   selection's order; returns "n|date" lines, the date on the Mac's clock
+   ("ERROR: ..." → a notification, stop)
+Run Shell Script scripts/mac/stage.zsh (the lines in a heredoc): copies each
+   item's picture to Shortcuts' iCloud Drive folder, stack-photos-macos/n/
+   <name> (Get File reads only there on the Mac, and Photos can't write
+   there), writes list.txt, skipped.txt (items with no picture: videos) and
+   date.txt (the latest date + 5 s, as ISO 8601 with the Mac's offset on that
+   date, by `date -j`), and removes the ~/Pictures folder
+Get File each list.txt path (in order) → Photos; skipped.txt → Skipped;
+   date.txt → ISO, which the date step then uses instead of Get Details'
+```
+
+Photos' AppleScript dates are clock times in the Mac's time zone; `date -j -f`
+reads them with that zone's rules for the date, so a summer photo gets summer
+time's offset. A clock time in the repeated hour at the end of daylight saving
+time is read as the first of the two, and one the clocks skip as an hour later.
+The work folder is emptied at the start of each run, and the iCloud Drive
+copies are removed after saving (and before "Nothing to stack"). Both scripts
+need Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts, and Photos asks
+once whether Shortcuts may control it.
+
 ## 2. Layout
 
 | Path                                | What it is                                                                                   |
 | ----------------------------------- | -------------------------------------------------------------------------------------------- |
 | `VERSION`, `release.json`           | the version; the release's one shortcut (listed under `iphone`; it is the Mac's too)         |
 | `scripts/build_shortcuts.py`        | the generator: the questions, the steps, the EXIF segment and its base64 pieces              |
+| `scripts/mac/`                      | the Mac route's export AppleScript and staging zsh script (and `lib/mac/probe.applescript`)  |
 | `../../lib/wfkit.py`                | the shared builder, with the image, number and date actions                                  |
 | `../../tests/stack-photos/`         | the tests: the shortcut run on a model of Shortcuts, its actions, and ImageIO reading a date |
 | `../../docs/stack-photos-design.md` | decisions and evidence                                                                       |
@@ -152,10 +200,11 @@ It writes `build/shortcuts/Stack Photos.unsigned.wflow` (and a readable
 `dist/Stack Photos.shortcut`. There is no encoder and no sample shortcut.
 
 The tests (`python3 -m pytest tests/stack-photos`) run the shortcut on a model
-of Shortcuts (`shortcut_model.py`) for every direction, ratio and fit, and on
-the Mac compile `imageio.swift` to write a JPEG as Combine and Convert Image do
-and to read the spliced date back with ImageIO (and exiftool). See
-[tests/README.md](../../tests/README.md).
+of Shortcuts (`shortcut_model.py`) for every direction, ratio and fit, and as a
+Mac with the real zsh scripts and a stand-in for Photos' answers; on the Mac
+they compile the AppleScripts against Photos' dictionary and `imageio.swift` to
+write a JPEG as Combine and Convert Image do and to read the spliced date back
+with ImageIO (and exiftool). See [tests/README.md](../../tests/README.md).
 
 ## 4. Releasing a new version
 

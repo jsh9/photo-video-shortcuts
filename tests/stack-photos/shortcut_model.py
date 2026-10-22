@@ -19,6 +19,11 @@ base64 for real. What each action does is modeled on its decompiled code
   a zero offset, in the device's time zone.
 - A text field holding only a variable passes the variable's value (a date
   stays a date).
+- The Mac's route: Get Device Details' Device Model is "Mac" or "iPhone"; Run
+  AppleScript's answers come from the test (Photos can't be scripted here);
+  Run Shell Script runs the real script with zsh, in a pretend home folder;
+  Get File reads below that home's Shortcuts folder in iCloud Drive, an image
+  as its size (Pillow), a text file as bytes.
 
 The image steps also check what the shortcut must never do: draw outside an
 image, distort it, or (with ``strict``) enlarge a photo.
@@ -27,7 +32,9 @@ image, distort it, or (with ``strict``) enlarge a photo.
 import base64
 import datetime as dt
 import io
+import os
 import re
+import subprocess
 from dataclasses import dataclass, replace
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal, getcontext
 
@@ -65,7 +72,9 @@ class Shortcuts:
     """
     Runs ``actions`` with ``shortcut_input`` (None: started in the Shortcuts
     app), the photos the picker returns, the menu ``answers`` in order, the
-    JPEG bytes Convert Image writes, and the device's time zone and clock.
+    JPEG bytes Convert Image writes, and the device's time zone and clock. On a
+    Mac (``device``), ``applescript(script, input)`` answers Run AppleScript,
+    scripts run with HOME ``home`` and TZ ``tz_name``.
     """
 
     def __init__(
@@ -77,6 +86,10 @@ class Shortcuts:
             jpeg=b'',
             tz=dt.timezone(dt.timedelta(hours=-4)),
             now=dt.datetime(2026, 10, 22, 12, 0, 0, tzinfo=dt.UTC),
+            device='iPhone',
+            applescript=None,
+            home=None,
+            tz_name='America/New_York',
     ):
         self.actions = actions
         self.shortcut_input = shortcut_input
@@ -85,6 +98,12 @@ class Shortcuts:
         self.jpeg = jpeg
         self.tz = tz
         self.now = now
+        self.device = device
+        self.applescript = applescript
+        self.home = home
+        self.tz_name = tz_name
+        self.scripts = []  # (kind, text) of each script run
+        self.pickers = 0  # how many times the photo picker was shown
         self.variables, self.outputs = {}, {}
         self.menus, self.notifications, self.saved = [], [], []
         self.resized, self.cropped, self.overlaid, self.combined = (
@@ -170,6 +189,7 @@ class Shortcuts:
         )
 
     def do_selectphoto(self, p, repeats):
+        self.pickers += 1
         return list(self.picked)
 
     def do_properties_images(self, p, repeats):
@@ -281,6 +301,60 @@ class Shortcuts:
 
     def do_exit(self, p, repeats):
         raise Stopped
+
+    def do_getdevicedetails(self, p, repeats):
+        assert p['WFDeviceDetail'] == 'Device Model'
+        return self.device
+
+    def do_runapplescript(self, p, repeats):
+        assert self.device == 'Mac', 'Run AppleScript on an iPhone'
+        assert isinstance(p['Script'], str)  # plain text, or it won't compile
+        given = (
+            as_list(self.value(p['Input'], repeats)) if 'Input' in p else []
+        )
+        self.scripts.append(('applescript', p['Script']))
+        return self.applescript(p['Script'], given)
+
+    def do_runshellscript(self, p, repeats):
+        assert self.device == 'Mac', 'Run Shell Script on an iPhone'
+        assert p['Shell'] == '/bin/zsh' and 'Input' not in p
+        script = self.text(p['Script'], repeats)
+        self.scripts.append(('shell', script))
+        env = {'HOME': str(self.home), 'TZ': self.tz_name, 'PATH': os.defpath}
+        result = subprocess.run(
+            ['/bin/zsh', '-c', script], env=env, capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    def do_documentpicker_open(self, p, repeats):
+        assert p['WFFileStorageService'] == 'iCloud Drive'
+        assert p['WFShowFilePicker'] is False
+        path = self.text(p['WFGetFilePath'], repeats)
+        file = self.home / ICLOUD_SHORTCUTS / path
+        if not file.is_file():
+            assert not p['WFFileErrorIfNotFound'], f'no {path}'
+            return None
+
+        if file.suffix.lower() == '.txt':
+            return File(file.read_bytes(), name=file.stem)
+
+        with PIL.Image.open(file) as image:
+            width, height = image.size
+
+        kind = {'.jpeg': 'jpeg', '.jpg': 'jpeg', '.png': 'png'}.get(
+            file.suffix.lower(), 'heic'
+        )
+        return Img(width, height, kind=kind, name=file.stem)
+
+    def do_detect_text(self, p, repeats):
+        value = self.value(p['WFInput'], repeats)
+        return '' if value is None else one(value).data.decode()
+
+    def do_text_split(self, p, repeats):
+        assert p['WFTextSeparator'] == 'New Lines'
+        # its input is a variable, as in Compress Photos' Split Text
+        return one(self.value(p['text'], repeats)).split('\n')
 
     def do_base64encode(self, p, repeats):
         assert p['WFBase64LineBreakMode'] == 'None'
@@ -451,6 +525,12 @@ class Shortcuts:
         number = self.number(field, repeats)
         assert number == number.to_integral_value(), number  # whole pixels
         return int(number)
+
+
+# Shortcuts' own folder in iCloud Drive, where Get File reads on the Mac
+ICLOUD_SHORTCUTS = (
+    'Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents'
+)
 
 
 def as_list(value):

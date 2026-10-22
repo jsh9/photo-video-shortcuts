@@ -28,14 +28,25 @@ one aspect ratio (horizontal: 3:4, 2:3, 9:16, 4:5; vertical: 4:3, 3:2, 16:9,
 that all have the smallest height (horizontal) or width (vertical); save to
 Photos dated 5 seconds after the latest photo. Without a-Shell or Terminal, and
 on iPhone and Mac alike: if either was impossible, stop and say so. Neither
-was.
+was, but the Mac needed scripts for one thing (2, the Mac route).
 
 ## 2. Decisions
 
-- **Shortcuts' own actions only**, one shortcut for both platforms: Get Details
-  of Images, Convert, Resize, Crop, Overlay and Combine Images, Calculate,
+- **Shortcuts' own actions**, one shortcut for both platforms: Get Details of
+  Images, Convert, Resize, Crop, Overlay and Combine Images, Calculate,
   Calculate Statistics, Round Number, the date actions, Base64 Encode, Replace
-  Text, Save to Photo Album. None of them is Mac-only (a test checks).
+  Text, Save to Photo Album.
+- **The Mac route (decided with the user, 2026-10-22).** The first version,
+  script-free, showed the picker when run from Photos' Share menu on the Mac,
+  and the user rejected that: no picker. Photos' Share menu hands a shortcut
+  nothing it can read on the Mac (Compress Photos' spike S5, and the unified
+  log of the user's run on macOS 27: input passed, Shortcut Input empty), so
+  the only way to Photos' selection is AppleScript. Offered one shortcut with a
+  Mac-only branch, a separate Mac shortcut, or no scripts (no Share menu on the
+  Mac), the user chose one shortcut. The branch (Run AppleScript and Run Shell
+  Script) runs only when Get Device Details says "Mac"; it needs Allow Running
+  Scripts on the Mac. With no selection in Photos (run from the Shortcuts app),
+  the Mac still shows the picker.
 - **A fourth ratio choice, *Keep each photo as it is*,** stacks the photos with
   their own shapes, resized only.
 - **Pad color: white**, the usual border for stacked photos. A 1x1 white PNG,
@@ -114,10 +125,18 @@ shortcut on the Mac takes a click. So:
 
 ## 5. To check on a device
 
+- The Mac route from Photos' Share menu: no picker; Photos' export of each
+  selected item (the AppleScript compiles against Photos' dictionary, but
+  Photos couldn't be scripted from the session, error -1743), the order, and
+  the date Photos shows for the stack.
+
 - A stack from the iPhone's share sheet and from the picker, on the iPhone and
   the Mac: the questions, the sizes, the white borders and the crops, and the
   date and time Photos shows for the stack (5 s after the latest photo).
+
 - How large a stack the share sheet can make before iOS's memory limit.
+
 - That Convert Image's JPEG starts as on the Mac (else the fallback writes the
   date after SOI, which works too, with ImageIO's segment kept).
+
 - The order in which Photos' share sheet passes the selected photos.

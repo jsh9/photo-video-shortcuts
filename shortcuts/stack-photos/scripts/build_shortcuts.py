@@ -2,25 +2,29 @@
 """
 Generates the shortcut "Stack Photos" as a signed .shortcut file.
 
-One shortcut for iPhone and Mac, made of Shortcuts' own actions only: no
-a-Shell, no scripts. It puts photos side by side (Horizontal) or one above the
-other (Vertical). Each photo is first fitted to one aspect ratio (padded with
-white, or cropped around its center), or kept as it is; then all are resized to
-the height (Horizontal) or the width (Vertical) of the smallest, and combined.
-The stack is saved to Photos as a JPEG dated 5 seconds after the latest photo.
-No action sets a date, so the shortcut writes it into the JPEG's EXIF itself,
-as base64 text (exif_segment, prefix_pieces; see ../DEVELOPING.md).
+One shortcut for iPhone and Mac, made of Shortcuts' own actions, with no
+a-Shell; on the Mac only, two scripts (Run AppleScript, Run Shell Script) get
+the photos selected in Photos, which Photos' Share menu doesn't hand to a
+shortcut there (see SHARED). It puts photos side by side (Horizontal) or one
+above the other (Vertical). Each photo is first fitted to one aspect ratio
+(padded with white, or cropped around its center), or kept as it is; then all
+are resized to the height (Horizontal) or the width (Vertical) of the smallest,
+and combined. The stack is saved to Photos as a JPEG dated 5 seconds after the
+latest photo. No action sets a date, so the shortcut writes it into the JPEG's
+EXIF itself, as base64 text (exif_segment, prefix_pieces; see
+../DEVELOPING.md).
 
 The generic builder (text and variable encoding, built-in actions, writing and
 signing the file) is lib/wfkit.py, shared with the other shortcuts.
 
 Usage::
 
-    build_shortcuts.py[--no - sign]
+    python3 build_shortcuts.py [--no-sign]
 """
 
 import argparse
 import base64
+import re
 import struct
 import sys
 from pathlib import Path
@@ -69,6 +73,26 @@ CROP = 'Crop: cut the sides, keep the center'
 QUALITY = 0.9
 SUFFIX = '-stack'  # the stack's name: the first photo's, with this
 DELAY = 5  # seconds after the latest photo's date
+
+# The Mac's route from Photos (choose_photos). On the Mac, Photos' Share menu
+# hands a shortcut its photos as files in a folder the Shortcuts extension
+# may not read, so Shortcut Input is empty (seen again on macOS 27: 4 items
+# passed, none received). So when started with no input on a Mac, the
+# shortcut asks Photos for its selection with Run AppleScript, as Compress
+# Photos (macOS) does: Photos exports each selected item into WORK (its
+# sandbox reaches ~/Pictures), and Run Shell Script copies them into
+# Shortcuts' iCloud Drive folder, the one place Get File reads on the Mac.
+# Both actions need Shortcuts > Settings > Advanced > Allow Running Scripts;
+# the iPhone never runs them (Get Device Details decides; iOS would fail an
+# action it doesn't have only when it runs: WorkflowKit's WFMissingAction).
+LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
+MAC = HERE / 'mac'
+WORK = '"$HOME/Pictures/.stack-photos-macos"'
+SHARED_NAME = 'stack-photos-macos'  # Get File's paths start with it
+SHARED = (
+    '"$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/'
+    f'Documents/{SHARED_NAME}"'
+)
 
 # A 1x1 white PNG (RGB, no alpha), stretched to the tile's size as the pad
 # canvas: Core Graphics keeps a stretched pixel's color to the edges, white
@@ -221,6 +245,136 @@ class Builder(wfkit.Builder):
 
     def set_text(self, name, value):
         self.set_variable(name, self.text(value))
+
+
+def applescript(name):
+    """
+    The Mac route's AppleScripts, with @NAME@ filled in: probe (is Photos in
+    front with items selected? lib/mac's, shared with the other Mac shortcuts)
+    and export (scripts/mac).
+    """
+    folder = LIB_MAC if name == 'probe' else MAC
+    return wfkit.applescript_text(folder / f'{name}.applescript', NAME=NAME)
+
+
+def stage_script(lines):
+    """
+    scripts/mac/stage.zsh as Run Shell Script's text parts: the text, with
+    ``lines`` (the export's result) at @LINES@.
+    """
+    text = (MAC / 'stage.zsh').read_text()
+    for placeholder, value in {
+        '@NAME@': NAME,
+        '@WORK@': WORK,
+        '@SHARED@': SHARED,
+        '@DELAY@': str(DELAY),
+    }.items():
+        text = text.replace(placeholder, value)
+
+    before, after = text.split('@LINES@')
+    assert not re.findall('@[A-Z_]+@', before + after)
+    return before, lines, after
+
+
+def choose_photos(b):
+    """
+    The variable Photos: the shortcut's input (the iPhone's share sheet;
+    Finder's Quick Actions on the Mac); with none, on a Mac, the items selected
+    in Photos when it is in front (the Share menu: see SHARED); else the photo
+    picker (the Shortcuts app, or nothing selected in Photos). The Mac route
+    also sets From Photos, and ISO and Skipped when it has them.
+    """
+
+    def picker():
+        b.set_variable('Photos', b.select_photos())
+
+    def on_mac():
+        probe = b.run_applescript(applescript('probe'))
+        b.if_has_value(
+            b.match_text(probe, '^SELECTION'),
+            lambda: from_photos(b),
+            lambda: b.if_has_value(
+                b.match_text(probe, '^ERROR'),
+                lambda: fail(b, probe),
+                picker,
+            ),
+        )
+
+    def no_input():
+        b.if_has_value(
+            b.match_text(b.device_detail('Device Model'), '^Mac'),
+            on_mac,
+            picker,
+        )
+
+    b.if_has_value(
+        SHORTCUT_INPUT,
+        lambda: b.set_variable('Photos', SHORTCUT_INPUT),
+        no_input,
+    )
+
+
+def from_photos(b):
+    """
+    Photos' selection, on the Mac: an empty work folder (its path is the
+    export's input, printed without a newline), Photos' export
+    (export.applescript), stage.zsh, then each listed picture read with Get
+    File into Photos, in the selection's order; the items with no picture
+    (videos) into Skipped; date.txt, the latest date plus DELAY seconds as ISO
+    8601 text, into ISO.
+    """
+    work = b.run_shell_script(
+        f'W={WORK}; rm -rf "$W"; mkdir -p "$W/in"; printf "%s" "$W"'
+    )
+    lines = b.run_applescript(applescript('export'), input_ref=work)
+    b.if_has_value(
+        b.match_text(lines, '^ERROR'), lambda: fail(b, lines), lambda: None
+    )
+    b.run_shell_script(*stage_script(lines))
+    b.set_text('From Photos', 'yes')
+
+    def read(name):
+        return b.text_from_input(
+            b.get_file_from_shortcuts_folder(f'{SHARED_NAME}/{name}')
+        )
+
+    names = read('list.txt')
+    b.if_has_value(
+        names,
+        lambda: b.repeat_each(
+            b.split(names, '\n'),
+            lambda: b.append_variable(
+                'Photos',
+                b.get_file_from_shortcuts_folder(
+                    f'{SHARED_NAME}/', REPEAT_ITEM, error_if_missing=True
+                ),
+            ),
+        ),
+        lambda: None,
+    )
+    skipped = read('skipped.txt')
+    b.if_has_value(
+        skipped,
+        lambda: b.append_variable('Skipped', b.split(skipped, '\n')),
+        lambda: None,
+    )
+    iso = read('date.txt')
+    b.if_has_value(iso, lambda: b.set_variable('ISO', iso), lambda: None)
+
+
+def fail(b, message):
+    """A notification with ``message`` (a script's "ERROR: ..."), and stop."""
+    b.notification(NAME, message)
+    b.stop()
+
+
+def clean_up(b):
+    """The Mac route's copies in iCloud Drive go once they are not needed."""
+    b.if_has_value(
+        variable('From Photos'),
+        lambda: b.run_shell_script(f'rm -rf {SHARED}'),
+        lambda: None,
+    )
 
 
 def choose_shape(b):
@@ -482,13 +636,13 @@ def stack_date(b, stills):
     )
 
 
-def dated_jpeg(b, jpeg):
+def dated_jpeg(b, jpeg, iso):
     """
-    The variable Dated: ``jpeg`` with the EXIF segment carrying When (see
-    exif_segment), or ``jpeg`` itself, and the variable Undated set, if When's
-    text isn't the expected ISO 8601.
+    The variable Dated: ``jpeg`` with the EXIF segment carrying the date
+    ``iso`` (ISO 8601 text: Format Date's, or the Mac route's; see
+    exif_segment), or ``jpeg`` itself, and the variable Undated set, if that
+    text isn't the expected shape.
     """
-    iso = b.format_date(variable('When'))
 
     def write():
         date = b.replace_text(iso, *ISO_TO_EXIF)
@@ -517,7 +671,9 @@ def dated_jpeg(b, jpeg):
 
     def undated():
         b.set_variable('Dated', jpeg)
-        b.set_text('Undated', ' It has no date: Format Date gave an odd text.')
+        b.set_text(
+            'Undated', " It has no date: the date's text was an odd one."
+        )
 
     b.if_has_value(b.match_text(iso, ISO_PATTERN), write, undated)
 
@@ -530,20 +686,20 @@ def build(sample):
         'aspect ratio (white borders or a centered crop) or kept as it is, '
         'all as high (or as wide) as the smallest, and saves the stack to '
         'Photos as a JPEG dated 5 seconds after the latest photo. Only '
-        "Shortcuts' own actions: it runs on iPhone and Mac. From the share "
-        'sheet (iPhone) or Finder (Mac) it stacks the shared photos; started '
-        'any other way it shows a photo picker. Help: '
+        "Shortcuts' own actions, plus on the Mac two scripts that get the "
+        "photos selected in Photos (Photos' Share menu gives a shortcut "
+        'none): turn on Shortcuts > Settings > Advanced > Allow Running '
+        'Scripts. It stacks the photos from the share sheet (iPhone), the '
+        'photos selected in Photos (Mac) or Finder (Mac); otherwise it shows '
+        'a photo picker. Help: '
         f'{HELP_URL}'
     )
-    b.if_has_value(
-        SHORTCUT_INPUT,
-        lambda: b.set_variable('Photos', SHORTCUT_INPUT),
-        lambda: b.set_variable('Photos', b.select_photos()),
-    )
+    choose_photos(b)
     keep_images(b, variable('Photos'))
     stills = variable('Stills')
 
     def nothing_to_stack():
+        clean_up(b)
         b.notification(NAME, 'Nothing to stack: no photos were given.')
         b.stop()
 
@@ -562,10 +718,17 @@ def build(sample):
     )
     stack = variable('Stack')
     jpeg = b.convert_image(stack, 'JPEG', QUALITY)
-    stack_date(b, stills)
-    dated_jpeg(b, jpeg)
+
+    def date_from_details():
+        stack_date(b, stills)
+        b.set_variable('ISO', b.format_date(variable('When')))
+
+    # the Mac route's date is Photos' own, else Get Details' (iPhone, Finder)
+    b.if_has_value(variable('ISO'), lambda: None, date_from_details)
+    dated_jpeg(b, jpeg, variable('ISO'))
     first = b.get_name(b.item_from_list(stills, 'First Item'))
     b.save_to_photos(b.set_name(variable('Dated'), first, SUFFIX, '.jpg'))
+    clean_up(b)
     b.if_has_value(
         variable('Skipped'),
         lambda: b.set_variable(
@@ -592,8 +755,8 @@ def build(sample):
 def stack_workflow(sample, actions):
     """
     The share sheet (iPhone; the Mac's Share menu, which gives no photos from
-    Photos: the picker then), and on the Mac Finder's Quick Actions and the
-    Services menu, with image files.
+    Photos: the selection route then), and on the Mac Finder's Quick Actions
+    and the Services menu, with image files.
     """
     return workflow(
         sample,

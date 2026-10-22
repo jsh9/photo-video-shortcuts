@@ -16,6 +16,7 @@ from shortcut_helpers import (  # noqa: E402, F401
     OBJ,
     compile_swift,
     ident,
+    inside_if_on,
     need,
     params,
     references,

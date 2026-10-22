@@ -695,6 +695,17 @@ class Builder:
         )
         return output_of(a, 'Adjusted Date')
 
+    def device_detail(self, name):
+        """
+        Get Device Details: ``name``. Device Model is the device's
+        localizedModel: "iPhone", "iPad", or "Mac" (on the Mac in every
+        language checked: English, Chinese, Japanese).
+        """
+        a = self.add(
+            'is.workflow.actions.getdevicedetails', {'WFDeviceDetail': name}
+        )
+        return output_of(a, 'Device Details')
+
     def current_date(self):
         a = self.add(
             'is.workflow.actions.date', {'WFDateActionMode': 'Current Date'}

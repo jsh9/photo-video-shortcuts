@@ -6,8 +6,9 @@ after the latest of them, so it sorts right after them. Each photo can first be
 fitted to one aspect ratio, with white borders or by cutting off its sides. The
 originals are left as they are.
 
-It is one shortcut for iPhone and Mac, made of Shortcuts' own actions only: no
-a-Shell, no Terminal, no scripts to allow.
+It is one shortcut for iPhone and Mac, made of Shortcuts' own actions: no
+a-Shell, no Terminal. On the Mac it asks Photos for the photos you selected
+with a short AppleScript, so Shortcuts must be allowed to run scripts there.
 
 <!--TOC-->
 
@@ -33,22 +34,28 @@ ______________________________________________________________________
    `stack-photos-shortcuts-v<version>.zip` (the same file for iPhone and Mac),
    unzip it, and open *Stack Photos* → Add Shortcut. With iCloud sync on for
    Shortcuts, it then shows up on your other devices too.
-2. **Grant permissions.** Run it once from the Shortcuts app with two photos,
-   and allow it to access Photos when asked.
+2. **Mac only: allow scripts.** Shortcuts ▸ Settings ▸ Advanced ▸ **Allow
+   Running Scripts** (already on if you use Compress Photos or Compress Videos
+   on the Mac). Photos' Share menu gives a shortcut no photos on the Mac, so
+   the shortcut asks Photos for its selection with AppleScript.
+3. **Grant permissions.** Run it once with two photos and allow it to access
+   Photos when asked. On the Mac, the first time you run it from Photos, macOS
+   asks whether Shortcuts may control Photos: choose Allow.
 
 ## 2. Use
 
 - **iPhone:** in Photos, select the photos, tap Share ▸ *Stack Photos*. Or run
   it from the Shortcuts app and pick the photos in its photo picker.
-- **Mac:** run it from the Shortcuts app or the menu bar and pick the photos in
-  its photo picker. Photos' Share menu gives a shortcut no photos on macOS 26,
-  so from there the picker shows up too. In Finder, select image files,
-  right-click ▸ Quick Actions ▸ *Stack Photos*.
+- **Mac:** in Photos, select the photos, then Share ▸ *Stack Photos* (or
+  right-click ▸ Share). Photos exports them as it shows them (with your edits)
+  for the shortcut; there is no picker. Run from the Shortcuts app or the menu
+  bar while Photos has no selection in front, it shows its photo picker. In
+  Finder, select image files, right-click ▸ Quick Actions ▸ *Stack Photos*.
 
 The photos are stacked in the order the shortcut gets them: the order you
-picked them in its picker; from the share sheet, the order Photos passes them.
-Videos are skipped (the notification says how many); a Live Photo is stacked as
-its still photo.
+selected them in Photos on the Mac, or picked them in the picker; from the
+iPhone's share sheet, the order Photos passes them. Videos are skipped (the
+notification says how many); a Live Photo is stacked as its still photo.
 
 ### 2.1. The questions
 
@@ -89,8 +96,10 @@ its still photo.
   lossless PNG until then, so this is their only new compression. There is no
   space between the photos.
 - **Its date** is the latest date among the photos, as Photos shows it, plus 5
-  seconds, in your device's time zone. If no photo has a date (an image from a
-  file without one), it is the time you run the shortcut.
+  seconds, in your device's time zone. (On the Mac, a date in the hour that
+  repeats when daylight saving time ends is read as the first of the two.) If
+  no photo has a date (an image from a file without one), it is the time you
+  run the shortcut.
 - **Not carried over:** location, camera, titles, captions, keywords and
   albums. HDR and wide color (Display P3) aren't kept: Shortcuts' Combine
   Images draws in 8-bit sRGB.
@@ -99,9 +108,16 @@ A notification says how many photos were stacked and the stack's size.
 
 ## 3. Troubleshooting
 
+- **Mac: "Running scripts is not allowed"** or similar: turn on Allow Running
+  Scripts (Install, step 2).
+
+- **Mac: "ERROR: Photos could not be asked..."**: allow Shortcuts to control
+  Photos in System Settings ▸ Privacy & Security ▸ Automation.
+
 - **It stops from the share sheet with a memory error.** iOS gives shortcuts
   run from the share sheet less memory than the Shortcuts app. Run it from the
   Shortcuts app and pick the photos there, or stack fewer photos at a time.
+
 - **"It has no date"** in the notification: the stack was saved, but its date
   couldn't be written (Shortcuts' date text wasn't the expected one), so Photos
   dates it at the time you ran the shortcut. Please report it with your
