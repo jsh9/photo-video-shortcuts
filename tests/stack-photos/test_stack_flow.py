@@ -120,7 +120,9 @@ CASES = [
 
 @pytest.mark.parametrize('direction,ratio,fit', CASES)
 def test_ratio_tiles(gen, actions, jpeg, direction, ratio, fit):
-    result, s = run(actions, gen, [direction, ratio, fit], jpeg=jpeg)
+    result, s = run(
+        actions, gen, sh.answers(gen, direction, ratio, fit), jpeg=jpeg
+    )
     assert result == 'done'
     a, b = (int(n) for n in ratio.split(':'))
     crop = fit == gen.CROP
@@ -174,7 +176,9 @@ def test_ratio_tiles(gen, actions, jpeg, direction, ratio, fit):
     'direction', ['Horizontal: side by side', 'Vertical: one above the other']
 )
 def test_kept_shapes(gen, actions, jpeg, direction):
-    result, s = run(actions, gen, [direction, gen.KEEP], jpeg=jpeg)
+    result, s = run(
+        actions, gen, sh.answers(gen, direction, gen.KEEP), jpeg=jpeg
+    )
     assert result == 'done'
     assert not s.cropped and not s.overlaid
     ((mode, tiles),) = s.combined
@@ -209,7 +213,12 @@ def test_kept_shapes(gen, actions, jpeg, direction):
 
 
 def test_questions(gen, actions, jpeg):
-    _, s = run(actions, gen, [gen.HORIZONTAL, '3:4', gen.PAD], jpeg=jpeg)
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, '3:4', gen.PAD),
+        jpeg=jpeg,
+    )
     assert s.menus == [
         ('Stack the photos', [gen.HORIZONTAL, gen.VERTICAL]),
         (
@@ -217,15 +226,34 @@ def test_questions(gen, actions, jpeg):
             ['3:4', '2:3', '9:16', '4:5', gen.KEEP],
         ),
         ('Fit each photo to 3:4', [gen.PAD, gen.CROP]),
+        (
+            'Height of the photos',
+            ["Height: the smallest photo's", 'Height: type it in pixels'],
+        ),
+        (
+            "Gap between the photos (of a photo's width)",
+            ['No gap', '2%', '5%', '10%', '15%'],
+        ),
     ]
-    _, s = run(actions, gen, [gen.VERTICAL, gen.KEEP], jpeg=jpeg)
+    _, s = run(
+        actions, gen, sh.answers(gen, gen.VERTICAL, gen.KEEP), jpeg=jpeg
+    )
     assert s.menus == [
         ('Stack the photos', [gen.HORIZONTAL, gen.VERTICAL]),
         (
             'Aspect ratio of each photo',
             ['4:3', '3:2', '16:9', '5:4', gen.KEEP],
         ),
+        (
+            'Width of the photos',
+            ["Width: the smallest photo's", 'Width: type it in pixels'],
+        ),
+        (
+            "Gap between the photos (of a photo's height)",
+            ['No gap', '2%', '5%', '10%', '15%'],
+        ),
     ]  # nothing to fit
+    assert not s.asked  # the smallest photo's: nothing to type
 
 
 @pytest.mark.parametrize('start', ['share sheet', 'Shortcuts app'])
@@ -236,7 +264,7 @@ def test_saved_with_the_date(gen, actions, jpeg, start, tz):
     result, s = run(
         actions,
         gen,
-        [gen.VERTICAL, '4:3', gen.CROP],
+        sh.answers(gen, gen.VERTICAL, '4:3', gen.CROP),
         start=start,
         jpeg=jpeg,
         tz=tz,
@@ -264,7 +292,9 @@ def test_saved_with_the_date(gen, actions, jpeg, start, tz):
 
 def test_imageio_segment_renamed(gen, actions, jpeg):
     # ImageIO's own EXIF segment becomes APP15: one EXIF segment in the file.
-    _, s = run(actions, gen, [gen.HORIZONTAL, gen.KEEP], jpeg=jpeg)
+    _, s = run(
+        actions, gen, sh.answers(gen, gen.HORIZONTAL, gen.KEEP), jpeg=jpeg
+    )
     data = s.saved[0].data
     markers = []
     i = 2
@@ -287,7 +317,12 @@ def test_other_jpeg_start_still_dated(gen, actions):
     assert not other.startswith(
         bytes.fromhex('ffd8ffe000104a46494600010100004800480000')
     )
-    _, s = run(actions, gen, [gen.HORIZONTAL, '2:3', gen.PAD], jpeg=other)
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, '2:3', gen.PAD),
+        jpeg=other,
+    )
     data = s.saved[0].data
     assert data[2:4] == b'\xff\xe1'
     when, offset = expected_date(LATEST + dt.timedelta(seconds=5), NEW_YORK)
@@ -305,7 +340,7 @@ def test_no_dates_uses_now(gen, actions, jpeg):
     _, s = run(
         actions,
         gen,
-        [gen.HORIZONTAL, '4:5', gen.CROP],
+        sh.answers(gen, gen.HORIZONTAL, '4:5', gen.CROP),
         photos=undated,
         jpeg=jpeg,
         now=now,
@@ -324,7 +359,7 @@ def test_one_photo(gen, actions, jpeg):
     result, s = run(
         actions,
         gen,
-        [gen.HORIZONTAL, '4:5', gen.PAD],
+        sh.answers(gen, gen.HORIZONTAL, '4:5', gen.PAD),
         photos=[single],
         jpeg=jpeg,
     )
@@ -338,7 +373,7 @@ def test_videos_skipped(gen, actions, jpeg):
     result, s = run(
         actions,
         gen,
-        [gen.HORIZONTAL, gen.KEEP],
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP),
         photos=[*PHOTOS[:2], video],
         jpeg=jpeg,
     )
@@ -361,7 +396,9 @@ def test_odd_date_text_saves_undated(gen, actions, jpeg, monkeypatch):
     monkeypatch.setattr(
         sm.Shortcuts, 'iso', lambda self, date: '2026-05-02T07:16:04.250+09:00'
     )
-    _, s = run(actions, gen, [gen.HORIZONTAL, gen.KEEP], jpeg=jpeg)
+    _, s = run(
+        actions, gen, sh.answers(gen, gen.HORIZONTAL, gen.KEEP), jpeg=jpeg
+    )
     assert s.saved[0].data == jpeg
     assert 'It has no date' in s.notifications[0]
 
@@ -374,12 +411,12 @@ def test_rounding_never_enlarges(gen, actions, jpeg):
         photo('C', 997, 1301),
     ]
     for answers in (
-        [gen.HORIZONTAL, '9:16', gen.PAD],
-        [gen.HORIZONTAL, '9:16', gen.CROP],
-        [gen.VERTICAL, '16:9', gen.PAD],
-        [gen.VERTICAL, '16:9', gen.CROP],
-        [gen.HORIZONTAL, gen.KEEP],
-        [gen.VERTICAL, gen.KEEP],
+        sh.answers(gen, gen.HORIZONTAL, '9:16', gen.PAD),
+        sh.answers(gen, gen.HORIZONTAL, '9:16', gen.CROP),
+        sh.answers(gen, gen.VERTICAL, '16:9', gen.PAD),
+        sh.answers(gen, gen.VERTICAL, '16:9', gen.CROP),
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP),
+        sh.answers(gen, gen.VERTICAL, gen.KEEP),
     ):
         result, s = run(actions, gen, answers, photos=odd, jpeg=jpeg)
         assert result == 'done'
@@ -394,7 +431,189 @@ def test_no_stack_says_so(gen, actions, jpeg, monkeypatch):
     monkeypatch.setattr(
         sm.Shortcuts, 'do_image_combine', lambda self, p, r: None
     )
-    result, s = run(actions, gen, [gen.HORIZONTAL, gen.KEEP], jpeg=jpeg)
+    result, s = run(
+        actions, gen, sh.answers(gen, gen.HORIZONTAL, gen.KEEP), jpeg=jpeg
+    )
     assert result == 'stopped'
     assert s.notifications == [gen.NO_STACK]
     assert not s.saved
+
+
+# The size typed in, and the gap
+
+
+@pytest.mark.parametrize(
+    'direction,ratio,fit,typed,tile',
+    [
+        # a ratio: the other side follows, rounded
+        (
+            'Horizontal: side by side',
+            '3:4',
+            'Crop: cut the sides, keep the center',
+            1000,
+            (750, 1000),
+        ),
+        (
+            'Horizontal: side by side',
+            '9:16',
+            'Pad: add white borders',
+            1001,
+            (563, 1001),
+        ),
+        (
+            'Vertical: one above the other',
+            '16:9',
+            'Pad: add white borders',
+            1200,
+            (1200, 675),
+        ),
+        # larger than the smallest photo: the photos are enlarged
+        (
+            'Vertical: one above the other',
+            '4:3',
+            'Crop: cut the sides, keep the center',
+            9000,
+            (9000, 6750),
+        ),
+    ],
+)
+def test_typed_size_with_a_ratio(
+        gen, actions, jpeg, direction, ratio, fit, typed, tile
+):
+    result, s = run(
+        actions,
+        gen,
+        sh.answers(gen, direction, ratio, fit, typed=True),
+        jpeg=jpeg,
+        typed=[typed],
+    )
+    assert result == 'done'
+    ((_, tiles),) = s.combined
+    assert all((t.width, t.height) == tile for t in tiles)
+
+
+def test_typed_size_kept_shapes(gen, actions, jpeg):
+    result, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP, typed=True),
+        jpeg=jpeg,
+        typed=[5000],
+    )
+    assert result == 'done'
+    ((_, tiles),) = s.combined
+    assert all(t.height == 5000 for t in tiles)
+    for tile, photo in zip(tiles, PHOTOS):
+        assert tile.width == int(
+            (Decimal(photo.width) * 5000 / photo.height).quantize(
+                1, 'ROUND_HALF_UP'
+            )
+        )
+
+
+def test_typed_size_default_is_the_smallest(gen, actions, jpeg):
+    # The number offered is what "the smallest photo's" gives.
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.VERTICAL, '4:3', gen.CROP, typed=True),
+        jpeg=jpeg,
+        typed=[800],
+    )
+    _, smallest = run(
+        actions, gen, sh.answers(gen, gen.VERTICAL, '4:3', gen.CROP), jpeg=jpeg
+    )
+    ((_, tiles),) = smallest.combined
+    assert s.asked == [('Width in pixels', tiles[0].width)]
+
+
+@pytest.mark.parametrize('typed', [None, 0])
+def test_typed_nothing_or_zero(gen, actions, jpeg, typed):
+    # Nothing typed: the smallest photo's; 0: one pixel (and every tile at
+    # least a pixel wide), not an error.
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP, typed=True),
+        jpeg=jpeg,
+        typed=[typed],
+    )
+    ((_, tiles),) = s.combined
+    expected = min(p.height for p in PHOTOS) if typed is None else 1
+    assert all(t.height == expected and t.width >= 1 for t in tiles)
+
+
+def gaps_and_tiles(images):
+    """The combined images split into the tiles and the strips between them."""
+    tiles, strips = images[0::2], images[1::2]
+    assert all(t.name != 'canvas' for t in tiles)
+    assert all(s.name == 'canvas' and s.kind == 'png' for s in strips)
+    return tiles, strips
+
+
+@pytest.mark.parametrize('gap', [2, 5, 10, 15])
+@pytest.mark.parametrize(
+    'direction,ratio',
+    [
+        ('Horizontal: side by side', '3:4'),
+        ('Vertical: one above the other', '16:9'),
+    ],
+)
+def test_gap_of_a_tile(gen, actions, jpeg, direction, ratio, gap):
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, direction, ratio, gen.CROP, gap=gap),
+        jpeg=jpeg,
+    )
+    ((mode, images),) = s.combined
+    tiles, strips = gaps_and_tiles(images)
+    assert len(tiles) == len(PHOTOS) and len(strips) == len(PHOTOS) - 1
+    tw, th = tiles[0].width, tiles[0].height
+    if mode == 'Horizontally':
+        size = int((Decimal(tw) * gap / 100).quantize(1, 'ROUND_HALF_UP'))
+        assert all((x.width, x.height) == (size, th) for x in strips)
+    else:
+        size = int((Decimal(th) * gap / 100).quantize(1, 'ROUND_HALF_UP'))
+        assert all((x.width, x.height) == (tw, size) for x in strips)
+
+
+def test_gap_kept_shapes_uses_the_narrowest(gen, actions, jpeg):
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP, gap=10),
+        jpeg=jpeg,
+    )
+    ((_, images),) = s.combined
+    tiles, strips = gaps_and_tiles(images)
+    narrowest = min(t.width for t in tiles)
+    height = tiles[0].height
+    size = int((Decimal(narrowest) * 10 / 100).quantize(1, 'ROUND_HALF_UP'))
+    assert all((x.width, x.height) == (size, height) for x in strips)
+
+
+def test_gap_at_least_a_pixel(gen, actions, jpeg):
+    tiny = [photo('A', 20, 30), photo('B', 30, 20)]
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.VERTICAL, gen.KEEP, gap=2),
+        photos=tiny,
+        jpeg=jpeg,
+    )
+    ((_, images),) = s.combined
+    _, strips = gaps_and_tiles(images)
+    assert [(x.width, x.height) for x in strips] == [(20, 1)]
+
+
+def test_one_photo_has_no_gap(gen, actions, jpeg):
+    _, s = run(
+        actions,
+        gen,
+        sh.answers(gen, gen.HORIZONTAL, '4:5', gen.PAD, gap=15),
+        photos=PHOTOS[:1],
+        jpeg=jpeg,
+    )
+    ((_, images),) = s.combined
+    assert len(images) == 1

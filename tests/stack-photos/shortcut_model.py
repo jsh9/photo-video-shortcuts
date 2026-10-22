@@ -90,6 +90,7 @@ class Shortcuts:
             applescript=None,
             home=None,
             tz_name='America/New_York',
+            typed=(),
     ):
         self.actions = actions
         self.shortcut_input = shortcut_input
@@ -104,6 +105,8 @@ class Shortcuts:
         self.tz_name = tz_name
         self.scripts = []  # (kind, text) of each script run
         self.pickers = 0  # how many times the photo picker was shown
+        self.typed = list(typed)  # what is typed into Ask for Input
+        self.asked = []  # (prompt, default) of each Ask for Input
         self.variables, self.outputs = {}, {}
         self.menus, self.notifications, self.saved = [], [], []
         self.resized, self.cropped, self.overlaid, self.combined = (
@@ -127,6 +130,7 @@ class Shortcuts:
             return 'stopped'
 
         assert not self.answers, f'menus not asked: {self.answers}'
+        assert not self.typed, f'not asked to type: {self.typed}'
         return 'done'
 
     # control flow
@@ -301,6 +305,16 @@ class Shortcuts:
 
     def do_exit(self, p, repeats):
         raise Stopped
+
+    def do_ask(self, p, repeats):
+        assert p['WFInputType'] == 'Number'
+        assert p['WFAskActionAllowsDecimalNumbers'] is False
+        assert p['WFAskActionAllowsNegativeNumbers'] is False
+        default = one(self.value(p['WFAskActionDefaultAnswerNumber'], repeats))
+        self.asked.append((p['WFAskActionPrompt'], default))
+        assert self.typed, f'nothing to type for "{p["WFAskActionPrompt"]}"'
+        typed = self.typed.pop(0)
+        return None if typed is None else Decimal(typed)
 
     def do_getdevicedetails(self, p, repeats):
         assert p['WFDeviceDetail'] == 'Device Model'

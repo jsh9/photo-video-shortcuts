@@ -83,18 +83,30 @@ notification says how many); a Live Photo is stacked as its still photo.
      around its center, on two opposite sides only: left and right, or top and
      bottom, never all four.
 
+4. **Height of the photos** (horizontal) or **Width of the photos** (vertical):
+
+   - *the smallest photo's*: no photo is enlarged (see Sizes below).
+   - *type it in pixels*: you type the number, with the smallest photo's filled
+     in. A larger number enlarges the photos to it; with an aspect ratio, the
+     other side follows the ratio (rounded to a whole pixel).
+
+5. **Gap between the photos**: *No gap*, or 2%, 5%, 10% or 15% of a photo's
+   width (horizontal) or height (vertical); with *Keep*, of the narrowest
+   (shortest) photo's. The gap is white, at least a pixel, and as high (wide)
+   as the photos.
+
 ### 2.2. What happens
 
-- **Sizes.** In a horizontal stack every photo gets the height of the smallest,
-  in a vertical stack its width: no photo is enlarged. With an aspect ratio,
-  all photos come out the same size, at exactly that ratio: the largest whole
-  multiple of it that no photo has to be enlarged for (for 3:4, 3 × 1008 by 4 ×
-  1008 = 3024 × 4032, say; a photo may lose a few pixels so that the ratio is
-  exact). With *Keep*, each photo keeps its own shape.
+- **Sizes.** In a horizontal stack every photo gets the height of the smallest
+  (or the height you typed), in a vertical stack its width: with the smallest,
+  no photo is enlarged. With an aspect ratio, all photos come out the same
+  size, at exactly that ratio: the largest whole multiple of it that no photo
+  has to be enlarged for (for 3:4, 3 × 1008 by 4 × 1008 = 3024 × 4032, say; a
+  photo may lose a few pixels so that the ratio is exact). With *Keep*, each
+  photo keeps its own shape.
 - **The new photo** is a JPEG at quality 0.9, saved to Recents and named after
   the first photo with `-stack` (`IMG_1234-stack.jpg`). The photos go through
-  lossless PNG until then, so this is their only new compression. There is no
-  space between the photos.
+  lossless PNG until then, so this is their only new compression.
 - **Its date** is the latest date among the photos, as Photos shows it, plus 5
   seconds, in your device's time zone. (On the Mac, a date in the hour that
   repeats when daylight saving time ends is read as the first of the two.) If

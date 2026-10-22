@@ -700,6 +700,27 @@ class Builder:
         )
         return output_of(a, 'Adjusted Date')
 
+    def ask_number(self, prompt, default=None):
+        """
+        Ask for Input: a whole number, not negative, with ``default`` (a
+        variable) filled in; returns the number typed. Keys as shortcuts built
+        on a device store them (the default as the variable itself, under
+        WFAskActionDefaultAnswerNumber); the two switches' names are in the
+        Mac's frameworks.
+        """
+        params = {
+            'WFAskActionPrompt': prompt,
+            'WFInputType': 'Number',
+            'WFAskActionAllowsDecimalNumbers': False,
+            'WFAskActionAllowsNegativeNumbers': False,
+        }
+        if default is not None:
+            params['WFAskActionDefaultAnswerNumber'] = attachment(default)
+
+        return output_of(
+            self.add('is.workflow.actions.ask', params), 'Provided Input'
+        )
+
     def device_detail(self, name):
         """
         Get Device Details: ``name``. Device Model is the device's

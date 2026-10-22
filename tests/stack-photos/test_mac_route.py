@@ -113,7 +113,12 @@ def exif_date(data):
 def test_selection_from_photos(gen, actions, jpeg, tmp_path):
     photos = Photos(gen, tmp_path, ITEMS)
     result, s = run_mac(
-        gen, actions, tmp_path, photos, [gen.HORIZONTAL, '3:4', gen.CROP], jpeg
+        gen,
+        actions,
+        tmp_path,
+        photos,
+        sh.answers(gen, gen.HORIZONTAL, '3:4', gen.CROP),
+        jpeg,
     )
     assert result == 'done'
     assert s.pickers == 0 and photos.exported
@@ -137,7 +142,7 @@ def test_iphone_never_runs_a_script(gen, actions, jpeg):
     s = sm.Shortcuts(
         actions,
         picked=picked,
-        answers=[gen.VERTICAL, gen.KEEP],
+        answers=sh.answers(gen, gen.VERTICAL, gen.KEEP),
         jpeg=jpeg,
         device='iPhone',
     )
@@ -152,7 +157,7 @@ def test_finder_input_runs_no_script(gen, actions, jpeg, tmp_path):
         actions,
         tmp_path,
         None,
-        [gen.VERTICAL, gen.KEEP],
+        sh.answers(gen, gen.VERTICAL, gen.KEEP),
         jpeg,
         shortcut_input=files,
     )
@@ -168,7 +173,7 @@ def test_nothing_selected_shows_the_picker(gen, actions, jpeg, tmp_path):
         actions,
         tmp_path,
         photos,
-        [gen.VERTICAL, gen.KEEP],
+        sh.answers(gen, gen.VERTICAL, gen.KEEP),
         jpeg,
         picked=picked,
     )
@@ -214,7 +219,7 @@ def test_no_dates_in_photos(gen, actions, jpeg, tmp_path):
         actions,
         tmp_path,
         photos,
-        [gen.HORIZONTAL, gen.KEEP],
+        sh.answers(gen, gen.HORIZONTAL, gen.KEEP),
         jpeg,
         now=now,
     )

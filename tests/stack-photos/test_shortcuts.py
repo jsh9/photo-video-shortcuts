@@ -197,7 +197,9 @@ def test_photos_resized_only_as_png(actions):
         for a in of(actions, 'image.convert') + of(actions, 'base64encode')
     }
     resizes = of(actions, 'image.resize')
-    assert len(resizes) == 5  # two kept shapes, crop, pad, the canvas
+    # two kept shapes, crop, pad, and white: the canvas and the gap (one for
+    # each direction)
+    assert len(resizes) == 7
     for resize in resizes:
         source = made[sh.params(resize)['WFImage']['Value']['OutputUUID']]
         p = sh.params(source)

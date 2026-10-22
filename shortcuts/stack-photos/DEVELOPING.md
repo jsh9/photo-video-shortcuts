@@ -40,13 +40,23 @@ Stack Photos                                 (shortcut, iPhone and Mac)
      Keep: TH = the smallest height, TW = the smallest width
      ratio: K = rounded down, the smallest over the photos of
             min(w/A, h/B) (Crop) or max(w/A, h/B) (Pad); TW = K·A, TH = K·B
+   size menu: the smallest photo's, or typed in (Ask for Input, a whole
+   number, TH or TW filled in): it replaces TH (horizontal) or TW
+   (vertical), at least 1; for a ratio the other side = round(size·A/B)
+   (or ·B/A). Nothing typed: the smallest photo's
+   gap menu: No gap, or 2, 5, 10, 15 (Gap, percent)
    Pad only: the canvas, a 1x1 white PNG (Base64 Decode) resized to TW × TH
    each photo: Convert Image to PNG, then
-     Keep: Resize Image to TH high (horizontal) or TW wide (vertical)
+     Keep: Resize Image to TH high (horizontal) or TW wide (vertical), the
+           other side rounded, at least 1
      Crop: resize by the larger of TW/w and TH/h, Crop Image the middle
            TW × TH from ((w'-TW)/2, (h'-TH)/2), rounded down
      Pad:  resize by the smaller, Overlay Image on the canvas at
            ((TW-w')/2, (TH-h')/2), rounded down
+   with a Gap: G = round(Gap% of TW (horizontal) or TH (vertical); for Keep,
+   of the narrowest (shortest) tile), at least 1; a white strip G × TH (or
+   TW × G, from the white PNG) between each two tiles. Combine Images' own
+   spacing would be transparent, black in the JPEG
    Combine Images (Horizontally or Vertically, no spacing) → a PNG
    Convert Image to JPEG, quality 0.9
    the date (the Mac route's ISO, if it has one; else): each photo's Date

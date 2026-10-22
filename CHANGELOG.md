@@ -16,10 +16,12 @@ encoder. Every release includes the current files of all shortcuts.
     aspect ratio (side by side 3:4, 2:3, 9:16 or 4:5; one above the other 4:3,
     3:2, 16:9 or 5:4), with white borders or by cutting off two opposite sides
     around its center, or keep its own shape; all then get the height (side by
-    side) or the width of the smallest, never enlarged. The stack is saved to
-    Photos as a JPEG named after the first photo with `-stack`, dated 5 seconds
-    after the latest photo (the date is written into its EXIF). Videos are
-    skipped. Add it from `stack-photos-shortcuts-v0.1.0.zip`, on either device.
+    side) or the width of the smallest, never enlarged, or a height or width
+    typed in pixels. A white gap of 2, 5, 10 or 15% of a photo's width (side by
+    side) or height can go between the photos. The stack is saved to Photos as
+    a JPEG named after the first photo with `-stack`, dated 5 seconds after the
+    latest photo (the date is written into its EXIF). Videos are skipped. Add
+    it from `stack-photos-shortcuts-v0.1.0.zip`, on either device.
 
 ## [Compress Photos 0.11.0] - 2026-10-19
 

@@ -58,7 +58,7 @@ def test_date_read_by_imageio(gen, actions, imageio, tmp_path, tz, offset):
     shortcuts = sm.Shortcuts(
         actions,
         shortcut_input=photos,
-        answers=[gen.HORIZONTAL, '3:4', gen.CROP],
+        answers=sh.answers(gen, gen.HORIZONTAL, '3:4', gen.CROP),
         jpeg=original.read_bytes(),
         tz=tz,
     )

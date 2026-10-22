@@ -51,6 +51,14 @@ was, but the Mac needed scripts for one thing (2, the Mac route).
   their own shapes, resized only.
 - **Pad color: white**, the usual border for stacked photos. A 1x1 white PNG,
   stretched.
+- **Size and gap (asked by the user after the first working version,
+  2026-10-22).** The height (horizontal) or width (vertical) is the smallest
+  photo's or typed in pixels; a typed size larger than the smallest enlarges
+  the photos (the user's choice), and the typed field starts at the smallest's.
+  The gap is 2, 5, 10 or 15% of one photo's width (horizontal) or height
+  (vertical), the narrowest's when shapes are kept (the user's choice over the
+  whole stack's), white (likewise), plus *No gap*. White strips sit between the
+  tiles: Combine Images' spacing is transparent, black in a JPEG.
 - **Exact ratios.** Every tile is K·A × K·B with K whole, the largest that
   enlarges no photo; with one size for all, equal heights and equal widths are
   the same. A photo may lose up to A−1 or B−1 pixels to that.

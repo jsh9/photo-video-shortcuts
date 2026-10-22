@@ -65,6 +65,25 @@ KEEP = 'Keep each photo as it is'
 FIT_PROMPT = 'Fit each photo to '  # + the ratio
 PAD = 'Pad: add white borders'
 CROP = 'Crop: cut the sides, keep the center'
+# The photos' height (horizontal) or width (vertical): the smallest photo's
+# (no photo enlarged), or a number of pixels typed in (photos enlarged if it
+# is larger), asked once the smallest is known, which is the typed one's
+# default. Keyed by horizontal.
+SIZE_PROMPTS = {True: 'Height of the photos', False: 'Width of the photos'}
+SMALLEST = {
+    True: "Height: the smallest photo's",
+    False: "Width: the smallest photo's",
+}
+TYPED = {True: 'Height: type it in pixels', False: 'Width: type it in pixels'}
+TYPE_PROMPTS = {True: 'Height in pixels', False: 'Width in pixels'}
+# The gap between the photos, a share of one photo's width (horizontal) or
+# height (vertical), the narrowest's (shortest's) when they differ; white.
+GAP_PROMPTS = {
+    True: "Gap between the photos (of a photo's width)",
+    False: "Gap between the photos (of a photo's height)",
+}
+NO_GAP = 'No gap'
+GAPS = [2, 5, 10, 15]  # percent
 
 # The stack's file: one JPEG encode at the end (the photos go through PNG
 # until then), at ImageIO's quality 0.9 (its default, 0.75, made a 24 MP
@@ -246,6 +265,12 @@ class Builder(wfkit.Builder):
 
     def set_text(self, name, value):
         self.set_variable(name, self.text(value))
+
+    def white(self, width, height):
+        """WHITE_PNG stretched to ``width`` × ``height``: a canvas or a gap."""
+        return self.resize_image(
+            self.base64(self.text(WHITE_PNG), 'Decode'), width, height
+        )
 
 
 def applescript(name):
@@ -442,6 +467,12 @@ def pair(b, first, second, operation):
     return b.statistics(variable('Pair'), operation)
 
 
+def at_least_one(b, number):
+    """The larger of ``number`` and 1 (a size of 0 pixels fails Resize)."""
+    one = b.add('is.workflow.actions.number', {'WFNumberActionNumber': '1'})
+    return pair(b, number, output_of(one, 'Number'), 'Maximum')
+
+
 def tile_size(b, stills):
     """
     TW and TH, every tile's size, but for kept shapes only TH (horizontal) or
@@ -514,12 +545,7 @@ def make_tiles(b, stills):
             variable('Crop'),
             lambda: None,
             lambda: b.set_variable(
-                'Canvas',
-                b.resize_image(
-                    b.base64(b.text(WHITE_PNG), 'Decode'),
-                    variable('TW'),
-                    variable('TH'),
-                ),
+                'Canvas', b.white(variable('TW'), variable('TH'))
             ),
         ),
     )
@@ -535,21 +561,30 @@ def make_tiles(b, stills):
         )
 
     def keep(png, w, h):
+        # at least a pixel: a typed size of 1 would make a tall photo 0 wide
         def horizontal():
-            width = b.round_number(
-                b.calculate(b.calculate(w, '×', variable('TH')), '÷', h)
+            width = at_least_one(
+                b,
+                b.round_number(
+                    b.calculate(b.calculate(w, '×', variable('TH')), '÷', h)
+                ),
             )
             b.append_variable(
                 'Tiles', b.resize_image(png, width, variable('TH'))
             )
+            b.append_variable('Tile Widths', width)  # for the gap
 
         def vertical():
-            height = b.round_number(
-                b.calculate(b.calculate(h, '×', variable('TW')), '÷', w)
+            height = at_least_one(
+                b,
+                b.round_number(
+                    b.calculate(b.calculate(h, '×', variable('TW')), '÷', w)
+                ),
             )
             b.append_variable(
                 'Tiles', b.resize_image(png, variable('TW'), height)
             )
+            b.append_variable('Tile Heights', height)  # for the gap
 
         b.if_has_value(variable('Horizontal'), horizontal, vertical)
 
@@ -599,6 +634,123 @@ def make_tiles(b, stills):
         b.if_has_value(variable('Crop'), crop, pad)
 
     b.repeat_each(stills, per_photo)
+
+
+def choose_size(b):
+    """
+    The size question, once TW and TH are the smallest photo's (tile_size):
+    typed in, the number (rounded, at least 1) replaces TH (horizontal) or TW
+    (vertical), and for a ratio the other side follows it, rounded (the ratio
+    then exact to the pixel).
+    """
+
+    def ask(horizontal):
+        def typed():
+            side = variable('TH' if horizontal else 'TW')
+            number = b.ask_number(TYPE_PROMPTS[horizontal], default=side)
+            # nothing typed: the smallest photo's (Round Number never gets
+            # nothing)
+            b.if_has_value(
+                number,
+                lambda: apply(
+                    horizontal, at_least_one(b, b.round_number(number))
+                ),
+                lambda: None,
+            )
+
+        b.choose_from_menu(
+            SIZE_PROMPTS[horizontal],
+            {SMALLEST[horizontal]: lambda: None, TYPED[horizontal]: typed},
+        )
+
+    def apply(horizontal, size):
+        mine, other = ('TH', 'TW') if horizontal else ('TW', 'TH')
+        across, down = ('A', 'B') if horizontal else ('B', 'A')
+        b.set_variable(mine, size)
+        b.if_has_value(
+            variable('Keep'),
+            lambda: None,
+            lambda: b.set_variable(
+                other,
+                b.round_number(
+                    b.calculate(
+                        b.calculate(size, '×', variable(across)),
+                        '÷',
+                        variable(down),
+                    )
+                ),
+            ),
+        )
+
+    b.if_has_value(
+        variable('Horizontal'), lambda: ask(True), lambda: ask(False)
+    )
+
+
+def choose_gap(b):
+    """The gap question: sets Gap, a percentage, unless No gap."""
+
+    def ask(horizontal):
+        cases = {NO_GAP: lambda: None}
+        for percent in GAPS:
+            cases[f'{percent}%'] = lambda p=percent: b.set_number('Gap', p)
+
+        b.choose_from_menu(GAP_PROMPTS[horizontal], cases)
+
+    b.if_has_value(
+        variable('Horizontal'), lambda: ask(True), lambda: ask(False)
+    )
+
+
+def add_gaps(b):
+    """
+    With a Gap, a white strip between each two tiles in Tiles: Gap percent of
+    one tile's width (horizontal; the narrowest's for kept shapes) or height
+    (vertical), rounded, at least a pixel, and as high (wide) as the tiles,
+    which all share that side. Combine Images' own spacing would be
+    transparent, which turns black in the JPEG.
+    """
+
+    def gapped(horizontal):
+        if horizontal:
+            base = lambda: b.statistics(variable('Tile Widths'), 'Minimum')
+            fitted = variable('TW')
+        else:
+            base = lambda: b.statistics(variable('Tile Heights'), 'Minimum')
+            fitted = variable('TH')
+
+        b.if_has_value(
+            variable('Keep'),
+            lambda: b.set_variable('Base', base()),
+            lambda: b.set_variable('Base', fitted),
+        )
+        share = b.calculate(variable('Base'), '×', variable('Gap'))
+        gap = at_least_one(b, b.round_number(b.calculate(share, '÷', 100)))
+        if horizontal:
+            strip = b.white(gap, variable('TH'))
+        else:
+            strip = b.white(variable('TW'), gap)
+
+        def per_tile():
+            b.if_has_value(
+                variable('Gapped'),
+                lambda: b.append_variable('Gapped', strip),
+                lambda: None,
+            )
+            b.append_variable('Gapped', REPEAT_ITEM)
+
+        b.repeat_each(variable('Tiles'), per_tile)
+        b.set_variable('Tiles', variable('Gapped'))
+
+    b.if_has_value(
+        variable('Gap'),
+        lambda: b.if_has_value(
+            variable('Horizontal'),
+            lambda: gapped(True),
+            lambda: gapped(False),
+        ),
+        lambda: None,
+    )
 
 
 def stack_date(b, stills):
@@ -707,7 +859,10 @@ def build(sample):
     b.if_has_value(stills, lambda: None, nothing_to_stack)
     choose_shape(b)
     tile_size(b, stills)
+    choose_size(b)
+    choose_gap(b)
     make_tiles(b, stills)
+    add_gaps(b)
     b.if_has_value(
         variable('Horizontal'),
         lambda: b.set_variable(
