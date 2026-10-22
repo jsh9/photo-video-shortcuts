@@ -5,12 +5,14 @@ their metadata (capture date, location, camera) and their albums. On iPhone,
 the heavy lifting runs in [a-Shell](https://holzschu.github.io/a-Shell_iOS/), a
 free terminal app, because iOS has no JPEG XL encoder or quality-controlled
 video encoder of its own. On the Mac, Shortcuts runs the same encoder itself
-(Run Shell Script).
+(Run Shell Script). One more, Stack Photos, puts photos side by side with
+Shortcuts' own actions alone, on both.
 
-| Shortcut                                               | What it does                                                                                                                                       | iPhone             | Mac                                                                       |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG, PNG and JPEG XL) → smaller HEIC (HDR kept as it is) or JPEG XL, saved back to Photos; Live Photos and videos are skipped | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
-| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped                             | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
+| Shortcut                                               | What it does                                                                                                                                                                              | iPhone             | Mac                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
+| [Compress Photos](shortcuts/compress-photos/README.md) | Still photos (HEIF, JPEG, PNG and JPEG XL) → smaller HEIC (HDR kept as it is) or JPEG XL, saved back to Photos; Live Photos and videos are skipped                                        | Yes (with a-Shell) | [Yes](shortcuts/compress-photos/README-mac.md) (Apple silicon, macOS 14+) |
+| [Compress Videos](shortcuts/compress-videos/README.md) | Videos → smaller H.265 or AV1 copies with Opus sound, saved back to Photos; photos, Live Photos and slo-mo are skipped                                                                    | Coming soon        | [Yes](shortcuts/compress-videos/README.md) (Apple silicon, macOS 14+)     |
+| [Stack Photos](shortcuts/stack-photos/README.md)       | Photos side by side or one above the other, each fitted to one aspect ratio (white borders or a centered crop) or kept as it is, saved to Photos as a new JPEG dated 5 s after the latest | Yes (no a-Shell)   | Yes (the same shortcut)                                                   |
 
 <!--TOC-->
 
@@ -20,12 +22,14 @@ ______________________________________________________________________
 
 - [1. Installation](#1-installation)
   - [1.1. On iPhone](#11-on-iphone)
-    - [1.1.1. Every shortcut: a-Shell (once)](#111-every-shortcut-a-shell-once)
+    - [1.1.1. a-Shell, for Compress Photos (once)](#111-a-shell-for-compress-photos-once)
     - [1.1.2. Compress Photos](#112-compress-photos)
     - [1.1.3. Compress Videos](#113-compress-videos)
+    - [1.1.4. Stack Photos](#114-stack-photos)
   - [1.2. On Mac](#12-on-mac)
     - [1.2.1. Compress Photos](#121-compress-photos)
     - [1.2.2. Compress Videos](#122-compress-videos)
+    - [1.2.3. Stack Photos](#123-stack-photos)
 - [2. Updating](#2-updating)
 - [3. Repository layout](#3-repository-layout)
 - [4. Developing](#4-developing)
@@ -39,7 +43,7 @@ ______________________________________________________________________
 
 ### 1.1. On iPhone
 
-#### 1.1.1. Every shortcut: a-Shell (once)
+#### 1.1.1. a-Shell, for Compress Photos (once)
 
 1. Install [a-Shell](https://apps.apple.com/app/a-shell/id1473805438) from the
    App Store. It's free.
@@ -94,10 +98,20 @@ How to use it: [Compress Photos](shortcuts/compress-photos/README.md).
 
 Coming soon.
 
+#### 1.1.4. Stack Photos
+
+No a-Shell. From the latest
+[release](https://github.com/jsh9/photo-video-shortcuts/releases) download
+`stack-photos-shortcuts-v<version>.zip`, unzip it in the Files app, and tap
+*Stack Photos* → Add Shortcut. Run it once from the Shortcuts app with two
+photos, and allow Photos access when asked.
+
+How to use it: [Stack Photos](shortcuts/stack-photos/README.md).
+
 ### 1.2. On Mac
 
-Apple silicon, macOS 14 or later. No a-Shell: Shortcuts runs the encoder
-itself.
+Compress Photos and Compress Videos: Apple silicon, macOS 14 or later. No
+a-Shell: Shortcuts runs the encoder itself.
 
 #### 1.2.1. Compress Photos
 
@@ -153,6 +167,17 @@ Finder's Quick Actions:
 
 How to use it: [Compress Videos](shortcuts/compress-videos/README.md).
 
+#### 1.2.3. Stack Photos
+
+The iPhone's shortcut, unchanged: with iCloud sync on for Shortcuts, adding it
+on the iPhone adds it on the Mac too. Otherwise download
+`stack-photos-shortcuts-v<version>.zip` from the latest
+[release](https://github.com/jsh9/photo-video-shortcuts/releases), unzip it,
+and double-click *Stack Photos* → Add Shortcut. No tools and no scripts to
+allow.
+
+How to use it: [Stack Photos](shortcuts/stack-photos/README.md).
+
 ## 2. Updating
 
 Each shortcut has its own version, shown in the note at the top of the shortcut
@@ -181,6 +206,8 @@ its developer notes:
   [releasing a new version](shortcuts/compress-photos/DEVELOPING.md#6-releasing-a-new-version).
 - [Compress Videos](shortcuts/compress-videos/DEVELOPING.md), including
   [releasing a new version](shortcuts/compress-videos/DEVELOPING.md#4-releasing-a-new-version).
+- [Stack Photos](shortcuts/stack-photos/DEVELOPING.md), including
+  [releasing a new version](shortcuts/stack-photos/DEVELOPING.md#4-releasing-a-new-version).
 
 ## 5. License
 
