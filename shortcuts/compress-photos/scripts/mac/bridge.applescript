@@ -7,17 +7,22 @@
 -- deleted) and returns "CLOSED". Any other input is export.applescript's
 -- result (text, or a file holding it: see planText): every album with that
 -- name is deleted, a new one is made, and each item of an "id|date|filename"
--- line is added to it, except videos (".mov", ".mp4", ".m4v"; a Live Photo's
--- still can't be told from a photo here). Returns "BRIDGE n", n the items the
--- album then holds; "BRIDGE 0" and no album when there is nothing to add (only
--- videos, or the export failed). On an error, returns "ERROR: ...". No
--- Shortcuts variable may appear in this text: the script would not compile.
+-- line is added to it, except videos (by their names, see isVideo; a Live
+-- Photo's still can't be told from a photo here). Returns "BRIDGE n", n the
+-- items the album then holds; "BRIDGE 0" and no album when there is nothing to
+-- add (only videos, or the export failed). On an error, returns "ERROR: ...". A
+-- user's own top-level album with that name (compared without case) is
+-- deleted too; no photo is. No Shortcuts variable may appear in this text:
+-- the script would not compile.
 on run {input, parameters}
+	set what to "fill"
 	try
 		set lines_ to ""
 		repeat with i from 1 to count of input
 			set lines_ to lines_ & (my planText(item i of input)) & linefeed
 		end repeat
+		set closing to (paragraph 1 of lines_) is "close"
+		if closing then set what to "delete"
 		with timeout of 3600 seconds
 			tell application "Photos"
 				set olds to (albums whose name is "@BRIDGE_ALBUM@")
@@ -25,7 +30,7 @@ on run {input, parameters}
 					delete (contents of a)
 				end repeat
 			end tell
-			if (paragraph 1 of lines_) is "close" then return "CLOSED"
+			if closing then return "CLOSED"
 			set ids to my itemIds(lines_)
 			if (count of ids) is 0 then return "BRIDGE 0"
 			tell application "Photos"
@@ -44,7 +49,7 @@ on run {input, parameters}
 			end tell
 		end timeout
 	on error e number errNum
-		return "ERROR: Photos could not fill the album @BRIDGE_ALBUM@ (" & errNum & ": " & e & ")"
+		return "ERROR: Photos could not " & what & " the album @BRIDGE_ALBUM@ (" & errNum & ": " & e & ")"
 	end try
 end run
 
@@ -57,7 +62,7 @@ on itemIds(t)
 	repeat with ln in paragraphs of t
 		set ln to ln as text
 		if ln contains "|" and ln does not contain tab and not (ln starts with "ERROR") then
-			if not (ln ends with ".mov" or ln ends with ".mp4" or ln ends with ".m4v") then
+			if not my isVideo(ln) then
 				set oid to text item 1 of ln
 				if oid is not "" then set end of ids to oid
 			end if
@@ -66,6 +71,15 @@ on itemIds(t)
 	set AppleScript's text item delimiters to oldDelims
 	return ids
 end itemIds
+
+-- Whether an "id|date|filename" line is a video's, by the name's extension
+-- (Photos' video formats; AppleScript compares without case)
+on isVideo(ln)
+	repeat with ext in {".mov", ".mp4", ".m4v", ".avi", ".3gp", ".3g2", ".mts", ".m2ts", ".mpg", ".mpeg", ".mkv"}
+		if ln ends with (contents of ext) then return true
+	end repeat
+	return false
+end isVideo
 
 -- The text of one item of the run's input: Shortcuts may pass a file instead
 -- of text (see import.applescript's planText).

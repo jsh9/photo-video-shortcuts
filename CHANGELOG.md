@@ -16,10 +16,10 @@ encoder. Every release includes the current files of all shortcuts.
     albums, title, caption, keywords, favorite, date and location, and the log
     lists the edited photos. Unedited photos are converted from their original
     files as before. To get Photos' current version of each photo, the shortcut
-    puts the selection into the album *Compress Photos (working)* for a moment
-    and deletes it (not the photos) before importing the copies; Shortcuts
-    needs access to the photo library for this (it may ask once). A photo that
-    can't be checked for edits is converted from its original with
+    puts the selection into the album *Compress Photos (working)* while it
+    converts them and deletes it (not the photos) before importing the copies;
+    Shortcuts needs access to the photo library for this (it may ask once). A
+    photo that can't be checked for edits is converted from its original with
     `! could not check ... for edits` in the log; look at its copy before
     deleting the original. A RAW photo is left alone as before.
   - Update *Compress Photos (macOS)*, and `photobatch-macos` (unchanged but for

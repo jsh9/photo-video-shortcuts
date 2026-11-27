@@ -406,7 +406,9 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
     picker_texts = [
         text
         for text in ph.shell_scripts(actions, VALUES)
-        if '/Pictures/.' not in text and not text.startswith('cat ')
+        if '/Pictures/.' not in text
+        and not text.startswith('cat ')
+        and 'JXL_CLOSED' not in text  # the selection route's album check
     ]
     assert len(picker_texts) == 2  # the batch and the finish script
     for text in picker_texts:
@@ -977,13 +979,27 @@ def test_selection_route_gets_renderings_through_the_bridge_album(
         )
         == 'close'
     )
+    # then a script that logs the close's answer unless it is CLOSED
+    after = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL
+        and 'JXL_CLOSED' in str(ph.params(a)['Script'])
+    ]
+    assert len(after) == 1 and close < after[0] < imp
+    (ref,) = [
+        r
+        for r in ph.references(ph.params(actions[after[0]])['Script'])
+        if r.get('OutputUUID')
+    ]
+    assert at[ref['OutputUUID']] == close
     (_, _), (picker_start, picker_batch) = route_spans(shortcuts, PHOTOS, 2)
     assert not any(picker_start <= i <= picker_batch for i in finds)
 
 
 def test_bridge_adds_the_exported_stills_only(gen):
     # Its ids come from export.applescript's "id|date|filename" lines: not a
-    # video's (a Live Photo's still can't be told from a photo there), nor
+    # video's (by its extension, any case) (a Live Photo's still can't be told from a photo there), nor
     # the "id<tab>field<tab>value" lines, an "ERROR: ..." line or an empty id.
     lines = '" & linefeed & "'.join([
         'A1/L0/001|2024-01-01 17:00:00|IMG_0001.HEIC',
@@ -995,6 +1011,8 @@ def test_bridge_adds_the_exported_stills_only(gen):
         'ERROR: Photos could not export (a|b)',
         '|2024-01-01 17:00:00|nameless.heic',
         'A6/L0/001||IMG_0006.PNG',
+        'A7/L0/001||old.AVI',
+        'A8/L0/001||camcorder.mts',
     ])
     call = (
         'set AppleScript\'s text item delimiters to ","\n'

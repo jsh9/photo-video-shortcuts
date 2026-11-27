@@ -19,9 +19,10 @@
 # match. A paired photo whose rendering is the same bytes is unedited, and its
 # original is converted; one whose rendering differs is edited, and a copy of
 # the rendering is converted (the edit baked in), under the original's name. Only
-# for the originals photobatch reads (HEIF, JPEG, PNG, JPEG XL): a RAW's
-# rendering is never converted in its place, so its original is never
-# collected. Any other photo is converted from its original, with a "!" line.
+# for the originals photobatch reads (HEIF, JPEG, PNG, JPEG XL, by their
+# names): a RAW's rendering is never converted in its place, so its original
+# is never collected. Any other photo is converted from its original, with a
+# "!" line (also one photobatch converts though its name isn't listed).
 setopt nullglob
 zmodload zsh/datetime
 case $IDS in
@@ -47,7 +48,7 @@ for line in "${(@f)RDATES}"; do
 done
 # readable NAME: whether photobatch reads the file NAME (and a rendering may
 # take its place)
-readable() { [[ ${1:e:l} == (heic|heif|hif|jpg|jpeg|png|jxl) ]]; }
+readable() { [[ ${1:e:l} == (heic|heif|hif|jpg|jpeg|jpe|jfif|png|jxl) ]]; }
 # filename -> id and date. A name two selected photos share can't be told
 # apart in the export, so it gets no id (its copy is saved but joins no
 # album, and neither original is collected for deletion) and no date.
@@ -68,14 +69,19 @@ for line in "${(@f)IDS}"; do
   fi
   seen[$name]=1
 done
+# The renderings' positions by name without extension, lowercased (the key
+# has an "x" in front: a name may be only an extension)
+typeset -A bystem
+for (( k = 1; k <= ${#renderings}; k++ )); do
+  bystem[x${${renderings[k]:t}:r:l}]+=" $k"
+done
 # candidates NAME: the positions of the renderings that may be the photo
 # NAME's, in $reply
 candidates() {
-  local stem=${${1:r}:l} o w k
+  local o w k
   o=$(clock "${dates[$1]}")
   reply=()
-  for (( k = 1; k <= ${#renderings}; k++ )); do
-    [[ ${${renderings[k]:t}:r:l} == "$stem" ]] || continue
+  for k in ${=bystem[x${${1:r}:l}]}; do
     w=${rwhen[$k]}
     [ -n "$o" ] && [ -n "$w" ] && (( w - o > 1 || o - w > 1 )) && continue
     reply+=($k)
@@ -108,7 +114,7 @@ for f in "$WORK"/in/*(.N); do
     candidates "$name"
     if [ -n "${ids[$name]}" ] && (( ${#reply} == 1 )) && (( ${claims[${reply[1]}]:-0} == 1 )) && [ -r "${renderings[${reply[1]}]}" ]; then
       r=${renderings[${reply[1]}]}
-      cmp -s "$r" "$f"
+      /usr/bin/cmp -s "$r" "$f" 2>/dev/null
       case $? in
         0) ;;  # unedited: its original
         1)
@@ -116,8 +122,8 @@ for f in "$WORK"/in/*(.N); do
           # Shortcuts keeps it (its group container, which macOS guards as
           # another app's data, kTCCServiceSystemPolicyAppDataDetailed, and a
           # background run can't ask for: "Operation not permitted"); Apple's
-          # cp and cmp can (macOS 27).
-          if cp "$r" "$WORK/jxl_in_$n.orig" 2>/dev/null; then
+          # cp and cmp can (macOS 27), so by their paths, not another on PATH.
+          if /bin/cp "$r" "$WORK/jxl_in_$n.orig" 2>/dev/null; then
             src=''
             edited+=("$name")
           else
@@ -184,6 +190,18 @@ elif (( ${#unchecked} )); then
   echo "! could not check the photos for edits ($why): edited photos are converted from their original files, without the edits. Look at the copies before deleting the originals." >> "$LOG"
 fi
 @RUN@
+# A photo photobatch converted though readable() doesn't know its name (a
+# JPEG named ".jpeg2", say: photobatch goes by the content) was never checked
+# for edits.
+typeset -a unlisted
+if [ -f "$WORK/jxl_done.txt" ]; then
+  while IFS='|' read -r file idx rest || [ -n "$file" ]; do
+    [ -n "$file" ] && [ -n "${origs[$idx]}" ] && ! readable "${origs[$idx]}" && unlisted+=("${origs[$idx]}")
+  done < "$WORK/jxl_done.txt"
+fi
+if (( ${#unlisted} )); then
+  echo "! ${#unlisted} photo(s) not checked for edits (a file type the check doesn't know): converted from the original file(s), without edits made in Photos. Look at the copies before deleting the originals: ${(j:, :)unlisted}" >> "$LOG"
+fi
 # What follows is Photos' work (import.applescript), which the progress window
 # would otherwise show nothing of.
 [ -f "$WORK/jxl_done.txt" ] && { echo; echo "Now Photos imports the files, adds them to their albums and collects the originals..."; } >> "$LOG"

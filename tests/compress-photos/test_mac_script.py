@@ -883,6 +883,113 @@ def test_selection_without_renderings_converts_the_originals(
     assert re.search(gen.WARNINGS, log)
 
 
+def test_selection_pairs_a_rendering_with_one_photo_only(mac):
+    # Two selected photos with one name without extension and the same date
+    # (a camera's HEIC and JPEG of one shot) and a single rendering: it may be
+    # either's, so neither takes it (else the JPEG's copy could get the HEIC's
+    # edit under the JPEG's id).
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    jpeg = ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0001.JPG')
+    edit = rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic')
+    mac.batch(
+        'selection',
+        renderings=[edit],
+        dates='1|2024-01-01T17:00:00-05:00\n',
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-01-01 17:00:00|IMG_0001.JPG\n'
+        ),
+    )
+    jobs = (mac.selection_work / 'jxl_job.txt').read_text().splitlines()
+    by_name = {line.split('|')[1]: int(line.split('|')[0]) for line in jobs}
+    assert staged(mac, by_name['IMG_0001.HEIC']) == (
+        mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    )
+    assert staged(mac, by_name['IMG_0001.JPG']) == jpeg
+    log = mac.log_file('selection').read_text()
+    assert '! could not check 2 photo(s) for edits' in log
+    assert EDITED not in log
+
+
+def test_selection_unreadable_rendering_is_unchecked(mac):
+    # cmp can't read it (here a folder where Shortcuts' file would be): the
+    # photo is converted from its original, with the "!" line.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    folder = mac.root / 'renderings' / 'IMG_0001.heic'
+    folder.mkdir(parents=True)
+    mac.batch(
+        'selection',
+        renderings=[folder],
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
+    )
+    assert staged(mac, 1) == mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    log = mac.log_file('selection').read_text()
+    assert '! could not check 1 photo(s) for edits' in log
+
+
+def test_selection_names_photobatch_reads_but_the_check_does_not_know(mac):
+    # A JPEG named ".jpe" is checked like any JPEG; one whose name the check
+    # doesn't know (an exiftool backup, ".JPG_original") is still converted
+    # by photobatch, which goes by the content, so the log says it wasn't
+    # checked for edits.
+    ph.noise_jpeg(mac.selection_work / 'in' / 'scan.jpe')
+    ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0002.jpg').rename(
+        mac.selection_work / 'in' / 'IMG_0002.JPG_original'
+    )
+    edit = rendering(mac, 'hdr/o1.heic', 'scan.jpeg')
+    out = mac.batch(
+        'selection',
+        renderings=[edit],
+        lines=(
+            'A1|2024-01-01 17:00:00|scan.jpe\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.JPG_original\n'
+        ),
+    )
+    assert [line.split('|')[1] for line in out.splitlines()] == ['A2', 'A1']
+    assert staged(mac, 2) == copy_of(edit)
+    log = mac.log_file('selection').read_text()
+    assert f'1 {EDITED}' in log and 'scan.jpe' in log
+    assert (
+        "! 1 photo(s) not checked for edits (a file type the check doesn't "
+        'know): converted from the original file(s), without edits made in '
+        'Photos. Look at the copies before deleting the originals: '
+        'IMG_0002.JPG_original'
+    ) in log
+
+
+@pytest.mark.parametrize(
+    ('answer', 'logged'),
+    [
+        ('CLOSED', None),
+        (
+            'ERROR: Photos could not delete the album Compress Photos '
+            '(working) (-1728: no)',
+            '(ERROR: Photos could not delete the album Compress Photos '
+            '(working) (-1728: no))',
+        ),
+        ('', '(the album script gave no answer)'),
+    ],
+)
+def test_selection_logs_an_album_photos_would_not_delete(mac, answer, logged):
+    # After the conversion the album is deleted; should Photos refuse, the
+    # log says so before the import (whose copies then join it too).
+    (script,) = [
+        s for s in mac.scripts('selection', lines=answer) if 'JXL_CLOSED' in s
+    ]
+    mac.logdir.mkdir(parents=True, exist_ok=True)
+    mac.log_file('selection').write_text('')
+    assert mac.run(script).returncode == 0
+    log = mac.log_file('selection').read_text()
+    if logged is None:
+        assert log == ''
+    else:
+        assert log == (
+            f'! could not delete the album Compress Photos (working) {logged}: '
+            'Photos may add the copies to it too. Delete that album in Photos '
+            '(its photos stay in the library).\n'
+        )
+
+
 def test_selection_never_converts_a_raw_photos_rendering(mac):
     # photobatch can't read a RAW: its rendering doesn't take its place, so it
     # fails as before and its original is never collected; nor is a video's,

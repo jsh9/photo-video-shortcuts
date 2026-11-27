@@ -16,7 +16,8 @@ as ~/.local/bin/photobatch) through Shortcuts' Run Shell Script action, which
 waits for the script, so there is no a-Shell, no helper shortcut and no
 handoff. The shell scripts are in scripts/mac/*.zsh and lib/mac/*.zsh (the
 progress window and the finish step), the AppleScripts in lib/mac/*.applescript
-(lib/ is shared with the other tools' shortcuts);
+(lib/ is shared with the other tools' shortcuts) and
+scripts/mac/bridge.applescript (this tool's own);
 tests/compress-photos/test_mac_script.py runs the shell scripts for real. See
 ../README-mac.md and ../DEVELOPING.md.
 
@@ -452,8 +453,24 @@ def selection_route(b):
         input_ref=variable('Renderings'),
     )
     # The album has done its work, and the import adds each copy to its
-    # original's albums: it must be gone first.
-    b.run_applescript(applescript_text('bridge'), input_ref=b.text('close'))
+    # original's albums: it must be gone first. If Photos wouldn't delete it,
+    # the log says so (the copies then join it too; no photo is lost).
+    closed = b.run_applescript(
+        applescript_text('bridge'), input_ref=b.text('close')
+    )
+    b.run_shell_script(
+        f'LOG={LOG_DIR}/{ROUTES[WORK_SELECTION]}.log\n'
+        "C=$(cat <<'JXL_CLOSED'\n",
+        closed,
+        '\nJXL_CLOSED\n)\n'
+        'case $C in\n'
+        '  CLOSED) ;;\n'
+        f'  *) echo "! could not delete the album {BRIDGE_ALBUM} '
+        '(${C:-the album script gave no answer}): Photos may add the copies '
+        'to it too. Delete that album in Photos (its photos stay in the '
+        'library)." >> "$LOG";;\n'
+        'esac',
+    )
     # "imported=N", "collected=M", then "! ..." problem lines.
     outcome = b.run_applescript(applescript_text('import'), input_ref=result)
     lines = b.split(outcome, '\n')

@@ -27,7 +27,8 @@ ______________________________________________________________________
 
 <!--TOC-->
 
-Plan for issue #29, written 2026-11-26. Nothing is built yet. Section 5 (the
+Plan for issue #29, written 2026-11-26; built 2026-11-27 (PR #30), with the
+changes the spike and review brought noted where they apply. Section 5 (the
 spike) comes first and can change the design: read its gates before writing
 code.
 
@@ -195,9 +196,10 @@ Pairing a rendering with a selected photo, before the staging loop:
   if both have a date, the dates are within one second. `RDATES` is on the
   Mac's clock like IDS' dates: `${iso[1,10]} ${iso[12,19]}` and the IDS date
   both through zsh's `strftime -r` (seconds).
-- Only originals `photobatch` reads (HEIF, JPEG, PNG, JPEG XL) are paired. A
-  RAW's rendering never takes its place: the RAW would fail as before instead
-  of its original being collected for deletion.
+- Only originals `photobatch` reads (HEIF, JPEG, PNG, JPEG XL, by name:
+  `readable`) are paired; one it converts under another name gets a `!` line
+  after the run. A RAW's rendering never takes its place: the RAW would fail as
+  before instead of its original being collected for deletion.
 - A pair counts only if it is the one candidate on both sides. Anything else is
   **unchecked**. A name two selected photos share already has no id; it is
   unchecked too.
@@ -208,7 +210,7 @@ stays `f`'s, D5):
 | Case                                 | Staged as `jxl_in_n.orig` | Counted as |
 | ------------------------------------ | ------------------------- | ---------- |
 | paired, `cmp -s rendering f` is true | `f` (as today)            | unedited   |
-| paired, the files differ             | the rendering (`${r:A}`)  | edited     |
+| paired, the files differ             | a copy of the rendering   | edited     |
 | no pair                              | `f` (as today)            | unchecked  |
 
 `jxl_dates.txt` and `jxl_meta.txt` are written by job index from IDS as today,
@@ -364,8 +366,8 @@ gain map, EXIF date and GPS), for the issue.
   Compress Videos embeds (so a later edit to them is noticed as a Videos
   change), if none exists.
 
-`tests/compress-photos/test_mac_script.py` (`Mac.scripts` gets `bridge`,
-`rnames`; `Mac.batch('selection', *renderings, …)` passes the files):
+`tests/compress-photos/test_mac_script.py` (`Mac.scripts` gets `bridge`;
+`Mac.batch('selection', renderings=[…])` passes the files):
 
 - unedited: the rendering is a copy of the exported file → `jxl_in_1.orig`
   points into `in/`, no note.
@@ -469,5 +471,10 @@ With the built shortcuts, from Photos' Share menu:
 - the unedited photo's copy is byte for byte the one 0.11.0 makes (same
   settings);
 - 100 photos: the time the bridge and *Find Photos* add;
-- Photos access for Shortcuts turned off in System Settings: the `!` line, and
-  the copies as today.
+- Photos access for Shortcuts turned off in System Settings: *Find Photos*
+  stops the run ("Photo Album Not Found"; it has no try), before anything is
+  converted; the next run deletes the album.
+
+Done on 2026-11-27 with the four edited photos of the spike, after the copy
+fix: they converted as they look in Photos, the edit baked in (the owner's
+check). The rest of this list is still open.
