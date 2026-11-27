@@ -34,6 +34,7 @@ __all__ = [
     'fetch_sample',
     'guessed_workflow',
     'new_uuid',
+    'number',
     'output_of',
     'plain_or_text',
     'text',
@@ -218,6 +219,18 @@ def plain_or_text(*parts):
         return ''.join(parts)
 
     return text(*parts)
+
+
+def number(value):
+    """
+    A number field: a variable as an attachment (WorkflowKit's
+    WFNumberSubstitutableState then resolves it to the number itself), a
+    constant as a string, as the Shortcuts app writes both.
+    """
+    if isinstance(value, Ref):
+        return attachment(value)
+
+    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +612,253 @@ class Builder:
                 'WFInput': attachment(media_ref),
                 'WFCameraRollSelectedGroup': attachment(album_ref),
             },
+        )
+
+    # Numbers, dates and images: built-in actions on both iPhone and Mac.
+    # Parameter names and values from the decompiled actions (ActionKit, iOS
+    # 18.2), checked against the Mac's frameworks and shortcuts built on a
+    # device. Number fields (WFNumberFieldParameter: sizes, positions,
+    # operands) take ``number(value)``: a variable keeps its number, so no
+    # region's digits or separators get in the way.
+    def calculate(self, ref, operation, operand):
+        """
+        Calculate: ``ref`` (+, -, ×, ÷) ``operand``, in decimal arithmetic
+        (NSDecimalNumber).
+        """
+        a = self.add(
+            'is.workflow.actions.math',
+            {
+                'WFInput': attachment(ref),
+                'WFMathOperation': operation,
+                'WFMathOperand': number(operand),
+            },
+        )
+        return output_of(a, 'Calculation Result')
+
+    def statistics(self, ref, operation):
+        """
+        Calculate Statistics: Minimum, Maximum... of the numbers ``ref``. Its
+        input is "Input", as Count's (shortcuts built on a device); under
+        "WFInput" it is ignored, the action gets nothing and gives nothing
+        (seen on macOS 27).
+        """
+        a = self.add(
+            'is.workflow.actions.statistics',
+            {'Input': attachment(ref), 'WFStatisticsOperation': operation},
+        )
+        return output_of(a, 'Statistics')
+
+    def round_number(self, ref, mode='Normal'):
+        """
+        Round Number to a whole number: Normal (half up), Always Round Up or
+        Always Round Down.
+        """
+        a = self.add(
+            'is.workflow.actions.round',
+            {
+                'WFInput': attachment(ref),
+                'WFRoundTo': 'Ones Place',
+                'WFRoundMode': mode,
+            },
+        )
+        return output_of(a, 'Rounded Number')
+
+    def time_between(self, start_ref, end_ref):
+        """
+        Get Time Between Dates in seconds: ``end_ref`` minus ``start_ref``
+        (negative when it is earlier), a whole number. Both dates go in as text
+        fields, as the Shortcuts app writes them.
+        """
+        a = self.add(
+            'is.workflow.actions.gettimebetweendates',
+            {
+                'WFInput': text(end_ref),
+                'WFTimeUntilFromDate': text(start_ref),
+                'WFTimeUntilUnit': 'Seconds',
+            },
+        )
+        return output_of(a, 'Time Between Dates')
+
+    def add_seconds(self, date_ref, seconds_ref):
+        """
+        Adjust Date: ``date_ref`` plus ``seconds_ref`` seconds. The duration's
+        magnitude is the variable's own dictionary, without the
+        WFTextTokenAttachment wrapper: that is how WorkflowKit's
+        WFQuantityParameterState writes it, and it reads a wrapped one as
+        "Unknown Variable" (macOS 27).
+        """
+        a = self.add(
+            'is.workflow.actions.adjustdate',
+            {
+                'WFDate': text(date_ref),
+                'WFAdjustOperation': 'Add',
+                'WFDuration': {
+                    'Value': {'Magnitude': seconds_ref.value, 'Unit': 'sec'},
+                    'WFSerializationType': 'WFQuantityFieldValue',
+                },
+            },
+        )
+        return output_of(a, 'Adjusted Date')
+
+    def ask_number(self, prompt, default=None):
+        """
+        Ask for Input: a whole number, not negative, with ``default`` (a
+        variable) filled in; returns the number typed. Keys as shortcuts built
+        on a device store them (the default as the variable itself, under
+        WFAskActionDefaultAnswerNumber); the two switches' names are in the
+        Mac's frameworks.
+        """
+        params = {
+            'WFAskActionPrompt': prompt,
+            'WFInputType': 'Number',
+            'WFAskActionAllowsDecimalNumbers': False,
+            'WFAskActionAllowsNegativeNumbers': False,
+        }
+        if default is not None:
+            params['WFAskActionDefaultAnswerNumber'] = attachment(default)
+
+        return output_of(
+            self.add('is.workflow.actions.ask', params), 'Provided Input'
+        )
+
+    def device_detail(self, name):
+        """
+        Get Device Details: ``name``. Device Model is the device's
+        localizedModel: "iPhone", "iPad", or "Mac" (on the Mac in every
+        language checked: English, Chinese, Japanese).
+        """
+        a = self.add(
+            'is.workflow.actions.getdevicedetails', {'WFDeviceDetail': name}
+        )
+        return output_of(a, 'Device Details')
+
+    def current_date(self):
+        a = self.add(
+            'is.workflow.actions.date', {'WFDateActionMode': 'Current Date'}
+        )
+        return output_of(a, 'Date')
+
+    def replace_text(self, ref, pattern, *replacement):
+        """
+        Replace Text with a regular expression (case sensitive) on the text
+        ``ref``: every match of ``pattern`` becomes ``replacement`` (text with
+        variables), a template in which "$1" is a group and a backslash escapes
+        (NSString's regular-expression replacing).
+        """
+        a = self.add(
+            'is.workflow.actions.text.replace',
+            {
+                'WFInput': text(ref),
+                'WFReplaceTextFind': pattern,
+                'WFReplaceTextReplace': plain_or_text(*replacement),
+                'WFReplaceTextRegularExpression': True,
+                'WFReplaceTextCaseSensitive': True,
+            },
+        )
+        return output_of(a, 'Updated Text')
+
+    def base64(self, ref, mode):
+        """
+        Base64 Encode, ``mode`` Encode (a file's or a text's UTF-8 bytes to one
+        line of text) or Decode (text to a file, whose type Shortcuts reads
+        from its bytes).
+        """
+        a = self.add(
+            'is.workflow.actions.base64encode',
+            {
+                'WFInput': attachment(ref),
+                'WFEncodeMode': mode,
+                'WFBase64LineBreakMode': 'None',
+            },
+        )
+        return output_of(a, f'Base64 {mode}d')
+
+    def resize_image(self, ref, width, height):
+        """
+        Resize Image to ``width`` × ``height`` pixels (the image's own
+        orientation applied first); the result keeps the input's file type.
+        """
+        a = self.add(
+            'is.workflow.actions.image.resize',
+            {
+                'WFImage': attachment(ref),
+                'WFImageResizeKey': 'Size',
+                'WFImageResizeWidth': number(width),
+                'WFImageResizeHeight': number(height),
+            },
+        )
+        return output_of(a, 'Resized Image')
+
+    def crop_image(self, ref, x, y, width, height):
+        """Crop Image: ``width`` × ``height`` from (``x``, ``y``), top left."""
+        a = self.add(
+            'is.workflow.actions.image.crop',
+            {
+                'WFInput': attachment(ref),
+                'WFImageCropPosition': 'Custom',
+                'WFImageCropX': number(x),
+                'WFImageCropY': number(y),
+                'WFImageCropWidth': number(width),
+                'WFImageCropHeight': number(height),
+            },
+        )
+        return output_of(a, 'Cropped Image')
+
+    def overlay_image(self, base_ref, overlay_ref, x, y, width, height):
+        """
+        Overlay Image without its editor: ``overlay_ref`` drawn at (``x``,
+        ``y``) from the top left of ``base_ref``, ``width`` × ``height``, not
+        rotated, opaque. The result has the base's size.
+        """
+        a = self.add(
+            'is.workflow.actions.overlayimageonimage',
+            {
+                'WFInput': attachment(base_ref),
+                'WFImage': attachment(overlay_ref),
+                'WFShouldShowImageEditor': False,
+                'WFImagePosition': 'Custom',
+                'WFImageX': number(x),
+                'WFImageY': number(y),
+                'WFImageWidth': number(width),
+                'WFImageHeight': number(height),
+                'WFRotation': '0',
+                'WFOverlayImageOpacity': '100',
+            },
+        )
+        return output_of(a, 'Overlaid Image')
+
+    def combine_images(self, ref, mode):
+        """
+        Combine Images, ``mode`` Horizontally or Vertically, with no space
+        between them: each image at its own size, side by side from the top
+        left (WFImageCombineAction).
+        """
+        a = self.add(
+            'is.workflow.actions.image.combine',
+            {
+                'WFInput': attachment(ref),
+                'WFImageCombineMode': mode,
+                'WFImageCombineSpacing': '0',
+            },
+        )
+        return output_of(a, 'Combined Image')
+
+    def convert_image(self, ref, image_format, quality=None):
+        """
+        Convert Image to ``image_format`` (JPEG, PNG, HEIF...), without the
+        input's metadata; ``quality`` (0 to 1) is ImageIO's, for JPEG and HEIF.
+        """
+        params = {
+            'WFInput': attachment(ref),
+            'WFImageFormat': image_format,
+            'WFImagePreserveMetadata': False,
+        }
+        if quality is not None:
+            params['WFImageCompressionQuality'] = quality
+
+        return output_of(
+            self.add('is.workflow.actions.image.convert', params),
+            'Converted Image',
         )
 
     # macOS-only actions (Shortcuts for Mac; they need "Allow Running
