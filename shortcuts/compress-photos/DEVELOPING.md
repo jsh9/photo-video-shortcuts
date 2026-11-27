@@ -1189,11 +1189,12 @@ included), so there is no new library. The plan and its spikes:
   multiply-adds than with WebAssembly's separate ones: decoded pixels from
   `photobatch-macos` differ from `photobatch.wasm`'s by at most 1 of 255 in
   about 0.02% of an 8-bit picture's samples, and by at most 6 of 65535 in 2% of
-  an HDR one's (measured on this tool's copies and `cjxl` files, 2026-10-16),
-  so their copies differ a little too. The SIMD and scalar WebAssembly builds
-  decode alike, so every iPhone gives the same copy. `test_jxl_input.py` checks
-  both (allowing 1 of 255, 16 of 65535 on the Mac); the encoder's own output
-  from a given picture is still the same on every build.
+  an HDR one's (measured on this tool's copies and `cjxl` files, 2026-10-16; 19
+  of 65535 on GitHub's macos-latest runners, 2026-11-27), so their copies
+  differ a little too. The SIMD and scalar WebAssembly builds decode alike, so
+  every iPhone gives the same copy. `test_jxl_input.py` checks both (allowing 1
+  of 255, 32 of 65535 on the Mac); the encoder's own output from a given
+  picture is still the same on every build.
 - **Memory** (WebAssembly, 48 MP, `test_memory.py`): 0.55 GB to JPEG XL and
   0.48 GB to HEIC for a single-pass file such as `cjxl` and this tool write;
   0.64 GB for a progressive one (`cjxl -p`). The other 48 MP conversions take

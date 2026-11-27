@@ -879,8 +879,10 @@ def test_builds_decode_alike(wasm, macos, inputs, tmp_path):
     ):
         for name, a, b in zip(names, pixels[mac_label], pixels[wasm_label]):
             # measured: 1 of 255 in about 0.02% of an 8-bit picture's
-            # samples, 6 of 65535 in 2% of an HDR (16-bit) one's
-            tolerance = 16 if a.max() > 255 else 1
+            # samples, 6 of 65535 in 2% of an HDR (16-bit) one's on an M4
+            # Pro; 19 of 65535 for copy_hdr on CI's macos-latest runners
+            # (2026-11-27)
+            tolerance = 32 if a.max() > 255 else 1
             assert np.abs(a - b).max() <= tolerance, (mac_label, name)
 
 
