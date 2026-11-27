@@ -51,7 +51,7 @@ OBJ = '￼'  # placeholder for a variable inside a text field
 COPY_KEYWORD = 'compr'
 
 
-def applescript_text(path, **values):
+def applescript_text(path, *, blocks=(), **values):
     """
     The AppleScript at ``path`` (lib/mac/<name>.applescript) with its
     @PLACEHOLDERS@ filled in: each keyword argument names one, and its value is
@@ -60,8 +60,20 @@ def applescript_text(path, **values):
     Shortcuts variable inside a Run AppleScript's text keeps it from compiling
     (it then produces no output and no error; seen on macOS 26), so values go
     in through the action's input (``Builder.run_applescript``).
+
+    A shared script's lines between a line ``-- @IF NAME`` and the next line
+    ``-- @END NAME`` are one tool's: kept for a NAME in ``blocks``, left out
+    otherwise (the marker lines always), so that the other tools' scripts stay
+    as they were.
     """
     text = path.read_text()
+    text = re.sub(
+        r'^[ \t]*-- @IF ([A-Z_]+)\n(.*?)^[ \t]*-- @END \1\n',
+        lambda m: m[2] if m[1] in blocks else '',
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert '-- @IF ' not in text and '-- @END ' not in text, path.name
     for name, value in values.items():
         if not isinstance(value, str):
             value = '{' + ', '.join(f'"{v}"' for v in value) + '}'

@@ -35,6 +35,34 @@ ______________________________________________________________________
 
 <!--TOC-->
 
+**What was built (0.13.0, 2026-11-27).** A prototype came first, which the
+owner tested with the real shortcut; it changed three decisions below:
+
+- **D1 changed:** JPEG XL copies keep their edits too, as a JPEG XL original
+  with a HEIC look (G5). Ordinary edits (crop, rotation, exposure) reverted
+  fully on the owner's HEIC and JPEG XL copies.
+- **D4 changed:** Portrait photos and Photographic Styles keep their edits.
+  `photobatch` now keeps every auxiliary image of the picture (depth, mattes,
+  the style-delta image, the linear thumbnail) and the `uri ` item
+  `tag:apple.com,2023:photo:metadata:styles`; with those, the owner could
+  adjust a Portrait's depth and a Style again on HEIC copies (without the
+  `uri ` item Photos showed the Style as a filter). JPEG XL copies revert, but
+  can't adjust them; the owner found that good enough. So the helper refuses
+  only edits by other apps (and records it can't use), and tries every edit
+  Photos made itself, with a note for parts not seen working (Clean Up,
+  Retouch, unknown ones).
+- **Falling back (3.5):** an edit that can't be kept is burnt in as in 0.12.0,
+  and its copy gets the keyword `burnt-in`; the log ends with a `!` block of
+  those photos, grouped by reason (the owner's choice). A copy Photos didn't
+  take is converted from its rendering after the conversion (`bake/`).
+- D2 (Compress Videos unchanged, the shared lines in `-- @IF EDITS` blocks) and
+  D3 (ad hoc signing) were built as planned. The helper is released as
+  `compress-photos-helper-macos.zip`, which `release.py` builds and checks.
+
+The rest of this document is the plan as written before the prototype. Not
+checked yet: Clean Up edits, JPEG originals with depth, and how the copies sync
+to an iPhone (and whether they revert there).
+
 Implementation plan for option C of issue #29, written 2026-11-27, after that
 day's spike (its facts are in section 9; its test copies are gone from the
 library). Nothing is built yet. **No further spike is planned**: the next thing

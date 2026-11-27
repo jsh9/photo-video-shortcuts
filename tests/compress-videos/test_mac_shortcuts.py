@@ -474,6 +474,8 @@ def test_applescripts_in_order_with_their_inputs(gen, actions):
     ]
     assert [r['OutputUUID'] for r in refs] == [vh.params(export)['UUID']]
     text = gen.applescript_text('import')
+    # Compress Photos' EDITS blocks (copies already in Photos) are left out
+    assert 'adopted' not in text and '-- @' not in text
     # the import reads its plan from every input item, text or the file
     # "stdout" Shortcuts passes once it takes three or more lines with the
     # same number of commas each (every name with a comma) for CSV (planText,

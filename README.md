@@ -123,16 +123,26 @@ a-Shell: Shortcuts runs the encoder itself.
 
    It should end with "Self-test passed".
 
-2. **Allow scripts.** Shortcuts ▸ Settings ▸ Advanced ▸ **Allow Running
+2. **Install Compress Photos Helper** (optional: it keeps the edits of photos
+   converted from Photos revertible). In Terminal:
+
+   ```
+   mkdir -p ~/Applications && curl -L -o /tmp/compress-photos-helper-macos.zip https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/compress-photos-helper-macos.zip && ditto -x -k /tmp/compress-photos-helper-macos.zip ~/Applications && rm /tmp/compress-photos-helper-macos.zip && open ~/Applications/"Compress Photos Helper.app"
+   ```
+
+   When macOS asks whether it may access your photos, choose Allow Full Access.
+   Without it, edits are burnt into the copies.
+
+3. **Allow scripts.** Shortcuts ▸ Settings ▸ Advanced ▸ **Allow Running
    Scripts**.
 
-3. **Add the shortcuts.** From the latest
+4. **Add the shortcuts.** From the latest
    [release](https://github.com/jsh9/photo-video-shortcuts/releases) download
    `compress-photos-mac-shortcuts-v<version>.zip`, unzip it, and double-click
    each of the two shortcuts, *Compress Photos (macOS)* and *Compress Photo
    Files (macOS)* → Add Shortcut.
 
-4. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
+5. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
    app with one photo, and allow Photos access when asked. The first time you
    run it from Photos, macOS asks whether Shortcuts may control Photos: choose
    Always Allow.

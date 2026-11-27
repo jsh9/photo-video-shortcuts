@@ -19,6 +19,9 @@ OLDER = HDR / 'apple_older.heic'  # Apple's older gain map (auxiliary image)
 SDR_HEIC = FIXTURES / 'heif' / 'rotate_then_crop.heic'
 # ImageIO's HEIC with a Portrait effects matte (make_portrait_matte.swift)
 MATTE = FIXTURES / 'heif' / 'portrait_matte.heic'
+# a picture with Apple's Photographic Styles metadata item, 'uri '
+# (make_styles_fixture.py)
+STYLES = FIXTURES / 'heif' / 'styles_metadata.heic'
 
 
 def items(path):
@@ -931,3 +934,15 @@ def test_other_auxiliary_images_are_kept_byte_for_byte(encoder, tmp_path):
     assert b'urn:com:apple:photo:2018:aux:portraiteffectsmatte' in (
         done[1].read_bytes()
     )
+
+
+def test_photographic_styles_metadata_is_kept_byte_for_byte(encoder, tmp_path):
+    # A photo taken with a Photographic Style has a metadata item describing
+    # the picture ('uri ', tag:apple.com,2023:photo:metadata:styles); without
+    # it, Photos shows the copy's Style as a filter, and it can't be adjusted
+    # (macOS 27). The copy keeps it, its data byte for byte, with its type.
+    _, done = ph.convert(encoder, tmp_path, [STYLES], ['--heic'])
+    before = {typ: data for typ, data in items(STYLES).values()}
+    after = {typ: data for typ, data in items(done[1]).values()}
+    assert after['uri '] == before['uri '] and len(before['uri ']) == 400
+    assert b'tag:apple.com,2023:photo:metadata:styles' in done[1].read_bytes()

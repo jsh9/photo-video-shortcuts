@@ -76,13 +76,13 @@ pace (nothing is added to it any more).
       (`! HDR gain map not used`, see [HDR photos](#31-hdr-photos)): those
       originals are in the album too, so look at the output before deleting.
     - Deleted photos go to Recently Deleted for 30 days. Deleting also removes
-      what the JXL doesn't have: depth/Portrait data, the SDR version of an HDR
-      photo (see [HDR photos](#31-hdr-photos)), edit history, and Photos-only
-      information (titles, captions, keywords, people). Albums are kept,
-      because the JXL is added to them, and so are the location (see
-      [Location](#33-location)) and a favorite: a copy of a favorite is a
-      favorite too. Live Photos are never converted, so they are never
-      collected.
+      what the copy doesn't have: depth/Portrait data (a HEIC copy keeps it),
+      the SDR version of an HDR photo (see [HDR photos](#31-hdr-photos)), edit
+      history, and Photos-only information (titles, captions, keywords,
+      people). Albums are kept, because the JXL is added to them, and so are
+      the location (see [Location](#33-location)) and a favorite: a copy of a
+      favorite is a favorite too. Live Photos are never converted, so they are
+      never collected.
     - It must run inside the Shortcuts app. Started from a Home Screen icon,
       widget or the Action Button, it can't wait for a-Shell, because
       Shortcuts' Wait to Return only works inside the app. It then goes on at
@@ -215,11 +215,16 @@ Kept:
 - the color profile, e.g. Display P3, and 10-bit precision;
 - **HDR**, for HDR photos from iPhones on iOS 14 or later (see
   [HDR photos](#31-hdr-photos));
+- in a HEIC copy of an iPhone HEIC, a Portrait photo's depth and mattes and a
+  Photographic Style's data, byte for byte (whether Photos on the iPhone lets
+  you adjust a copy's depth or Style hasn't been checked; on the Mac it does,
+  for copies saved with their edit);
 - the file name, e.g. `IMG_1234.heic` or `IMG_1234.jxl`.
 
 Not kept:
 
-- **Depth/Portrait data**. The result is the still.
+- **Depth/Portrait data** in a JPEG XL copy, or a HEIC copy of a JPEG. The
+  result is the still.
 - **Live Photos** aren't converted at all (see [Use](#2-use)).
 - **HDR of photos sent as JPEG** (Send As: Automatic): the JPEG's gain map
   isn't converted, so the result is the standard-dynamic-range (SDR) photo.
@@ -315,13 +320,14 @@ then says `! Apple's HDR profile not found` (except for photos taken before iOS
 **HEIC keeps the HDR as it is.** The HEIC route doesn't touch the gain map: the
 camera's gain map tiles, its `tmap` item and the Exif and XMP that go with them
 are copied into the new file byte for byte, and only the picture's own HEVC
-tiles are re-encoded (the photo's Photographic Styles data, about 0.3 MB, is
-dropped, so a style can't be changed afterwards). Photos shows the copy as it
-shows the original, with none of the JPEG XL issues below. *Drop HDR* on the
-Mac (`--sdr`) leaves the gain map out, for an ordinary SDR HEIC; a JPEG, PNG or
-JPEG XL (see [JPEG XL photos](#34-jpeg-xl-photos)), or a HEIF whose picture
-isn't 8-bit 4:2:0 HEVC tiles, is written anew as an SDR HEIC (the log says so).
-What follows is about JPEG XL.
+tiles are re-encoded. The photo's other auxiliary images (a Portrait photo's
+depth and mattes, Photographic Styles data) and Apple's Styles metadata are
+kept byte for byte too, about 0.3 MB of a 2.7 MB photo. Photos shows the copy
+as it shows the original, with none of the JPEG XL issues below. *Drop HDR* on
+the Mac (`--sdr`) leaves the gain map out, for an ordinary SDR HEIC; a JPEG,
+PNG or JPEG XL (see [JPEG XL photos](#34-jpeg-xl-photos)), or a HEIF whose
+picture isn't 8-bit 4:2:0 HEVC tiles, is written anew as an SDR HEIC (the log
+says so). What follows is about JPEG XL.
 
 Grain: up to 0.6.0, an HDR JXL got a little fine grain in its smooth areas
 against the stripes Apple's 8-bit rendering of an HDR JPEG XL shows in a smooth

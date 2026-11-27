@@ -1,10 +1,10 @@
-// Compress Photos Helper (prototype): reads an edited photo's edit from the
-// photo library and creates its compressed copy with the edit, through
-// PhotoKit, so that the edit can still be reverted in Photos. The selection
-// route of Compress Photos (macOS) Prototype starts it (scripts/mac/
-// selection.zsh); see docs/compress-photos-revertible-edits-plan.md.
-// The prototype tries every edited photo: what may not come out right is a
-// note in the answer, never a refusal.
+// Compress Photos Helper: reads an edited photo's edit from the photo library
+// and creates its compressed copy with the edit, through PhotoKit, so that the
+// edit can still be reverted in Photos. The selection route of Compress Photos
+// (macOS) starts it (scripts/mac/selection.zsh), which burns the edit in
+// instead when this refuses a photo ("no") or can't save it ("failed"); see
+// docs/compress-photos-revertible-edits-plan.md. Photos' own edits are all
+// tried: what may not come out right is a note in the answer, not a refusal.
 //
 //   photoedits --version            "photoedits <version> protocol <n>"
 //   photoedits ask [DIR]            asks for access to Photos (also with no
@@ -17,38 +17,49 @@ import Foundation
 import ImageIO
 import Photos
 
-let version = "0.13.0-prototype"
-let protocolNumber = 1
+// The version: the app's (build-helper.sh writes Compress Photos' VERSION into
+// its Info.plist). The protocol: the shape of the files the shortcut and this
+// exchange (check.txt and .out, create.txt and .out); the shortcut checks it.
+let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+// Protocol 2: 0.13.0's answers (1 was the prototype's, which took other apps'
+// edits).
+let protocolNumber = 2
 let header = "photoedits \(version) protocol \(protocolNumber)"
 
 // MARK: answers
 
+// The answer file is written again after each line, so that the lines so far
+// count should the program stop (a crash in PhotoKit, say): the reader takes
+// an answer without its last line, "end", as cut short.
 final class Answer {
     private var lines = [header]
     private let lock = NSLock()
     private let url: URL?
     init(_ url: URL?) { self.url = url }
     func say(_ s: String) {
-        lock.lock(); lines.append(s); lock.unlock()
+        lock.lock(); defer { lock.unlock() }
+        lines.append(s)
+        if url != nil { write(lines) }
     }
     // Writes the answer and ends the program. `last` is "end", or
     // "end|timeout" from the watchdog.
     func finish(_ last: String, _ code: Int32) -> Never {
         lock.lock()
-        let text = (lines + [last]).joined(separator: "\n") + "\n"
-        if let url {
-            // Not atomically: that goes through a temporary folder of its own.
-            // The reader checks the last line, "end".
-            do {
-                try text.write(to: url, atomically: false, encoding: .utf8)
-            } catch {
-                FileHandle.standardError.write(Data("photoedits: \(describe(error))\n".utf8))
-                exit(3)
-            }
+        if url != nil {
+            write(lines + [last])
         } else {
-            print(text, terminator: "")
+            print((lines + [last]).joined(separator: "\n"))
         }
         exit(code)
+    }
+    // Not atomically: that goes through a temporary folder of its own.
+    private func write(_ text: [String]) {
+        do {
+            try (text.joined(separator: "\n") + "\n").write(to: url!, atomically: false, encoding: .utf8)
+        } catch {
+            FileHandle.standardError.write(Data("photoedits: \(describe(error))\n".utf8))
+            exit(3)
+        }
     }
 }
 
@@ -65,57 +76,67 @@ func wait<T>(_ seconds: Double, _ body: (@escaping (T) -> Void) -> Void) -> T? {
 
 func describe(_ e: Error) -> String {
     let e = e as NSError
-    return "\(e.domain) \(e.code): \(e.localizedDescription)"
-        .replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "|", with: "/")
+    return clean("\(e.domain) \(e.code): \(e.localizedDescription)")
+}
+
+// A text for an answer line: no "|" (the field separator) or line break.
+func clean(_ s: String) -> String {
+    s.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+        .replacingOccurrences(of: "|", with: "/")
 }
 
 // MARK: rules that need no library
 
-// The parts of an edit that are worked out from the base picture and their own
-// settings alone (identifiers from Photos' own list, PhotoImaging's
-// PICompositionSerializerConstants, macOS 27). Any other part needs data the
-// copy doesn't carry (depth, a Photographic Style's data, Clean Up's masks,
-// RAW, video), or isn't known here.
+// The parts of an edit that were tried (identifiers from Photos' own list,
+// PhotoImaging's PICompositionSerializerConstants, macOS 27): worked out from
+// the base picture and their own settings, and, for a Portrait photo or a
+// Photographic Style, from the data a HEIC copy keeps (photobatch keeps every
+// auxiliary image and Apple's styles metadata; a JPEG XL copy has none, so
+// those edits revert there but can't be adjusted again). Any other part is
+// tried too, with a note.
 let carried: Set<String> = [
     "SmartTone", "SmartColor", "SmartBlackAndWhite", "WhiteBalance", "SemanticEnhance",
     "RKCurvesOperation", "RKLevelsOperation", "RKSelectiveColorOperation",
     "DGDefinition2Operation", "RKNoiseReductionOperation", "RKProSharpenOperation",
     "DGVignetteEffectOperation", "Grain", "Effect", "Crop", "Orientation",
     "RedEyeBB", "RKRedEyeOperation",
+    "DepthEffect", "PortraitEffect", "SemanticStyle", "TextureStyle",
 ]
 let named: [String: String] = [
-    "DepthEffect": "a Portrait photo", "PortraitEffect": "a Portrait photo",
-    "SemanticStyle": "a Photographic Style", "TextureStyle": "a Photographic Style",
     "Inpaint": "Clean Up", "InpaintMasks": "Clean Up", "GenerativeEdits": "Clean Up",
     "GeneratedTiles": "Clean Up", "RKRetouchOperation": "Retouch",
 ]
 
-// nil if the plist is an edit this tool can copy, else the reason
-func plistProblem(_ url: URL) -> String? {
+// What an edit record (Adjustments.plist) says about copying the edit:
+// (refusal, nil) when the copy can't have it, else (nil, note), the note nil
+// when nothing is in doubt.
+func plistProblem(_ url: URL) -> (refusal: String?, note: String?) {
     guard let data = try? Data(contentsOf: url),
           let d = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil))
-          as? [String: Any] else { return "its edit could not be read" }
+          as? [String: Any] else { return ("its edit could not be read", nil) }
     let format = d["adjustmentFormatIdentifier"] as? String ?? "?"
-    if format != "com.apple.photo" { return "edited by another app (\(format))" }
+    if format != "com.apple.photo" { return ("edited by another app (\(clean(format)))", nil) }
     guard let blob = d["adjustmentData"] as? Data, !blob.isEmpty else {
-        return "Photos keeps its edit outside Adjustments.plist"
+        return ("Photos keeps its edit outside its edit record", nil)
     }
     guard let base = d["adjustmentBaseVersion"] as? NSNumber, base.intValue == 0 else {
-        return "its edit is not based on the original photo"
+        return ("its edit is not based on the original photo", nil)
     }
     // The edit itself: JSON, compressed (raw DEFLATE), with a list of parts.
     guard let json = try? (blob as NSData).decompressed(using: .zlib) as Data,
           let edit = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
           let parts = edit["adjustments"] as? [[String: Any]] else {
-        return "its edit is in a form this version doesn't read"
+        return (nil, "its edit is in a form this version doesn't read")
     }
+    var notes: [String] = []
     for part in parts where (part["enabled"] as? Bool) != false {
         let id = part["identifier"] as? String ?? "?"
         if !carried.contains(id) {
-            return named[id] ?? "its edit has a part the copy can't carry (\(id))"
+            let what = named[id].map { "\($0), not tested" } ?? "a part not tested (\(clean(id)))"
+            if !notes.contains(what) { notes.append(what) }
         }
     }
-    return nil
+    return (nil, notes.isEmpty ? nil : notes.joined(separator: "; "))
 }
 
 struct Stored: Equatable { var width = 0, height = 0, orientation = 1; var type = "" }
@@ -129,13 +150,19 @@ func stored(_ url: URL) -> Stored? {
                   type: (CGImageSourceGetType(src) as String?) ?? "")
 }
 
-// nil if the base has the original's pixels as stored (size and orientation)
+// The size a picture is shown at: its stored size, turned for orientations 5
+// to 8
+func shown(_ s: Stored) -> (Int, Int) {
+    (5...8).contains(s.orientation) ? (s.height, s.width) : (s.width, s.height)
+}
+
+// nil if the base is shown at the original's size. photobatch turns the pixels
+// upright (orientation 1), which Photos' edit allows for: the copy of a photo
+// stored upside down (orientation 3) came out right (macOS 27).
 func geometryProblem(base: URL, original: URL) -> String? {
     guard let b = stored(base), let o = stored(original) else { return "its files could not be read" }
-    if b.width != o.width || b.height != o.height || b.orientation != o.orientation {
-        return "the copy is stored \(b.width)x\(b.height), orientation \(b.orientation); "
-            + "the original \(o.width)x\(o.height), orientation \(o.orientation)"
-    }
+    let (bw, bh) = shown(b), (ow, oh) = shown(o)
+    if bw != ow || bh != oh { return "the copy is \(bw)x\(bh), the original \(ow)x\(oh)" }
     return nil
 }
 
@@ -165,9 +192,8 @@ func check(_ n: String, _ id: String, _ dir: URL) -> String {
     guard a.mediaType == .image else { return no("not a photo") }
     guard a.hasAdjustments else { return no("Photos has no edit for it") }
     let format = a.adjustmentFormatIdentifier ?? "?"
-    if format != "com.apple.photo" { notes.append("edited by another app (\(format))") }
+    if format != "com.apple.photo" { return no("edited by another app (\(clean(format)))") }
     if a.mediaSubtypes.contains(.photoLive) { notes.append("a Live Photo") }
-    if a.mediaSubtypes.contains(.photoDepthEffect) { notes.append("a Portrait photo: the copy has no depth data") }
     let resources = PHAssetResource.assetResources(for: a)
     let types = resources.map { $0.type.rawValue }.sorted()
     if types != [1, 5, 7] {
@@ -188,7 +214,9 @@ func check(_ n: String, _ id: String, _ dir: URL) -> String {
     }
     guard let outcome = written else { return no("its edit did not arrive in 30 s") }
     if let error = outcome { return no("its edit could not be read (\(describe(error)))") }
-    if let why = plistProblem(plist) { notes.append(why) }
+    let (refusal, note) = plistProblem(plist)
+    if let refusal { return no(refusal) }
+    if let note { notes.append(note) }
     return "\(n)|ok|" + notes.joined(separator: "; ")
 }
 
@@ -277,7 +305,8 @@ func run() -> Never {
         print(header)
         exit(0)
     case "plist" where args.count == 2:
-        print(plistProblem(URL(fileURLWithPath: args[1])).map { "no|\($0)" } ?? "ok")
+        let (refusal, note) = plistProblem(URL(fileURLWithPath: args[1]))
+        print(refusal.map { "no|\($0)" } ?? "ok|\(note ?? "")")
         exit(0)
     case "geometry" where args.count == 3:
         print(geometryProblem(base: URL(fileURLWithPath: args[1]), original: URL(fileURLWithPath: args[2]))

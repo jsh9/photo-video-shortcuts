@@ -10,7 +10,8 @@ all shortcuts, so the README's "latest" download links always work:
 - <name>-shortcuts-v<version>.zip: the shortcut's iPhone .shortcut files, and
   <name>-mac-shortcuts-v<version>.zip its Mac ones (when it has any), each
   inside a folder of the same name (the files keep their names with spaces);
-- the encoders declared in the tool's release.json, with fixed names.
+- the encoders declared in the tool's release.json, with fixed names (also
+  a zipped Mac app, such as Compress Photos Helper).
 
 Before publishing, it checks the git state, the changelog entry, that every
 file was rebuilt in this run, and that each encoder reports its VERSION. It
@@ -26,6 +27,7 @@ Usage::
 import argparse
 import base64
 import json
+import plistlib
 import re
 import shutil
 import subprocess
@@ -69,11 +71,15 @@ class ReleaseError(Exception):
 def encoder_kind(name):
     """
     'wasm' for a WebAssembly encoder (<name>.wasm, run with wasmtime), 'native'
-    for a Mac executable (a name without an extension, run directly), or None
-    for a name that is neither.
+    for a Mac executable (a name without an extension, run directly), 'app' for
+    a Mac app in a ZIP (<name>.zip, its executable run directly), or None for a
+    name that is none of these.
     """
     if name.endswith('.wasm') and name != '.wasm':
         return 'wasm'
+
+    if name.endswith('.zip') and name != '.zip':
+        return 'app'
 
     if name and '.' not in name:
         return 'native'
@@ -250,12 +256,13 @@ def check_git(tool):
 
 def build(tool, sign):
     """
-    Builds a tool's encoders and shortcuts with its own scripts: build-wasm.sh
-    and build-macos.sh (each when present), then build_shortcuts.py (the iPhone
-    shortcuts) and build_mac_shortcuts.py (the Mac ones, when present).
+    Builds a tool's encoders and shortcuts with its own scripts: build-wasm.sh,
+    build-macos.sh and build-helper.sh (each when present), then
+    build_shortcuts.py (the iPhone shortcuts) and build_mac_shortcuts.py (the
+    Mac ones, when present).
     """
     scripts = tool.path / 'scripts'
-    for script in ('build-wasm.sh', 'build-macos.sh'):
+    for script in ('build-wasm.sh', 'build-macos.sh', 'build-helper.sh'):
         if (scripts / script).exists():
             run([scripts / script], cwd=tool.path)
 
@@ -295,18 +302,31 @@ def check_encoder_version(tool, encoder):
     """
     Each encoder must report the tool's VERSION (`<encoder> --version`, or the
     option in VERSION_OPTIONS): a .wasm file through wasmtime, a native Mac
-    executable directly (the release is built on a Mac).
+    executable directly (the release is built on a Mac), a zipped app by its
+    executable, unzipped as a user would (``ditto -x -k``).
     """
     option = VERSION_OPTIONS.get(encoder.name, '--version')
-    if encoder_kind(encoder.name) == 'wasm':
+    kind = encoder_kind(encoder.name)
+    if kind == 'app':
+        with tempfile.TemporaryDirectory() as folder:
+            run(['ditto', '-x', '-k', encoder, folder])
+            apps = list(Path(folder).glob('*.app'))
+            if len(apps) != 1:
+                raise ReleaseError(f'{encoder.name}: expected one app in it')
+
+            info = plistlib.loads(
+                (apps[0] / 'Contents' / 'Info.plist').read_bytes()
+            )
+            exe = apps[0] / 'Contents' / 'MacOS' / info['CFBundleExecutable']
+            output = run([exe, option], capture=True)
+    elif kind == 'wasm':
         if not shutil.which('wasmtime'):
             raise ReleaseError('wasmtime is needed to check encoder versions')
 
-        cmd = ['wasmtime', 'run', encoder, option]
+        output = run(['wasmtime', 'run', encoder, option], capture=True)
     else:
-        cmd = [encoder, option]
+        output = run([encoder, option], capture=True)
 
-    output = run(cmd, capture=True)
     if not re.search(rf'\b{re.escape(tool.version)}\b', output):
         raise ReleaseError(
             f'{encoder.name} reports "{output.strip()}", not {tool.version}'

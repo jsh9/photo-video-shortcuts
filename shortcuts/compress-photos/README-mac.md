@@ -56,8 +56,10 @@ ______________________________________________________________________
   Drive on their way into Photos, since that is the only place Shortcuts reads
   a file a script wrote; they are removed as soon as they are saved. From a
   selection in Photos, the files pass through a hidden folder in your Pictures
-  folder instead (Photos reads and writes it), also removed at the end.
-  *Compress Photo Files (macOS)* needs neither.
+  folder instead (Photos reads and writes it), also removed at the end, and an
+  edited photo's copies through `~/Library/Caches/compress-photos-macos/edits`
+  (*Compress Photos Helper*'s folder), removed once saved. *Compress Photo
+  Files (macOS)* needs neither.
 
 ## 2. Installation
 
@@ -77,16 +79,33 @@ ______________________________________________________________________
    `xattr -d com.apple.quarantine ~/.local/bin/photobatch` once (until then the
    shortcuts report the encoder as not installed).
 
-2. **Allow scripts.** In Shortcuts ▸ Settings ▸ Advanced, turn on **Allow
+2. **Install Compress Photos Helper** (optional: it keeps the edits of photos
+   converted from Photos revertible). Paste this line in Terminal, then press
+   Return:
+
+   ```
+   mkdir -p ~/Applications && curl -L -o /tmp/compress-photos-helper-macos.zip https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/compress-photos-helper-macos.zip && ditto -x -k /tmp/compress-photos-helper-macos.zip ~/Applications && rm /tmp/compress-photos-helper-macos.zip && open ~/Applications/"Compress Photos Helper.app"
+   ```
+
+   It puts *Compress Photos Helper* into the Applications folder of your home
+   folder (`~/Applications`, where the shortcut looks for it, or
+   `/Applications`) and starts it once: macOS asks whether it may access your
+   photos. Choose **Allow Full Access**: it reads an edited photo's edit and
+   saves the copy with it. It has no window and quits by itself. Without it,
+   edited photos are converted with their edits burnt in (see
+   [Compress Photos (macOS)](#31-compress-photos-macos)). Each update asks
+   again (the app is signed ad hoc, without an Apple developer identity).
+
+3. **Allow scripts.** In Shortcuts ▸ Settings ▸ Advanced, turn on **Allow
    Running Scripts**. Without it, the shortcuts fail at their Run Shell Script
    step.
 
-3. **Add the shortcuts.** From the latest
+4. **Add the shortcuts.** From the latest
    [release](https://github.com/jsh9/photo-video-shortcuts/releases) download
    `compress-photos-mac-shortcuts-v<version>.zip`, double-click it to unzip,
    then double-click each `.shortcut` → Add Shortcut.
 
-4. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
+5. **Grant permissions.** Run *Compress Photos (macOS)* once from the Shortcuts
    app with one photo, and allow it to access Photos when asked. The first time
    you run it from Photos (select a photo, Share ▸ *Compress Photos (macOS)*),
    macOS asks whether Shortcuts may control Photos: choose Always Allow. (Don't
@@ -118,18 +137,36 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
     originals**. Review that album and delete its photos when you are done (a
     shortcut cannot delete photos on this path). The album stays, empty, for
     the next run.
-  - An **edited photo** (exposure, a style, a rotation, a crop...) is converted
-    as it looks in Photos now, as on the iPhone: the edit is in the copy's
-    pixels and can't be reverted there. An HDR photo stays HDR, without Apple's
-    HDR profile (see [HDR photos](README.md#31-hdr-photos)). The copy still
-    gets its original's albums, title, caption, keywords, favorite, date and
-    location. The log lists the edited photos. A Portrait photo may count as
-    edited too, and its copy then has the blur Photos shows. To get Photos'
-    current version of each photo, the shortcut puts the selection into an
-    album **Compress Photos (working)** while it converts them (it syncs to
-    your other devices like any album); it deletes the album (not the photos)
-    before importing the copies. An album of your own with that name, at the
-    top level, is deleted too (its photos stay in the library).
+  - An **edited photo** (exposure, a style, a rotation, a crop...) is saved
+    with its edit, as Photos keeps an edited original: the copy looks as Photos
+    shows the photo, and Image ▸ Revert to Original still undoes the edit,
+    leaving the compressed original. This needs *Compress Photos Helper* (see
+    [Installation](#2-installation)), which saves these copies to Photos
+    itself. On a HEIC copy, a Portrait photo's depth and a Photographic Style
+    can be adjusted again, as on the original; a JPEG XL copy reverts, but
+    can't adjust them. Photos keeps the edited look apart from the original,
+    always as HEIC (at your RF, or RF 26 for a JPEG XL copy), so such a copy
+    takes about twice the space of one with the edit burnt in. The copy gets
+    its original's albums, title, caption, keywords, favorite, date and
+    location, and the log lists these photos. Photos' own edits are all tried:
+    one the helper hasn't been tested with (Clean Up, Retouch) gets a line
+    `! ...: saved with its edit, but it may not come out right (...)`; look at
+    that copy before deleting its original.
+  - When an edit can't be kept (the helper isn't installed or has no full
+    access to Photos, another app made the edit, or Photos didn't take the
+    copy), the photo is converted as it looks in Photos now, with the edit
+    **burnt in**: it is in the copy's pixels and can't be reverted. These
+    copies get the keyword `burnt-in`, and the log ends with
+    `! N edited photo(s) are saved with their edits burnt in`, then the photos
+    by reason, so it opens in Quick Look. An HDR photo stays HDR either way,
+    without Apple's HDR profile (see [HDR photos](README.md#31-hdr-photos)). A
+    Portrait photo may count as edited too (its blur is an edit).
+  - To get Photos' current version of each photo, the shortcut puts the
+    selection into an album **Compress Photos (working)** while it converts
+    them (it syncs to your other devices like any album); it deletes the album
+    (not the photos) before importing the copies. An album of your own with
+    that name, at the top level, is deleted too (its photos stay in the
+    library).
   - If a photo can't be checked for edits (the log says
     `! could not check ... for edits`), it is converted from its original,
     without edits made in Photos, and its original is collected all the same:
@@ -204,10 +241,11 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   the shortcut's hidden work folder in Pictures, which the next run empties:
   don't use the selection path with that setting, or move the copies out of the
   folder before the next run. Deleted photos go to Recently Deleted for 30
-  days. Deleting also removes what the copy doesn't have: depth data, the SDR
-  version of an HDR photo, edit history and people. A copy has its original's
-  location, title, caption and keywords, and is a favorite if its original is
-  (see [What is and isn't kept](#4-what-is-and-isnt-kept)).
+  days. Deleting also removes what the copy doesn't have: a JPEG XL copy's
+  depth data, the SDR version of an HDR photo, the unedited picture behind an
+  edit burnt in, and people. A copy has its original's location, title, caption
+  and keywords, and is a favorite if its original is (see
+  [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - To find the copies later, make a smart album (File ▸ New Smart Album) with
   Keyword is `compr`; add Keyword is `jxl` (or `heic`, `q=83`, `RF=26`, ...)
   with Match all for those of one format or quality. A smart album lists them
@@ -282,29 +320,35 @@ keywords. From Finder, the copy of `Name.jxl` is `Name 2.jxl`, next to it.
 
 ## 5. Updating
 
-Each release says which files changed. To update the encoder, run the install
-command from [Installation](#2-installation) again. To update the shortcuts,
-add the new `.shortcut` files; Shortcuts replaces the old ones. The shortcuts
-check the encoder's version and note a mismatch in the log.
+Each release says which files changed. To update the encoder or *Compress
+Photos Helper*, run its install command from [Installation](#2-installation)
+again (the helper then asks again for access to Photos). To update the
+shortcuts, add the new `.shortcut` files; Shortcuts replaces the old ones. The
+shortcuts check the encoder's version and note a mismatch in the log, and burn
+edits in when the helper speaks another version of their protocol (the log says
+it doesn't match: update both).
 
 ## 6. Troubleshooting
 
-| Symptom                                                                                                                                                 | Fix                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The shortcut stops at Run Shell Script with an error about scripts                                                                                      | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                                                                                                                                                                                       |
-| Quick Look shows `ERROR: photobatch is not installed`                                                                                                   | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin` for an executable file named `photobatch`: a file downloaded with a browser isn't executable until you run `chmod +x ~/.local/bin/photobatch` (and `xattr -d com.apple.quarantine` on it).       |
-| `"photobatch" cannot be opened because the developer cannot be verified`                                                                                | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/photobatch`, or install it with the `curl` command instead.                                                                                                                                                                                    |
-| `! … is not photobatch <version>` in the log, or `usage: photobatch …`                                                                                  | The encoder and the shortcuts are from different releases (an older encoder doesn't know the shortcuts' options and prints its usage instead of converting). Update the older one (see [Updating](#5-updating)).                                                                                                                                       |
-| The shortcut isn't in Photos' Share menu                                                                                                                | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                                                                                                                                                                                 |
-| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions                                                                                          | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                                                                                                                                                                                        |
-| Notification "Saved 0 photo(s)" and Quick Look shows the log                                                                                            | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                                                                                                                                                                                   |
-| `! not saved to Photos: <name>` in the log                                                                                                              | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing.                                                                                                                                                             |
-| Run from Photos' Share menu, but asked to pick photos                                                                                                   | Photos wasn't in front with a selection when the shortcut asked it (the shortcut gets nothing through the Share menu itself: Photos passes a JPEG copy that Shortcuts can't read). Select the photos in Photos and run it again from there.                                                                                                            |
-| "Shortcuts is not allowed to send keystrokes" or Photos not responding to the shortcut                                                                  | Allow Shortcuts to control Photos: System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.                                                                                                                                                                                                                                             |
-| From Photos, the shortcut stops with "Photo Album Not Found" (*Find Photos couldn't find the album "Compress Photos (working)"*); nothing was converted | Shortcuts can't read your photo library: in System Settings ▸ Privacy & Security ▸ Photos, give Shortcuts full access, then run it again. The album it made is deleted on the next run (or delete it yourself; its photos stay in the library).                                                                                                        |
-| An album **Compress Photos (working)** is left in Photos, or the log says `! could not delete the album Compress Photos (working)`                      | A run was stopped, or Photos wouldn't delete the album. Delete the album (not its photos), or let the next run from Photos delete it. Copies made by that run may be in it too; they are also in their originals' albums.                                                                                                                              |
-| `! could not check ... for edits` or `! ... not checked for edits` in the log                                                                           | Those photos were converted from their original files, without the edits made in Photos. Compare each copy with its photo before deleting the original from *Compressed originals*.                                                                                                                                                                    |
-| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                                                                                 | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. Their originals are in the album *Compressed originals* like the others; the notes tell you which to keep.                                                                                                                                                  |
-| Results in `~/Pictures/HEIC` or `~/Pictures/JPEG XL` instead of next to the files                                                                       | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                                                                                                                            |
-| A green horizontal stripe near the bottom of a photo converted on the iPhone (thumbnail and preview; gone once the full photo loads)                    | A bug in Photos on iOS 27, which writes a faulty 2048×1536 preview for 12 MP JPEG XL files saved to Photos on an iPhone, whatever made them; the JXL is fine, and photos converted or imported on the Mac get a correct preview. See [Troubleshooting](README.md#4-troubleshooting) on the iPhone page for the details and how to fix affected photos. |
-| Faint pink or lavender patches in a bright blue sky or in clouds of an HDR photo's copy, in Photos; the original and a Drop HDR copy have none          | Apple's display of HDR JPEG XL, not the file (see [HDR photos](README.md#31-hdr-photos) on the iPhone page). The log points such photos out (`! bright sky (39% of the photo): ...`, and a count at the end). Convert them with Drop HDR.                                                                                                              |
+| Symptom                                                                                                                                                 | Fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The shortcut stops at Run Shell Script with an error about scripts                                                                                      | Turn on Shortcuts ▸ Settings ▸ Advanced ▸ Allow Running Scripts.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Quick Look shows `ERROR: photobatch is not installed`                                                                                                   | Run the install command from [Installation](#2-installation). The shortcuts look in `~/.local/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin` for an executable file named `photobatch`: a file downloaded with a browser isn't executable until you run `chmod +x ~/.local/bin/photobatch` (and `xattr -d com.apple.quarantine` on it).                                                                                                                                                               |
+| `"photobatch" cannot be opened because the developer cannot be verified`                                                                                | The file was downloaded with a browser and quarantined. Run `xattr -d com.apple.quarantine ~/.local/bin/photobatch`, or install it with the `curl` command instead.                                                                                                                                                                                                                                                                                                                                            |
+| `! … is not photobatch <version>` in the log, or `usage: photobatch …`                                                                                  | The encoder and the shortcuts are from different releases (an older encoder doesn't know the shortcuts' options and prints its usage instead of converting). Update the older one (see [Updating](#5-updating)).                                                                                                                                                                                                                                                                                               |
+| The shortcut isn't in Photos' Share menu                                                                                                                | Enable the Shortcuts extension in System Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, and *Show in Share Sheet* in the shortcut's details.                                                                                                                                                                                                                                                                                                                                                         |
+| *Compress Photo Files (macOS)* isn't in Finder's Quick Actions                                                                                          | Check *Use as Quick Action ▸ Finder* in the shortcut's details.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Notification "Saved 0 photo(s)" and Quick Look shows the log                                                                                            | No photo converted; the log says why for each one (for example `unsupported format` for a RAW file).                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `! not saved to Photos: <name>` in the log                                                                                                              | The converted file didn't reach Photos; its original is kept. Usually iCloud Drive is off for Shortcuts (see [Requirements](#1-requirements)); the log says so when its folder is missing.                                                                                                                                                                                                                                                                                                                     |
+| Run from Photos' Share menu, but asked to pick photos                                                                                                   | Photos wasn't in front with a selection when the shortcut asked it (the shortcut gets nothing through the Share menu itself: Photos passes a JPEG copy that Shortcuts can't read). Select the photos in Photos and run it again from there.                                                                                                                                                                                                                                                                    |
+| "Shortcuts is not allowed to send keystrokes" or Photos not responding to the shortcut                                                                  | Allow Shortcuts to control Photos: System Settings ▸ Privacy & Security ▸ Automation ▸ Shortcuts ▸ Photos.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| From Photos, the shortcut stops with "Photo Album Not Found" (*Find Photos couldn't find the album "Compress Photos (working)"*); nothing was converted | Shortcuts can't read your photo library: in System Settings ▸ Privacy & Security ▸ Photos, give Shortcuts full access, then run it again. The album it made is deleted on the next run (or delete it yourself; its photos stay in the library).                                                                                                                                                                                                                                                                |
+| An album **Compress Photos (working)** is left in Photos, or the log says `! could not delete the album Compress Photos (working)`                      | A run was stopped, or Photos wouldn't delete the album. Delete the album (not its photos), or let the next run from Photos delete it. Copies made by that run may be in it too; they are also in their originals' albums.                                                                                                                                                                                                                                                                                      |
+| `! could not check ... for edits` or `! ... not checked for edits` in the log                                                                           | Those photos were converted from their original files, without the edits made in Photos. Compare each copy with its photo before deleting the original from *Compressed originals*.                                                                                                                                                                                                                                                                                                                            |
+| `! N edited photo(s) are saved with their edits burnt in`, then the reasons                                                                             | Those copies have the edit in their pixels (keyword `burnt-in`); the reasons say why: *Compress Photos Helper is not installed* (install it, see [Installation](#2-installation)); *has no full access to Photos* (System Settings ▸ Privacy & Security ▸ Photos ▸ Compress Photos Helper ▸ Full Access); *doesn't match this shortcut* (update both); *edited by another app* (such an edit can't be kept). To get a revertible copy, fix the cause, delete the `burnt-in` copy, and convert the photo again. |
+| `Compress Photos Helper gave no answer when saving it (Photos may also have its copy with the edit)` among the burnt-in reasons                         | The helper stopped while saving (or macOS stopped it). The photo has a copy with the edit burnt in; Photos may also have the copy the helper saved, without albums or keywords. Look for two copies of it and delete one.                                                                                                                                                                                                                                                                                      |
+| `! ...: saved with its edit, but ...` in the log                                                                                                        | The copy has its edit, but something about it wasn't tested or checked out (an edit the helper doesn't know, a copy of another size than its original, Photos not showing the edit yet). Look at the copy in Photos, and revert it, before deleting its original.                                                                                                                                                                                                                                              |
+| `! HDR gain map not used`, `! Apple's HDR profile not found`, and so on                                                                                 | The same notes as on the iPhone; see [Troubleshooting](README.md#4-troubleshooting) there. Their originals are in the album *Compressed originals* like the others; the notes tell you which to keep.                                                                                                                                                                                                                                                                                                          |
+| Results in `~/Pictures/HEIC` or `~/Pictures/JPEG XL` instead of next to the files                                                                       | Shortcuts passed copies of the files without saying where they came from, or the folder isn't writable. Please report it, with how the files were selected.                                                                                                                                                                                                                                                                                                                                                    |
+| A green horizontal stripe near the bottom of a photo converted on the iPhone (thumbnail and preview; gone once the full photo loads)                    | A bug in Photos on iOS 27, which writes a faulty 2048×1536 preview for 12 MP JPEG XL files saved to Photos on an iPhone, whatever made them; the JXL is fine, and photos converted or imported on the Mac get a correct preview. See [Troubleshooting](README.md#4-troubleshooting) on the iPhone page for the details and how to fix affected photos.                                                                                                                                                         |
+| Faint pink or lavender patches in a bright blue sky or in clouds of an HDR photo's copy, in Photos; the original and a Drop HDR copy have none          | Apple's display of HDR JPEG XL, not the file (see [HDR photos](README.md#31-hdr-photos) on the iPhone page). The log points such photos out (`! bright sky (39% of the photo): ...`, and a count at the end). Convert them with Drop HDR.                                                                                                                                                                                                                                                                      |
