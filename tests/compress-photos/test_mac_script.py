@@ -8,6 +8,7 @@ two photos at a time.
 """
 
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -117,6 +118,7 @@ class Mac:
             hdr='keep',
             dates='',
             meta='',
+            bridge='',
     ):
         """The shortcut's Run Shell Script texts, variables filled in."""
         return ph.shell_scripts(
@@ -129,8 +131,11 @@ class Mac:
                 'Combined Text': lines,
                 'Skipped Echo': skipped,
                 'AppleScript Result': lines,  # the selection route's IDS
-                'Dates': dates,  # the picker route's dates in Photos
-                'Meta': meta,  # and their locations
+                # the picker route's dates in Photos; the selection route's
+                # renderings' dates
+                'Dates': dates,
+                'Meta': meta,  # the picker route's locations
+                'Bridge': bridge,  # bridge.applescript's answer
             },
         )
 
@@ -172,8 +177,38 @@ class Mac:
             text=True,
         )
 
+    # what photobatch reads, and so what may have a rendering
+    READABLE = {'.heic', '.heif', '.hif', '.jpg', '.jpeg', '.png', '.jxl'}
+
+    def renderings(self):
+        """
+        What Find Photos gives the selection route for photos that are all
+        unedited: each exported still's bytes, named as Shortcuts names them
+        (``IMG_0001.heic``, ``IMG_0002.jpeg``), in a folder of their own.
+        """
+        folder = self.root / 'renderings'
+        folder.mkdir(exist_ok=True)
+        files = []
+        for f in sorted((self.selection_work / 'in').iterdir()):
+            ext = f.suffix.lower()
+            if ext in self.READABLE:
+                ext = '.jpeg' if ext == '.jpg' else ext
+                files.append(folder / (f.stem + ext))
+                shutil.copyfile(f, files[-1])
+
+        return files
+
     def batch(self, shortcut, *args, **values):
-        """Runs the route's conversion script."""
+        """
+        Runs the route's conversion script. The selection route gets
+        ``renderings`` (by default ``self.renderings()``: every photo unedited)
+        as its arguments, and ``bridge`` "BRIDGE n" for them.
+        """
+        if shortcut == 'selection' and not args:
+            files = values.pop('renderings', None)
+            args = self.renderings() if files is None else files
+            values.setdefault('bridge', f'BRIDGE {len(args)}')
+
         result = self.run(self.main_script(shortcut, **values), *args)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ''
@@ -492,7 +527,7 @@ def test_selection_heic_copies_say_their_format_and_rf(mac):
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
-        f'{folder}/IMG_0001.heic|A1|delete|IMG_0001.heic|heic,rf=26',
+        f'{folder}/IMG_0001.heic|A1|delete|IMG_0001.heic|heic,RF=26',
     ]
     assert (folder / 'IMG_0001.heic').exists()
 
@@ -606,6 +641,381 @@ def test_selection_duplicate_names_get_no_id(mac, gen):
     assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
         '3|gps|42.5,-75.25\n'
     )
+    # nor can their renderings be told apart: converted from the originals
+    assert (
+        '! could not check 2 photo(s) for edits: converted from the original '
+        'file(s), without edits made in Photos. Look at the copies before '
+        'deleting the originals: IMG_0001 (1).HEIC, IMG_0001.HEIC'
+    ) in log
+
+
+def rendering(mac, fixture, name, folder='renderings'):
+    """A file as Shortcuts' Find Photos gives it to the selection route."""
+    return photo(mac.root / folder, fixture, name)
+
+
+def staged(mac, index):
+    """
+    What photobatch converts for job ``index``: the file a link points to (an
+    original), or ``copy_of`` the bytes of a file staged as a copy (an edited
+    photo's rendering, which photobatch can't read where Shortcuts keeps it).
+    """
+    path = mac.selection_work / f'jxl_in_{index}.orig'
+    if path.is_symlink():
+        return pathlib.Path(os.readlink(path))
+
+    return copy_of(path)
+
+
+def copy_of(path):
+    return ('a copy of', pathlib.Path(path).read_bytes())
+
+
+EDITED = 'edited photo(s) are converted as they look in Photos now'
+UNCHECKED = '! could not check'
+
+
+@pytest.mark.parametrize(
+    ('fmt', 'quality', 'ext'), [('jxl', '83', 'jxl'), ('heic', '26', 'heic')]
+)
+def test_selection_converts_an_edited_photo_as_photos_shows_it(
+        mac, fmt, quality, ext
+):
+    # Find Photos gives an edited photo as Photos' rendering (here as Photos
+    # saves an edit: upright at its new size, a new unlabeled gain map), an
+    # unedited one as its original's bytes. The edited one's rendering is
+    # converted, under the original's name and with its id; the unedited one's
+    # original. Photos' date and location still reach photobatch by job index.
+    exported(mac, 'hdr/o6.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    edited = rendering(mac, 'hdr/edited_in_photos.heic', 'IMG_0001.heic')
+    unedited = rendering(mac, 'hdr/srgb.heic', 'IMG_0002.heic')
+    out = mac.batch(
+        'selection',
+        renderings=[edited, unedited],
+        fmt=fmt,
+        quality=quality,
+        dates=('1|2024-01-01T17:00:00-05:00\n2|2024-07-01T09:30:00-04:00\n'),
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-07-01 09:30:00|IMG_0002.HEIC\n'
+            'A1\tgps\t40.758442,-73.829767\n'
+        ),
+    )
+    assert staged(mac, 1) == copy_of(edited)
+    assert staged(mac, 2) == mac.selection_work / 'in' / 'IMG_0002.HEIC'
+    folder = mac.selection_work / 'out'
+    keywords = 'heic,RF=26' if fmt == 'heic' else 'jxl,q=83'
+    assert [line.split('|')[1:4:2] for line in out.splitlines()] == [
+        ['A1', f'IMG_0001.{ext}'],
+        ['A2', f'IMG_0002.{ext}'],
+    ]
+    assert all(line.endswith(keywords) for line in out.splitlines())
+    log = mac.log_file('selection').read_text()
+    assert (
+        f"1 {EDITED} (the edit can't be reverted on the copy): IMG_0001.HEIC"
+        in log
+    )
+    assert UNCHECKED not in log
+    # the rendering's HDR is kept, and its size is the edited photo's
+    assert 'saved as SDR' not in log and 'orientation check' not in log
+    assert 'HEIF 62x46' in log
+    assert (mac.selection_work / 'jxl_dates.txt').read_text() == (
+        '1|2024-01-01T17:00:00-0500\n2|2024-07-01T09:30:00-0400\n'
+    )
+    assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
+        '1|gps|40.758442,-73.829767\n'
+    )
+    tags = ph.exif_tags(folder / f'IMG_0001.{ext}')
+    assert tags['GPS:GPSLatitude'] == pytest.approx(40.758442, abs=1e-7)
+
+
+def test_selection_converts_a_jpeg_rendering_of_a_heic(mac):
+    # An edit may come as a JPEG (Shortcuts names it .jpeg); photobatch reads
+    # the format from the file, and the copy keeps the original's name.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    (mac.root / 'renderings').mkdir()
+    edit = ph.noise_jpeg(mac.root / 'renderings' / 'IMG_0001.jpeg')
+    out = mac.batch(
+        'selection',
+        renderings=[edit],
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
+    )
+    assert out.split('|')[1:4:2] == ['A1', 'IMG_0001.jxl']
+    log = mac.log_file('selection').read_text()
+    assert 'JPEG 320x240' in log and f'1 {EDITED}' in log
+
+
+@pytest.mark.parametrize(
+    'name',
+    ['IMG_0001.heic', 'img_0001.heic', 'IMG_0001.HEIC', 'IMG_0001.jpeg'],
+)
+def test_selection_pairs_renderings_by_name_without_extension(mac, name):
+    # Shortcuts names the files after the original, with its own extension
+    # ("IMG_1711.JPG" came as "IMG_1711.jpeg" on macOS 27); case aside.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    r = rendering(mac, 'hdr/o1.heic', name)
+    mac.batch(
+        'selection',
+        renderings=[r],
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
+    )
+    assert staged(mac, 1) == copy_of(r)
+
+
+def test_selection_pairs_one_name_by_date(mac):
+    # Two selected photos whose files share a name without extension (a HEIC
+    # and a JPEG from two cameras): each rendering goes with the photo of its
+    # date, to the second (Photos' AppleScript and Shortcuts' Date Taken give
+    # the same; a second apart still counts).
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    jpeg = ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0001.JPG')
+    edit = rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic')
+    same = mac.root / 'renderings' / 'IMG_0001.jpeg'
+    shutil.copyfile(jpeg, same)
+    mac.batch(
+        'selection',
+        renderings=[same, edit],
+        dates=('1|2024-02-02T08:00:00-05:00\n2|2024-01-01T17:00:01-05:00\n'),
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-02-02 08:00:00|IMG_0001.JPG\n'
+        ),
+    )
+    jobs = (mac.selection_work / 'jxl_job.txt').read_text().splitlines()
+    by_name = {line.split('|')[1]: int(line.split('|')[0]) for line in jobs}
+    assert staged(mac, by_name['IMG_0001.HEIC']) == copy_of(edit)
+    assert staged(mac, by_name['IMG_0001.JPG']) == jpeg
+    log = mac.log_file('selection').read_text()
+    assert f'1 {EDITED}' in log and UNCHECKED not in log
+
+
+@pytest.mark.parametrize(
+    'case', ['missing', 'two', 'other date', 'unreadable']
+)
+def test_selection_converts_an_unchecked_photo_from_its_original(mac, case):
+    # A photo whose rendering is missing, or can't be told from another's, or
+    # whose date is another, or that can't be read, is converted from its
+    # original as before, and
+    # the log says so (its original is collected all the same: the log opens).
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    files = [rendering(mac, 'hdr/srgb.heic', 'IMG_0002.heic')]
+    dates = ''
+    if case == 'two':
+        files += [
+            rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic', 'a'),
+            rendering(mac, 'hdr/o6.heic', 'IMG_0001.heic', 'b'),
+        ]
+    elif case == 'other date':
+        files.append(rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic'))
+        dates = '2|2024-01-01T18:00:00-05:00\n'
+    elif case == 'unreadable':
+        files.append(rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic'))
+        files[-1].chmod(0)
+
+    out = mac.batch(
+        'selection',
+        renderings=files,
+        dates=dates,
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.HEIC\n'
+        ),
+    )
+    assert staged(mac, 1) == mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    assert staged(mac, 2) == mac.selection_work / 'in' / 'IMG_0002.HEIC'
+    assert [line.split('|')[1] for line in out.splitlines()] == ['A1', 'A2']
+    log = mac.log_file('selection').read_text()
+    assert (
+        '! could not check 1 photo(s) for edits: converted from the original '
+        'file(s), without edits made in Photos. Look at the copies before '
+        'deleting the originals: IMG_0001.HEIC'
+    ) in log
+    assert EDITED not in log
+
+
+@pytest.mark.parametrize(
+    ('bridge', 'why'),
+    [
+        (
+            'ERROR: Photos could not fill the album Compress Photos (working) '
+            '(-1728: no)',
+            'ERROR: Photos could not fill the album Compress Photos (working) '
+            '(-1728: no)',
+        ),
+        (
+            'BRIDGE 2',
+            'Shortcuts found no photos in the album Compress Photos (working)',
+        ),
+        (
+            'BRIDGE 0',
+            'Photos put none of them into the album Compress Photos (working)',
+        ),
+        ('', 'the album script gave no answer'),
+    ],
+)
+def test_selection_without_renderings_converts_the_originals(
+        mac, gen, bridge, why
+):
+    # No rendering at all: every photo is converted from its original, as
+    # before 0.12.0, with one "!" line saying why.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/o1.heic', 'IMG_0002.HEIC')
+    out = mac.batch(
+        'selection',
+        renderings=[],
+        bridge=bridge,
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.HEIC\n'
+        ),
+    )
+    assert [line.split('|')[1] for line in out.splitlines()] == ['A1', 'A2']
+    assert staged(mac, 1) == mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    log = mac.log_file('selection').read_text()
+    assert (
+        f'! could not check the photos for edits ({why}): edited photos are '
+        'converted from their original files, without the edits. Look at the '
+        'copies before deleting the originals.'
+    ) in log
+    assert log.count(UNCHECKED) == 1
+    assert re.search(gen.WARNINGS, log)
+
+
+def test_selection_pairs_a_rendering_with_one_photo_only(mac):
+    # Two selected photos with one name without extension and the same date
+    # (a camera's HEIC and JPEG of one shot) and a single rendering: it may be
+    # either's, so neither takes it (else the JPEG's copy could get the HEIC's
+    # edit under the JPEG's id).
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    jpeg = ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0001.JPG')
+    edit = rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic')
+    mac.batch(
+        'selection',
+        renderings=[edit],
+        dates='1|2024-01-01T17:00:00-05:00\n',
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-01-01 17:00:00|IMG_0001.JPG\n'
+        ),
+    )
+    jobs = (mac.selection_work / 'jxl_job.txt').read_text().splitlines()
+    by_name = {line.split('|')[1]: int(line.split('|')[0]) for line in jobs}
+    assert staged(mac, by_name['IMG_0001.HEIC']) == (
+        mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    )
+    assert staged(mac, by_name['IMG_0001.JPG']) == jpeg
+    log = mac.log_file('selection').read_text()
+    assert '! could not check 2 photo(s) for edits' in log
+    assert EDITED not in log
+
+
+def test_selection_unreadable_rendering_is_unchecked(mac):
+    # cmp can't read it (here a folder where Shortcuts' file would be): the
+    # photo is converted from its original, with the "!" line.
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    folder = mac.root / 'renderings' / 'IMG_0001.heic'
+    folder.mkdir(parents=True)
+    mac.batch(
+        'selection',
+        renderings=[folder],
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
+    )
+    assert staged(mac, 1) == mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    log = mac.log_file('selection').read_text()
+    assert '! could not check 1 photo(s) for edits' in log
+
+
+def test_selection_names_photobatch_reads_but_the_check_does_not_know(mac):
+    # A JPEG named ".jpe" is checked like any JPEG; one whose name the check
+    # doesn't know (an exiftool backup, ".JPG_original") is still converted
+    # by photobatch, which goes by the content, so the log says it wasn't
+    # checked for edits.
+    ph.noise_jpeg(mac.selection_work / 'in' / 'scan.jpe')
+    ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0002.jpg').rename(
+        mac.selection_work / 'in' / 'IMG_0002.JPG_original'
+    )
+    edit = rendering(mac, 'hdr/o1.heic', 'scan.jpeg')
+    out = mac.batch(
+        'selection',
+        renderings=[edit],
+        lines=(
+            'A1|2024-01-01 17:00:00|scan.jpe\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.JPG_original\n'
+        ),
+    )
+    assert [line.split('|')[1] for line in out.splitlines()] == ['A2', 'A1']
+    assert staged(mac, 2) == copy_of(edit)
+    log = mac.log_file('selection').read_text()
+    assert f'1 {EDITED}' in log and 'scan.jpe' in log
+    assert (
+        "! 1 photo(s) not checked for edits (a file type the check doesn't "
+        'know): converted from the original file(s), without edits made in '
+        'Photos. Look at the copies before deleting the originals: '
+        'IMG_0002.JPG_original'
+    ) in log
+
+
+@pytest.mark.parametrize(
+    ('answer', 'logged'),
+    [
+        ('CLOSED', None),
+        (
+            'ERROR: Photos could not delete the album Compress Photos '
+            '(working) (-1728: no)',
+            '(ERROR: Photos could not delete the album Compress Photos '
+            '(working) (-1728: no))',
+        ),
+        ('', '(the album script gave no answer)'),
+    ],
+)
+def test_selection_logs_an_album_photos_would_not_delete(mac, answer, logged):
+    # After the conversion the album is deleted; should Photos refuse, the
+    # log says so before the import (whose copies then join it too).
+    (script,) = [
+        s for s in mac.scripts('selection', lines=answer) if 'JXL_CLOSED' in s
+    ]
+    mac.logdir.mkdir(parents=True, exist_ok=True)
+    mac.log_file('selection').write_text('')
+    assert mac.run(script).returncode == 0
+    log = mac.log_file('selection').read_text()
+    if logged is None:
+        assert log == ''
+    else:
+        assert log == (
+            f'! could not delete the album Compress Photos (working) {logged}: '
+            'Photos may add the copies to it too. Delete that album in Photos '
+            '(its photos stay in the library).\n'
+        )
+
+
+def test_selection_never_converts_a_raw_photos_rendering(mac):
+    # photobatch can't read a RAW: its rendering doesn't take its place, so it
+    # fails as before and its original is never collected; nor is a video's,
+    # or a Live Photo's still.
+    raw = mac.selection_work / 'in' / 'IMG_0001.DNG'
+    raw.write_text('raw')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
+    (mac.selection_work / 'in' / 'IMG_0002.mov').write_text('video')
+    files = [
+        rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic'),
+        rendering(mac, 'hdr/o1.heic', 'IMG_0002.heic'),
+    ]
+    out = mac.batch(
+        'selection',
+        renderings=files,
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.DNG\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.HEIC\n'
+        ),
+    )
+    assert out == ''
+    assert staged(mac, 1) == raw
+    assert 'IMG_0002' not in (mac.selection_work / 'jxl_job.txt').read_text()
+    log = mac.log_file('selection').read_text()
+    assert 'unsupported format' in log
+    assert EDITED not in log and UNCHECKED not in log
 
 
 def test_selection_name_with_field_separators(mac):

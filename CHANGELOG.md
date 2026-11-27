@@ -3,6 +3,32 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.12.0] - 2026-11-27
+
+- Changed
+  - On the Mac, *Compress Photos (macOS)* started from Photos (the photos
+    selected there) converts an edited photo as it looks in Photos now
+    (exposure, a style, a rotation, a crop), as the iPhone and the Mac's picker
+    do: before, it converted the unedited original, so deleting the original
+    lost the edit. The edit is in the copy's pixels and can't be reverted
+    there; an HDR photo stays HDR, without Apple's HDR profile
+    (`! Apple's HDR profile not found`). The copy still gets its original's
+    albums, title, caption, keywords, favorite, date and location, and the log
+    lists the edited photos. Unedited photos are converted from their original
+    files as before. To get Photos' current version of each photo, the shortcut
+    puts the selection into the album *Compress Photos (working)* while it
+    converts them and deletes it (not the photos) before importing the copies;
+    Shortcuts needs access to the photo library for this (it may ask once). A
+    photo that can't be checked for edits is converted from its original with
+    `! could not check ... for edits` in the log; look at its copy before
+    deleting the original. A RAW photo is left alone as before.
+  - On the Mac, a HEIC copy's quality keyword in Photos is `RF=26` (the RF you
+    chose), in capitals, instead of `rf=26`. Copies made before keep theirs;
+    converting such a copy again still drops its old keyword.
+  - Update *Compress Photos (macOS)*, and `photobatch-macos` (unchanged but for
+    its version, which the shortcut checks). The iPhone shortcuts and
+    `photobatch.wasm` work as in 0.11.0.
+
 ## [Stack Photos 0.1.0] - 2026-10-22
 
 - Added

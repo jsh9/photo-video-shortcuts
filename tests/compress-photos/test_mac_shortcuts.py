@@ -28,6 +28,7 @@ VALUES = {
     'AppleScript Result': 'ID|2024-01-01 17:00:00|IMG_0001.HEIC',
     'Dates': '1|2024-01-01T17:00:00-05:00',
     'Meta': '1|gps|40.5,-73.25',
+    'Bridge': 'BRIDGE 1',
 }
 
 
@@ -112,29 +113,33 @@ def test_shell_scripts_use_zsh_with_files_as_arguments(shortcuts, name):
         assert p['Shell'] == '/bin/zsh'
         assert p['InputMode'] in ('as arguments', 'to stdin')
 
-    # The batch script gets the photos (or files) as its input, as
-    # arguments; the finish scripts get the outcome on stdin; the small
-    # follow-up scripts (log, prepare) have no input.
-    batch = [
+    # The batch scripts get the photos (or files) as their input, as
+    # arguments: the picker route's and the Finder shortcut's the photos to
+    # convert, the selection route's Photos' renderings of them; the finish
+    # scripts get the outcome on stdin; the small follow-up scripts (log,
+    # prepare) have no input.
+    batches = [
         a
         for a in scripts
         if 'Input' in ph.params(a)
         and ph.params(a)['InputMode'] == 'as arguments'
     ]
-    assert len(batch) == 1
-    text = ph.render(ph.params(batch[0])['Script'], VALUES)
-    assert "QUALITY='83'" in text
-    assert "CORES='all'" in text
-    assert 'for f in "$@"; do' in text
-    assert (
-        '"$photobatch" --mac "${fmt[@]}" "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
-        in text
-    )
-    assert 'open -a Terminal "$cmd"' in text
-    assert (
-        'echo \\$\\$ > ' in text
-    )  # the window records its pid for finish.zsh
-    assert 'jxl_in_$' in text and 'jxl_done.txt' in text
+    assert len(batches) == (2 if name == PHOTOS else 1)
+    for batch in batches:
+        text = ph.render(ph.params(batch)['Script'], VALUES)
+        assert "QUALITY='83'" in text
+        assert "CORES='all'" in text
+        assert 'for f in "$@"; do' in text or 'renderings=("$@")' in text
+        assert (
+            '"$photobatch" --mac "${fmt[@]}" "${cores[@]}" "${hdr[@]}" -C "$WORK" jxl_job.txt'
+            in text
+        )
+        assert 'open -a Terminal "$cmd"' in text
+        assert (
+            'echo \\$\\$ > ' in text
+        )  # the window records its pid for finish.zsh
+        assert 'jxl_in_$' in text and 'jxl_done.txt' in text
+
     for a in scripts:
         if ph.params(a).get('InputMode') == 'to stdin':
             script = ph.params(a)['Script']
@@ -401,7 +406,9 @@ def test_photos_results_read_with_get_file_from_the_shortcuts_folder(
     picker_texts = [
         text
         for text in ph.shell_scripts(actions, VALUES)
-        if '/Pictures/.' not in text and not text.startswith('cat ')
+        if '/Pictures/.' not in text
+        and not text.startswith('cat ')
+        and 'JXL_CLOSED' not in text  # the selection route's album check
     ]
     assert len(picker_texts) == 2  # the batch and the finish script
     for text in picker_texts:
@@ -765,19 +772,22 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     # Started while Photos is in front with photos selected, the shortcut
     # converts that selection: a probe (Run AppleScript) decides, Photos
     # exports the originals (export.applescript, input: the work folder),
-    # the script converts them, and Photos imports the results
-    # (import.applescript, input: the script's output lines).
+    # the bridge album gets their renderings (bridge.applescript, input: the
+    # export's lines; then "close"), the script converts them, and Photos
+    # imports the results (import.applescript, input: the script's output
+    # lines).
     actions = shortcuts[PHOTOS]
     scripts = [a for a in actions if ph.ident(a) == RUN_APPLESCRIPT]
-    assert [ph.params(a)['Script'][:40] for a in scripts] == [
-        gen.applescript_text(n)[:40] for n in ('probe', 'export', 'import')
+    assert [ph.params(a)['Script'] for a in scripts] == [
+        gen.applescript_text(n)
+        for n in ('probe', 'export', 'bridge', 'bridge', 'import')
     ]
     # Plain text only: a Shortcuts variable in the script text keeps a Run
     # AppleScript from compiling (seen on macOS 26); values go in as input.
     for a in scripts:
         assert isinstance(ph.params(a)['Script'], str)
 
-    probe, export, imp = scripts
+    probe, export, _, _, imp = scripts
     assert 'Input' not in ph.params(probe)
     assert 'Input' in ph.params(export) and 'Input' in ph.params(imp)
     # the export's input is the prepare script's output (the work folder),
@@ -812,13 +822,13 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
     # quality common.zsh's KEYWORDS gives each result line, which the import
     # also knows to drop from the keywords of an original that is a copy
     assert gen.COPY_KEYWORD == 'compr' == gen.wf.COPY_KEYWORD
-    assert gen.FORMAT_KEYWORDS == {'heic': 'rf=', 'jxl': 'q='}
+    assert gen.FORMAT_KEYWORDS == {'heic': 'RF=', 'jxl': 'q='}
     assert 'repeat with f in {"heic", "jxl"}' in script
-    assert 'repeat with pfx in {"rf=", "q="}' in script
+    assert 'repeat with pfx in {"RF=", "q="}' in script
     assert 'set end of kws to "compr"' in script
     assert 'set keywords of copyItem to wantKeywords' in script
     assert (
-        'heic) FORMAT_NAME=HEIC; KEYWORDS="heic,rf=$QUALITY";;' in selection[0]
+        'heic) FORMAT_NAME=HEIC; KEYWORDS="heic,RF=$QUALITY";;' in selection[0]
     )
     assert (
         '*) FORMAT_NAME=\'JPEG XL\'; KEYWORDS="jxl,q=$QUALITY";;'
@@ -863,6 +873,160 @@ def test_photos_selection_route_notifies_without_a_picker(shortcuts):
             assert not inside, ph.ident(action)
 
 
+def test_selection_route_gets_renderings_through_the_bridge_album(
+        gen, shortcuts
+):
+    # bridge.applescript fills the album with the exported items (input: the
+    # export's lines) and its answer goes to the variable Bridge; only when it
+    # holds some ("BRIDGE n", n > 0) does Find Photos read the album (Find
+    # Photos fails on a missing album and stops the run). Its photos go to
+    # the variable Renderings, the selection script's files, and their dates
+    # to Dates; the album is deleted ("close") before the import, which adds
+    # each copy to its original's albums. The picker route has no Find Photos.
+    actions = shortcuts[PHOTOS]
+    at = {ph.params(a).get('UUID'): i for i, a in enumerate(actions)}
+    scripts = [
+        i for i, a in enumerate(actions) if ph.ident(a) == RUN_APPLESCRIPT
+    ]
+    _, export, bridge, close, imp = scripts
+    assert (
+        ph.params(actions[export])['UUID']
+        == next(ph.references(ph.params(actions[bridge])['Input']))[
+            'OutputUUID'
+        ]
+    )
+    setters = [
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.setvariable'
+        and ph.params(a)['WFVariableName'] == 'Bridge'
+    ]
+    assert len(setters) == 1
+    assert (
+        at[next(ph.references(ph.params(setters[0])['WFInput']))['OutputUUID']]
+        == bridge
+    )
+
+    finds = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == 'is.workflow.actions.filter.photos'
+    ]
+    assert len(finds) == 1
+    find = finds[0]
+    p = ph.params(actions[find])
+    assert 'WFContentItemInputParameter' not in p  # Find, not Filter
+    (template,) = p['WFContentItemFilter']['Value'][
+        'WFActionParameterFilterTemplates'
+    ]
+    assert template['Property'] == 'Album' and template['Operator'] == 4
+    assert template['Values']['Enumeration']['Value'] == gen.BRIDGE_ALBUM
+    match = next(
+        a
+        for a in actions
+        if ph.ident(a) == 'is.workflow.actions.text.match'
+        and ph.params(a).get('WFMatchTextPattern') == '^BRIDGE [1-9]'
+    )
+    assert "'Bridge'" in repr(ph.params(match)['text'])
+    inside = [
+        i
+        for i, (_, yes) in enumerate(
+            ph.inside_if_on(actions, ph.params(match)['UUID'])
+        )
+        if yes
+    ]
+    assert find in inside
+    renderings = [
+        i
+        for i in inside
+        if ph.ident(actions[i]) == 'is.workflow.actions.setvariable'
+        and ph.params(actions[i])['WFVariableName'] == 'Renderings'
+    ]
+    assert len(renderings) == 1
+    dates = [
+        i
+        for i in inside
+        if ph.ident(actions[i]) == 'is.workflow.actions.appendvariable'
+        and ph.params(actions[i])['WFVariableName'] == 'Dates'
+    ]
+    assert dates and all(i > find for i in dates)
+
+    selection = next(
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL
+        and 'in/*(.N)' in str(ph.params(a)['Script'])
+    )
+    p = ph.params(actions[selection])
+    assert p['InputMode'] == 'as arguments'
+    assert next(ph.references(p['Input'])) == {
+        'Type': 'Variable',
+        'VariableName': 'Renderings',
+    }
+    text = ph.render(p['Script'], VALUES)
+    assert "BRIDGE=$(cat <<'JXL_BRIDGE'\nBRIDGE 1\nJXL_BRIDGE\n)" in text
+    assert (
+        "RDATES=$(cat <<'JXL_RDATES'\n1|2024-01-01T17:00:00-05:00\nJXL_RDATES"
+        in text
+    )
+    assert gen.BRIDGE_ALBUM in text
+    assert export < bridge < find < selection < close < imp
+    closing = next(ph.references(ph.params(actions[close])['Input']))
+    assert (
+        ph.render(
+            ph.params(actions[at[closing['OutputUUID']]])['WFTextActionText'],
+            {},
+        )
+        == 'close'
+    )
+    # then a script that logs the close's answer unless it is CLOSED
+    after = [
+        i
+        for i, a in enumerate(actions)
+        if ph.ident(a) == RUN_SHELL
+        and 'JXL_CLOSED' in str(ph.params(a)['Script'])
+    ]
+    assert len(after) == 1 and close < after[0] < imp
+    (ref,) = [
+        r
+        for r in ph.references(ph.params(actions[after[0]])['Script'])
+        if r.get('OutputUUID')
+    ]
+    assert at[ref['OutputUUID']] == close
+    (_, _), (picker_start, picker_batch) = route_spans(shortcuts, PHOTOS, 2)
+    assert not any(picker_start <= i <= picker_batch for i in finds)
+
+
+def test_bridge_adds_the_exported_stills_only(gen):
+    # Its ids come from export.applescript's "id|date|filename" lines: not a
+    # video's (by its extension, any case) (a Live Photo's still can't be told from a photo there), nor
+    # the "id<tab>field<tab>value" lines, an "ERROR: ..." line or an empty id.
+    lines = '" & linefeed & "'.join([
+        'A1/L0/001|2024-01-01 17:00:00|IMG_0001.HEIC',
+        'A2/L0/001||clip.MOV',
+        'A3/L0/001|2024-01-01 17:00:00|My|Photo.jpg',
+        'A4/L0/001||IMG_0004.m4v',
+        'A5/L0/001||IMG_0005.mp4',
+        'A1/L0/001" & tab & "gps" & tab & "40.1,-73.2',
+        'ERROR: Photos could not export (a|b)',
+        '|2024-01-01 17:00:00|nameless.heic',
+        'A6/L0/001||IMG_0006.PNG',
+        'A7/L0/001||old.AVI',
+        'A8/L0/001||camcorder.mts',
+    ])
+    call = (
+        'set AppleScript\'s text item delimiters to ","\n'
+        f'return (my itemIds("{lines}")) as text'
+    )
+    got = run_handlers(gen, 'bridge', '-- The ids of export.applescript', call)
+    # and the delimiters are left as they were
+    assert got == 'A1/L0/001,A3/L0/001,A6/L0/001'
+    script = gen.applescript_text('bridge')
+    assert f'albums whose name is "{gen.BRIDGE_ALBUM}"' in script
+    assert f'make new album named "{gen.BRIDGE_ALBUM}"' in script
+    assert 'media item id (oid as text)' in script  # not a "whose" filter
+
+
 def test_applescripts_compile(gen):
     # osacompile reads Photos' dictionary without launching it.
     import shutil
@@ -871,7 +1035,7 @@ def test_applescripts_compile(gen):
 
     ph.need(shutil.which('osacompile'), 'osacompile is needed')
     with tempfile.TemporaryDirectory() as folder:
-        for name in ('probe', 'export', 'import'):
+        for name in ('probe', 'export', 'bridge', 'import'):
             src = pathlib.Path(folder) / f'{name}.applescript'
             src.write_text(gen.applescript_text(name))
             result = subprocess.run(
@@ -1048,12 +1212,13 @@ def test_import_gives_each_copy_its_keywords(gen):
     # original's, then "compr" and its own from its result line (its format
     # and quality). A copy of a copy (its original has "compr") keeps none of
     # its original's format and quality keywords, nor a second "compr"; case
-    # is ignored, as AppleScript compares text. An original that isn't a copy
-    # keeps every keyword, a "HEIC" or "q=..." of the user's own too. A line
-    # without keywords (Compress Videos'): "compr" only.
+    # is ignored, as AppleScript compares text (so a copy made before 0.12.0,
+    # whose keyword is "rf=26", not "RF=26", is known too). An original that
+    # isn't a copy keeps every keyword, a "HEIC" or "q=..." of the user's own
+    # too. A line without keywords (Compress Videos'): "compr" only.
     cases = [
         ('missing value', 'jxl,q=83'),
-        ('{"NYC", "skyline"}', 'heic,rf=26'),
+        ('{"NYC", "skyline"}', 'heic,RF=26'),
         ('{"compr", "heic", "rf=26", "a,b"}', 'jxl,q=83'),
         ('{"Compr", "JXL", "Q=90"}', 'jxl,q=5'),
         ('{"HEIC", "q=high", "rf=26"}', 'jxl,q=83'),
@@ -1074,7 +1239,7 @@ def test_import_gives_each_copy_its_keywords(gen):
     )
     assert got.split('\n') == [
         'compr|jxl|q=83',
-        'NYC|skyline|compr|heic|rf=26',
+        'NYC|skyline|compr|heic|RF=26',
         'a,b|compr|jxl|q=83',
         'compr|jxl|q=5',
         'HEIC|q=high|rf=26|compr|jxl|q=83',
@@ -1086,17 +1251,21 @@ def test_photos_dates_in_photos_go_to_photobatch(gen, shortcuts):
     # The picker route reads each photo's date in Photos (Date Taken) in the
     # repeat that collects the names (ph.check_photo_dates), and its batch
     # script gets Dates; the selection route has them from Photos' AppleScript
-    # (export.applescript: "id|date|filename"), and the Finder shortcut, whose
-    # files aren't in Photos, none.
+    # (export.applescript: "id|date|filename"), and its renderings' dates
+    # from Date Taken too, to pair them with the photos (RDATES); the Finder
+    # shortcut, whose files aren't in Photos, none.
     actions = shortcuts[PHOTOS]
-    (format_at,) = ph.check_photo_dates(actions)
+    selection_at, picker_at = ph.check_photo_dates(actions)
     batches = [
         i
         for i, a in enumerate(actions)
         if ph.ident(a) == RUN_SHELL and 'Dates' in repr(ph.params(a)['Script'])
     ]
-    assert len(batches) == 1 and format_at < batches[0]
+    assert len(batches) == 2
+    assert selection_at < batches[0] < picker_at < batches[1]
     script = ph.render(ph.params(actions[batches[0]])['Script'], VALUES)
+    assert '1|2024-01-01T17:00:00-05:00\nJXL_RDATES' in script
+    script = ph.render(ph.params(actions[batches[1]])['Script'], VALUES)
     assert 'for f in "$@"; do' in script  # the picker route's
     assert '1|2024-01-01T17:00:00-05:00\nJXL_DATES' in script
     assert 'set dateText to my wallTime(«class idat» of p)' in (

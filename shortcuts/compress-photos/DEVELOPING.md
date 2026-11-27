@@ -161,17 +161,31 @@ Compress Photos (macOS)                      (shortcut)
    export the originals into its in/ and returns "id|date|filename" lines
    (the date: the photo's in Photos, on the Mac's clock), then
    "id<tab>gps<tab>value" lines (the location, read with one
-   "properties of" per photo); Run Shell Script
-   (common.zsh + selection.zsh, IDS = those lines) stages in/* (a photo plus
-   a .mov of the same name is a Live Photo: skipped; a video alone: skipped),
+   "properties of" per photo); Run AppleScript
+   (scripts/mac/bridge.applescript, input: those lines) puts the selected
+   items, videos aside, into a new top-level album "Compress Photos
+   (working)" by id (`media item id X`, one `add`) and answers "BRIDGE n"
+   (variable Bridge); if n > 0, Find Photos where Album is that album
+   (variable Renderings) and each one's Date Taken (variable Dates, by
+   position; wf.photo_date); Run Shell Script
+   (common.zsh + selection.zsh, IDS = those lines, Renderings as arguments)
+   pairs each exported still with its rendering (the same name without
+   extension, case aside, and the same date to a second, one match on both
+   sides) and stages in/* (a photo plus
+   a .mov of the same name is a Live Photo: skipped; a video alone: skipped;
+   an edited photo, whose rendering isn't the original's bytes: a copy of
+   the rendering, under the original's name; an unpaired one: the original,
+   with a "!" line),
    writes jxl_dates.txt (each date with the Mac's offset on that date, by
    `date -j`; none for a clock time in the hour repeated when daylight
    saving time ends) and jxl_meta.txt (the other lines, by job index), runs
    photobatch, renames each result to out/Name.jxl (or .heic) and
    prints
-   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)"
+   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,RF=26)"
    (a "|", ":", "/", "\" or control character in the original's name is
    "_" in the copy's: photobatch's clean_name, so the line splits on "|");
+   Run AppleScript bridge.applescript (input: the text "close") deletes the
+   album, before the import adds each copy to its original's albums;
    Run AppleScript
    (lib/mac/import.applescript, input: those lines, as text or as the file
    "stdout": see the notes below) has Photos import each file,
@@ -348,6 +362,42 @@ can't represent
 picker; and Delete Photos isn't registered in the share extension at all, and
 in the app it needs the Shortcuts window for its prompt
 (`Presenter connection failed` otherwise).
+
+**Edited photos on the selection route (0.12.0, issue #29).** Photos'
+`export ... with using originals` gives the file as recorded, without edits;
+without `using originals` it writes "rendered jpgs" (`Photos.sdef`): 8-bit
+JPEGs of 15 to 21 MB for 24 MP photos, 5 s for eight. Photos' AppleScript has
+no "edited" property, and no Shortcuts action takes a photo's id (Photos' App
+Intents, `PhotosUICore.framework`'s `Metadata.appintents`: `AssetEntityQuery`
+has no parameters). An album bridges the two: Find Photos where Album is a name
+looks the name up in the user albums each time it runs and fetches that album's
+items (ContentKit, iOS 18.2: `WFPHAssetPredicateFromContentPredicate`,
+`fetchAssetsInAssetCollection`), and the file Shortcuts makes of a library
+photo is one of its stored resources (`preferredAssetResourceForType:`): the
+full-size rendering Photos saved with an edit, else the original. Checked on
+macOS 27 with eight photos from the Share menu (`runSource: action_extension`,
+2026-11-27): the four unedited ones (a HEIC, a Live Photo's still, two JPEGs)
+came byte for byte as exported; the four edited HEICs (an adjustment, a
+rotation, a crop, a photo shot upside down) came as Photos' HEIC renderings,
+upright at their new size with a new gain map, and `photobatch` keeps their HDR
+(`! Apple's HDR profile not found`, as from the iPhone), with no orientation
+warning. The files are named after the original with Shortcuts' extension
+(`IMG_1711.JPG` → `IMG_1711.jpeg`), Date Taken is Photos' AppleScript date to
+the second, and Find Photos gave them in the album's order. The bridge took 0.3
+s, Find Photos 0.25 s, deleting the album 0.1 s, and a Run Shell Script whose
+input variable was never set still runs, with no arguments. The renderings sit
+in Shortcuts' group container
+(`~/Library/Group Containers/group.com.apple.shortcuts/Temporary/`), which
+macOS guards as another app's data: `photobatch` gets "Operation not permitted"
+there (TCC `kTCCServiceSystemPolicyAppDataDetailed`, refused in a background
+session, so no prompt), while Apple's `cp` and `cmp` read it. So
+`selection.zsh` compares with `cmp` and copies an edited photo's rendering into
+the work folder (`jxl_in_N.orig`, a file rather than a link); the tests'
+renderings live in an ordinary folder and can't show this. Find Photos has no
+try: with no album (only when Shortcuts lacks full access to the library:
+ContentKit's `photoAlbums` is then empty) it stops the run with "Photo Album
+Not Found", before anything is converted; the If on `^BRIDGE [1-9]` keeps it
+from running on an album that wasn't made.
 
 ### 1.2. XMP
 
@@ -871,14 +921,14 @@ took ..." line has the time. Compress Videos' copies get this too (nothing is
 written into a video's file, so there every field Photos has is set this way).
 
 The keywords a copy gets there (`copyKeywords`) are its original's, then
-`compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `rf=26`,
+`compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `RF=26`,
 the number chosen for the run (every copy of a run has the same, as x265 and
 libjxl encode every photo at it; `q=100` is lossless). `selection.zsh` appends
 them to each result line, `path|id|delete or keep|Name.jxl|jxl,q=83`
 (`KEYWORDS`, set in `common.zsh` with `FORMAT_NAME`); Compress Videos' lines
 have none, so its copies get `compr` only. An original that is itself a copy
 (it has `compr`) passes on none of the keywords the tool gave it: its `compr`,
-`heic`, `jxl` and `q=`/`rf=` keywords (`toolKeyword`; `COPY_KEYWORD` in
+`heic`, `jxl` and `q=`/`RF=` keywords (`toolKeyword`; `COPY_KEYWORD` in
 `lib/wfkit.py`, shared with Compress Videos, and the builder's
 `FORMAT_KEYWORDS`) are left out, so that a copy of a copy (a HEIC copy
 converted again, to JPEG XL) says only what it is. Any other original's
@@ -1103,7 +1153,7 @@ included), so there is no new library. The plan and its spikes:
 | `scripts/patch_deps.py`                               | the small edits to the library sources in `.deps/`, shared by `build-wasm.sh` (WASI, x265 without threads, skcms, Brotli boxes) and `build-macos.sh` (skcms, Brotli boxes)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `scripts/wf.py`                                       | what both platforms' shortcuts share: the format question with each format's quality list, the still-photo filter, the photo's date; re-exports `lib/wfkit.py`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `scripts/build_shortcuts.py`                          | generates and signs the two iPhone `.shortcut` files into `dist/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `selection.zsh`, `files.zsh`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `scripts/build_mac_shortcuts.py`, `scripts/mac/*.zsh` | generates and signs the two Mac `.shortcut` files into `dist/`; the zsh script they run (`common.zsh`, `run.zsh`, `photos.zsh`, `selection.zsh`, `files.zsh`) and the selection route's album bridge (`bridge.applescript`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `../../lib/`                                          | shared with the other tools' shortcuts: `wfkit.py`, the Shortcuts plist builder (text and variables, built-in actions, writing and signing); `mac/`, the Mac shortcuts' progress window (`progress.zsh`), finish step (`finish.zsh`) and AppleScripts (`probe`, `export`, `import`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 `build/` and `dist/` are not committed. Release files are published on
