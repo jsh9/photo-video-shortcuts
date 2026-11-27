@@ -93,6 +93,11 @@ WORK_FILES = f'"${{TMPDIR:-/tmp/}}{WORK_NAME}"'
 # exports the originals into this folder and imports the results from it
 # (AppleScript), and its sandbox reaches ~/Pictures but not the folders above.
 WORK_SELECTION = f'"$HOME/Pictures/.{WORK_NAME}"'
+# The album through which the selection route gets Photos' rendering of each
+# selected photo (mac/bridge.applescript fills it by id, Find Photos reads it,
+# and it is deleted before the import): top level, made and deleted by each
+# run. A run that dies leaves it, and the next run deletes it first.
+BRIDGE_ALBUM = 'Compress Photos (working)'
 # The converted originals are collected in the album wf.ORIGINALS_ALBUM (a
 # script can't delete photos; the user deletes them from there): the
 # selection route by photo id (import.applescript), the picker route by the
@@ -167,7 +172,9 @@ LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # when nothing was, which leaves ">> $LOG" alone, a command that only touches
 # the log), and the picker route's Dates ("index|date" lines, wf.photo_date; a
 # list in a text field is one item per line) and Meta ("index|gps|lat,lon"
-# lines, wf.photo_location).
+# lines, wf.photo_location); and the selection route's Dates (its renderings'
+# dates, by position) and Bridge (bridge.applescript's answer, see
+# renderings).
 SLOTS = {
     '@FORMAT@': 'Format',
     '@QUALITY@': 'Quality',
@@ -177,6 +184,7 @@ SLOTS = {
     '@SKIPPED@': 'Skipped Echo',
     '@DATES@': 'Dates',
     '@META@': 'Meta',
+    '@BRIDGE@': 'Bridge',
 }
 
 
@@ -236,6 +244,7 @@ def script_text(name, body, label, work):
         .read_text()
         .replace('@ROUTE@', ROUTES[work]),
         '@FALLBACK@': FALLBACK_FOLDER,
+        '@BRIDGE_ALBUM@': BRIDGE_ALBUM,
         '@LABEL@': label,
         '@CANDIDATES@': ' '.join(f'"{p}"' for p in ENCODER_PATHS),
         '@LOOKED@': ', '.join(p.replace('$HOME', '~') for p in ENCODER_PATHS),
@@ -249,14 +258,21 @@ def script_text(name, body, label, work):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@,
-    @OLD_ORIGINALS_ALBUM@, @COPY_KEYWORD@, @FORMAT_KEYWORDS@ and
-    @QUALITY_PREFIXES@ (AppleScript lists) filled in (``wf.applescript_text``:
-    plain text, the values going in through the action's input).
+    lib/mac/<name>.applescript (shared with the other tools), or this tool's
+    own mac/<name>.applescript (bridge), with @NAME@, @ORIGINALS_ALBUM@,
+    @OLD_ORIGINALS_ALBUM@, @BRIDGE_ALBUM@, @COPY_KEYWORD@, @FORMAT_KEYWORDS@
+    and @QUALITY_PREFIXES@ (AppleScript lists) filled in
+    (``wf.applescript_text``: plain text, the values going in through the
+    action's input).
     """
+    path = MAC / f'{name}.applescript'
+    if not path.exists():
+        path = LIB_MAC / f'{name}.applescript'
+
     return wf.applescript_text(
-        LIB_MAC / f'{name}.applescript',
+        path,
         NAME=NAME_PHOTOS,
+        BRIDGE_ALBUM=BRIDGE_ALBUM,
         ORIGINALS_ALBUM=ORIGINALS_ALBUM,
         OLD_ORIGINALS_ALBUM=OLD_ORIGINALS_ALBUM,
         COPY_KEYWORD=COPY_KEYWORD,
@@ -299,6 +315,7 @@ def script(name, body, label, work, fmt, quality, cores, hdr, lines):
         '@SKIPPED@': variable('Skipped Echo'),
         '@DATES@': variable('Dates'),
         '@META@': variable('Meta'),
+        '@BRIDGE@': variable('Bridge'),
     }
     parts = []
     for piece in re.split(
@@ -350,7 +367,9 @@ def build_photos(sample):
         'metadata. Only still photos are converted: Live Photos and videos are '
         'skipped. Started while Photos is in front with photos selected (Share menu, '
         'right-click > Shortcuts, menu bar), it converts that selection: Photos '
-        "exports the originals, the JPEG XL copies are imported into the originals' "
+        'exports the originals (an edited photo is converted as it looks in Photos, '
+        f'through the album "{BRIDGE_ALBUM}", which it deletes after), the copies '
+        "are imported into the originals' "
         f'albums, and the converted originals go into the album "{ORIGINALS_ALBUM}" '
         'for you to review and delete. Started any other way, it shows a photo picker, saves the '
         "copies to Photos in the originals' albums, and collects the originals in that album too. "
@@ -396,9 +415,11 @@ def build_photos(sample):
 def selection_route(b):
     """
     The photos selected in Photos, through AppleScript (see mac/*.applescript):
-    Photos exports their originals into WORK_SELECTION/in, the script converts
-    them, and Photos imports the results into the originals' albums and
-    collects the converted originals in ORIGINALS_ALBUM.
+    Photos exports their originals into WORK_SELECTION/in, Shortcuts gets
+    Photos' current version of each through the album BRIDGE_ALBUM
+    (renderings), the script converts each original, or an edited photo's
+    current version, and Photos imports the results into the originals' albums
+    and collects the converted originals in ORIGINALS_ALBUM.
     """
     fmt, quality = choose_format(b)
     cores = choose_cores(b)
@@ -415,6 +436,7 @@ def selection_route(b):
         f'W={WORK_SELECTION}; rm -rf "$W"; mkdir -p "$W/in"; printf "%s" "$W"'
     )
     ids = b.run_applescript(applescript_text('export'), input_ref=work)
+    renderings(b, ids)
     result = b.run_shell_script(
         *script(
             NAME_PHOTOS,
@@ -426,8 +448,12 @@ def selection_route(b):
             cores,
             hdr,
             ids,
-        )
+        ),
+        input_ref=variable('Renderings'),
     )
+    # The album has done its work, and the import adds each copy to its
+    # original's albums: it must be gone first.
+    b.run_applescript(applescript_text('bridge'), input_ref=b.text('close'))
     # "imported=N", "collected=M", then "! ..." problem lines.
     outcome = b.run_applescript(applescript_text('import'), input_ref=result)
     lines = b.split(outcome, '\n')
@@ -459,6 +485,40 @@ def selection_route(b):
         lambda: b.notification(
             TITLE, 'Saved ', imported, ' photo(s) to Photos.'
         ),
+    )
+
+
+def renderings(b, ids):
+    """
+    Photos' current version of each photo selected in Photos, for the selection
+    script to compare with the exported original (selection.zsh):
+    bridge.applescript puts the selected items (``ids``, the export's lines)
+    into the album BRIDGE_ALBUM and answers "BRIDGE n" (the variable Bridge);
+    if it holds any, Find Photos gets them as library photos (the variable
+    Renderings), whose files Shortcuts makes from Photos' stored resources: an
+    edited photo's rendering, an unedited one's original byte for byte
+    (ContentKit's ``-[WFPhotoMediaContentItem
+    preferredAssetResourceForType:]``; checked on macOS 27, issue #29). Their
+    dates in Photos go to the variable Dates (wf.photo_date, by position), to
+    tell apart two photos whose files share a name. Otherwise Renderings stays
+    unset, and the selection script gets no files.
+
+    Find Photos has no try: should it fail (Shortcuts without access to
+    Photos), Shortcuts stops the run there, before anything is converted, and
+    the next run deletes the album.
+    """
+    b.set_variable(
+        'Bridge',
+        b.run_applescript(applescript_text('bridge'), input_ref=ids),
+    )
+
+    def find():
+        photos = b.find_photos_in_album(BRIDGE_ALBUM)
+        b.set_variable('Renderings', photos)
+        b.repeat_each(photos, lambda: photo_date(b, REPEAT_ITEM, REPEAT_INDEX))
+
+    b.if_has_value(
+        b.match_text(variable('Bridge'), r'^BRIDGE [1-9]'), find, lambda: None
     )
 
 

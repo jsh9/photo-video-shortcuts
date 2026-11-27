@@ -474,6 +474,50 @@ class Builder:
         )
         return output_of(a, 'Photos')
 
+    def find_photos_in_album(self, album):
+        """
+        Find Photos (no input) where Album is ``album`` (a name): that album's
+        items, as photos of the library, in no particular order, with no limit.
+
+        Shortcuts looks the name up in the user albums each time the action
+        runs (folders included; the first album with that name) and fetches
+        exactly that album's items (``fetchAssetsInAssetCollection``); with no
+        such album the action fails ("Photo Album Not Found"). Operator 4 is
+        "is" (5 is "is not"). ContentKit, decompiled from iOS 18.2:
+        ``WFPHAssetPredicateFromContentPredicate`` and
+        ``+[WFPhotoLibraryFiltering
+        performCustomFilteringUsingContentPredicates:…]``. The parameters are
+        those the Shortcuts app wrote for Filter Photos in 0.3.0 (commit
+        6d60078), without an input.
+        """
+        a = self.add(
+            'is.workflow.actions.filter.photos',
+            {
+                'WFContentItemFilter': {
+                    'Value': {
+                        'WFActionParameterFilterPrefix': 1,  # All, not Any
+                        'WFActionParameterFilterTemplates': [
+                            {
+                                'Operator': 4,
+                                'Property': 'Album',
+                                'Removable': True,
+                                'Values': {
+                                    'Enumeration': {
+                                        'Value': album,
+                                        'WFSerializationType': 'WFStringSubstitutableState',
+                                    },
+                                    'Unit': 4,
+                                },
+                            }
+                        ],
+                        'WFContentPredicateBoundedDate': False,
+                    },
+                    'WFSerializationType': 'WFContentPredicateTableTemplate',
+                },
+            },
+        )
+        return output_of(a, 'Photos')
+
     def stop(self):
         self.add('is.workflow.actions.exit', {})
 

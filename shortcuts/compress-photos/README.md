@@ -233,9 +233,9 @@ Not kept:
 - **Edits**: an edited photo is converted as it looks now; the edit can't be
   reverted. Photos keeps the unedited original and the edit separately, but
   hands the shortcut only the edited rendering, from the share sheet and from
-  the photo picker alike, so the JXL has neither the original nor the edit. If
-  you want both, convert the photo before editing it, and edit the JXL (or keep
-  the HEIC).
+  the photo picker alike (and on the Mac from Photos' selection too, since
+  0.12.0), so the JXL has neither the original nor the edit. If you want both,
+  convert the photo before editing it, and edit the JXL (or keep the HEIC).
 - **A title or keywords set in Photos.** Shortcuts on the iPhone can't read
   them (nor can any app through Apple's photo library interface), so the copy
   has only those the original file itself holds, if any; Photos' own are lost

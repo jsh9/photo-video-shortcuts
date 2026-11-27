@@ -111,14 +111,28 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   (or right-click ▸ Shortcuts ▸ *Compress Photos (macOS)*, or the menu bar
   while Photos is in front). The shortcut takes the photos selected in Photos.
   The first time, macOS asks whether Shortcuts may control Photos: click OK.
+  Shortcuts also needs access to your photo library (it may ask once).
   - Photos exports the **original files** (the HEIC as it was imported, with
     its HDR), the copies are imported into the originals' albums, and the
     originals of the imported copies go into the album **Compressed
     originals**. Review that album and delete its photos when you are done (a
     shortcut cannot delete photos on this path). The album stays, empty, for
     the next run.
-  - An **edited photo** is converted from its unedited original on this path:
-    the edits aren't applied. To convert the edited version, use the picker.
+  - An **edited photo** (exposure, a style, a rotation, a crop...) is converted
+    as it looks in Photos now, as on the iPhone: the edit is in the copy's
+    pixels and can't be reverted there. An HDR photo stays HDR, without Apple's
+    HDR profile (see [HDR photos](README.md#31-hdr-photos)). The copy still
+    gets its original's albums, title, caption, keywords, favorite, date and
+    location. The log lists the edited photos. To get Photos' current version
+    of each photo, the shortcut puts the selection into an album **Compress
+    Photos (working)** for a moment; it deletes the album (not the photos)
+    before importing the copies.
+  - If a photo can't be checked for edits (the log says
+    `! could not check ... for edits`), it is converted from its original,
+    without edits made in Photos, and its original is collected all the same:
+    look at its copy before deleting the original. A RAW photo is never
+    converted from its edited version (the encoder can't read RAW, so it is
+    left alone).
     - Shortcuts never sees the photos Photos would hand over through the Share
       menu (on macOS 26 that is a JPEG copy Shortcuts can't read), which is why
       the shortcut asks Photos for the selection instead. If two selected
@@ -225,11 +239,12 @@ The same as on the iPhone: see
 [HDR photos](README.md#31-hdr-photos) and [Dates](README.md#32-dates). The Mac
 shortcuts get the photos from Shortcuts as files, as the iPhone shortcut does
 from the share sheet, and the encoder is the same; an edited photo is converted
-as it looks now. Each copy gets the date Photos shows for its original, in
-Photos and in its EXIF, also a date you changed in Photos (Image ▸ Adjust Date
-and Time) and for a photo without a capture date of its own; from Photos (the
-selection), a copy that Photos dated differently on import is given its
-original's date. The Finder shortcut's files keep their own dates.
+as it looks now, from Photos (the selection) and from the picker alike. Each
+copy gets the date Photos shows for its original, in Photos and in its EXIF,
+also a date you changed in Photos (Image ▸ Adjust Date and Time) and for a
+photo without a capture date of its own; from Photos (the selection), a copy
+that Photos dated differently on import is given its original's date. The
+Finder shortcut's files keep their own dates.
 
 Each copy also gets the location Photos shows for its original, in its GPS: a
 location you changed in Photos (Image ▸ Location) is kept, and one you hid
