@@ -108,11 +108,11 @@ BRIDGE_ALBUM = 'Compress Photos (working)'
 # COPY_KEYWORD (wfkit's, shared with Compress Videos) on every copy, then its
 # format and quality, as common.zsh's KEYWORDS gives them: FORMAT_KEYWORDS'
 # format and its prefix with the chosen number ("jxl" and "q=83", "heic" and
-# "rf=26"). In Photos' library only, as the copy's title, caption and other
+# "RF=26"). In Photos' library only, as the copy's title, caption and other
 # keywords are: none is written into the file. The import drops these from the
 # keywords of an original that is itself a copy (a copy of a copy).
 COPY_KEYWORD = wf.COPY_KEYWORD
-FORMAT_KEYWORDS = {'heic': 'rf=', 'jxl': 'q='}
+FORMAT_KEYWORDS = {'heic': 'RF=', 'jxl': 'q='}
 # Where every route keeps its log and the progress window's script: a plain
 # folder, so that Terminal (the progress window) never needs access to
 # iCloud Drive or Pictures (common.zsh sets the same path). Each route has its

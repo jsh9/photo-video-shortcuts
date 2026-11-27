@@ -22,6 +22,9 @@ encoder. Every release includes the current files of all shortcuts.
     photo that can't be checked for edits is converted from its original with
     `! could not check ... for edits` in the log; look at its copy before
     deleting the original. A RAW photo is left alone as before.
+  - On the Mac, a HEIC copy's quality keyword in Photos is `RF=26` (the RF you
+    chose), in capitals, instead of `rf=26`. Copies made before keep theirs;
+    converting such a copy again still drops its old keyword.
   - Update *Compress Photos (macOS)*, and `photobatch-macos` (unchanged but for
     its version, which the shortcut checks). The iPhone shortcuts and
     `photobatch.wasm` work as in 0.11.0.

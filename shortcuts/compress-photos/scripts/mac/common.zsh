@@ -23,9 +23,9 @@ FORMAT='@FORMAT@'  # heic: HEIC (x265, QUALITY is the RF); anything else: JPEG X
 QUALITY='@QUALITY@'
 # The format's name for the log, and the keywords the selection route gives
 # each copy in Photos (selection.zsh, import.applescript): its format and
-# quality, "heic,rf=26" or "jxl,q=83"; every copy of a run has the same.
+# quality, "heic,RF=26" or "jxl,q=83"; every copy of a run has the same.
 case $FORMAT in
-  heic) FORMAT_NAME=HEIC; KEYWORDS="heic,rf=$QUALITY";;
+  heic) FORMAT_NAME=HEIC; KEYWORDS="heic,RF=$QUALITY";;
   *) FORMAT_NAME='JPEG XL'; KEYWORDS="jxl,q=$QUALITY";;
 esac
 CORES='@CORES@'  # all: several photos at a time, every core; one: one photo, one thread

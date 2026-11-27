@@ -527,7 +527,7 @@ def test_selection_heic_copies_say_their_format_and_rf(mac):
     )
     folder = mac.selection_work / 'out'
     assert out.splitlines() == [
-        f'{folder}/IMG_0001.heic|A1|delete|IMG_0001.heic|heic,rf=26',
+        f'{folder}/IMG_0001.heic|A1|delete|IMG_0001.heic|heic,RF=26',
     ]
     assert (folder / 'IMG_0001.heic').exists()
 
@@ -705,7 +705,7 @@ def test_selection_converts_an_edited_photo_as_photos_shows_it(
     assert staged(mac, 1) == copy_of(edited)
     assert staged(mac, 2) == mac.selection_work / 'in' / 'IMG_0002.HEIC'
     folder = mac.selection_work / 'out'
-    keywords = 'heic,rf=26' if fmt == 'heic' else 'jxl,q=83'
+    keywords = 'heic,RF=26' if fmt == 'heic' else 'jxl,q=83'
     assert [line.split('|')[1:4:2] for line in out.splitlines()] == [
         ['A1', f'IMG_0001.{ext}'],
         ['A2', f'IMG_0002.{ext}'],

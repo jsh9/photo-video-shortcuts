@@ -181,7 +181,7 @@ Compress Photos (macOS)                      (shortcut)
    saving time ends) and jxl_meta.txt (the other lines, by job index), runs
    photobatch, renames each result to out/Name.jxl (or .heic) and
    prints
-   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,rf=26)"
+   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,RF=26)"
    (a "|", ":", "/", "\" or control character in the original's name is
    "_" in the copy's: photobatch's clean_name, so the line splits on "|");
    Run AppleScript bridge.applescript (input: the text "close") deletes the
@@ -921,14 +921,14 @@ took ..." line has the time. Compress Videos' copies get this too (nothing is
 written into a video's file, so there every field Photos has is set this way).
 
 The keywords a copy gets there (`copyKeywords`) are its original's, then
-`compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `rf=26`,
+`compr`, then its format and quality: `jxl` and `q=83`, or `heic` and `RF=26`,
 the number chosen for the run (every copy of a run has the same, as x265 and
 libjxl encode every photo at it; `q=100` is lossless). `selection.zsh` appends
 them to each result line, `path|id|delete or keep|Name.jxl|jxl,q=83`
 (`KEYWORDS`, set in `common.zsh` with `FORMAT_NAME`); Compress Videos' lines
 have none, so its copies get `compr` only. An original that is itself a copy
 (it has `compr`) passes on none of the keywords the tool gave it: its `compr`,
-`heic`, `jxl` and `q=`/`rf=` keywords (`toolKeyword`; `COPY_KEYWORD` in
+`heic`, `jxl` and `q=`/`RF=` keywords (`toolKeyword`; `COPY_KEYWORD` in
 `lib/wfkit.py`, shared with Compress Videos, and the builder's
 `FORMAT_KEYWORDS`) are left out, so that a copy of a copy (a HEIC copy
 converted again, to JPEG XL) says only what it is. Any other original's

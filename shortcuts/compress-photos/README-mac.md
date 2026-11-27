@@ -209,7 +209,7 @@ platform only: the iPhone's need a-Shell, these need Run Shell Script.
   location, title, caption and keywords, and is a favorite if its original is
   (see [What is and isn't kept](#4-what-is-and-isnt-kept)).
 - To find the copies later, make a smart album (File ▸ New Smart Album) with
-  Keyword is `compr`; add Keyword is `jxl` (or `heic`, `q=83`, `rf=26`, ...)
+  Keyword is `compr`; add Keyword is `jxl` (or `heic`, `q=83`, `RF=26`, ...)
   with Match all for those of one format or quality. A smart album lists them
   at once; Photos' search finds the keywords only once it has indexed them.
 - Photos may list the copies under Duplicates. Merging keeps only one file, so
@@ -259,7 +259,7 @@ From Photos (the selection), the copy also gets its original's title, caption
 and keywords, and is a favorite if its original is, in Photos only: they aren't
 written into the copy's file, which has only the original file's own, if any
 (as the original's file does). It also gets the keywords `compr`, its format
-(`jxl` or `heic`) and its quality (`q=83`, `rf=26`: the number you chose), also
+(`jxl` or `heic`) and its quality (`q=83`, `RF=26`: the number you chose), also
 in Photos only, to find the copies (see
 [Compress Photos (macOS)](#31-compress-photos-macos)). After the import, the
 shortcut checks each copy in Photos and gives it whatever Photos read

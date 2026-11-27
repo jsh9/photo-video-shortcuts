@@ -79,7 +79,7 @@ ORIGINALS_ALBUM = 'Videos already compressed'
 # copyKeywords), with its original's, to find the copies there; in Photos'
 # library only, the same word as Compress Photos' (wfkit's). No format or
 # quality keywords (Compress Photos adds "jxl" and "q=83", or "heic" and
-# "rf=26").
+# "RF=26").
 COPY_KEYWORD = vf.COPY_KEYWORD
 FORMAT_KEYWORDS = {}
 # The log, the progress window's script and its pid, and the last run's

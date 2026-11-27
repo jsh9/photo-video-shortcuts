@@ -209,7 +209,7 @@ fi
 # output line per result, "path|original id|delete or keep|Name.jxl|keywords",
 # for import.applescript. Nothing when nothing was converted. The keywords are
 # the copy's format and quality (KEYWORDS, common.zsh: "jxl,q=83",
-# "heic,rf=26"), which import.applescript gives it in Photos only, with
+# "heic,RF=26"), which import.applescript gives it in Photos only, with
 # "compr" (never in the file).
 mkdir -p "$WORK/out"
 if [ -f "$WORK/jxl_done.txt" ]; then
