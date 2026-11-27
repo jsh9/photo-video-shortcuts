@@ -43,9 +43,12 @@ declares:
 ```
 
 `shortcuts` is a list (iPhone shortcuts) or a dictionary with the platforms
-`iphone` and `mac`. An encoder is a `.wasm` file (run with `wasmtime`) or a
-native Mac executable, a name without an extension (run directly; releases are
-built on a Mac).
+`iphone` and `mac`. A file can be listed under one platform only: Stack Photos,
+one shortcut for both, lists it under `iphone`, so its one ZIP is
+`stack-photos-shortcuts-v<version>.zip` (and the notes say iPhone), and has no
+encoders (`"encoders": []`). An encoder is a `.wasm` file (run with `wasmtime`)
+or a native Mac executable, a name without an extension (run directly; releases
+are built on a Mac).
 
 Encoder files and signed shortcuts come from that tool's `dist/`. Every
 declared file must exist, contain data, and have been regenerated during its

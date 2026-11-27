@@ -38,6 +38,12 @@ Apple Shortcuts that compress photos and videos, with the encoders they run:
   natively against Homebrew, and statically for macOS.
 - **Compress Videos** (`shortcuts/compress-videos/`): Mac only for now; ffmpeg
   plus `vidmeta` (C) for the metadata.
+- **Stack Photos** (`shortcuts/stack-photos/`): one shortcut for iPhone and Mac
+  made of Shortcuts' own actions (no encoder, no a-Shell). It stacks photos and
+  writes the stack's date into its JPEG's EXIF through Base64 Encode, Replace
+  Text and Base64 Decode. On the Mac only, Run AppleScript and Run Shell Script
+  get the photos selected in Photos (`scripts/mac/`), which Photos' Share menu
+  doesn't hand to a shortcut there.
 
 The `.shortcut` files are **generated** by Python
 (`shortcuts/<name>/scripts/build_*.py`, on top of `lib/wfkit.py`), never edited
@@ -80,7 +86,7 @@ In a Linux container (a typical cloud agent session) you can still:
 
 - run `pre-commit run --all-files` (`pip install pre-commit`);
 - run `python3 -m pip install -r tests/requirements.txt` and then
-  `python3 -m pytest tests/scripts tests/compress-photos/test_shortcuts.py tests/compress-photos/test_mac_shortcuts.py`.
+  `python3 -m pytest tests/scripts tests/compress-photos/test_shortcuts.py tests/compress-photos/test_mac_shortcuts.py tests/stack-photos`.
   `test_written_file_is_valid` fails there because it needs macOS's `plutil`;
   tests whose build or tool is missing are skipped (in CI they fail instead).
 
