@@ -63,6 +63,10 @@ OUT = HERE.parent / 'build' / 'shortcuts'
 
 NAME_PHOTOS = 'Compress Photos (macOS)'
 NAME_FILES = 'Compress Photo Files (macOS)'
+# The revertible-edits prototype (docs/compress-photos-revertible-edits-
+# plan.md): the Photos shortcut under a name of its own, so that it doesn't
+# replace the released one.
+NAME_PROTOTYPE = 'Compress Photos (macOS) Prototype'
 HELP_URL = 'https://github.com/jsh9/photo-video-shortcuts/blob/main/shortcuts/compress-photos/README-mac.md'
 ENCODER_URL = 'https://github.com/jsh9/photo-video-shortcuts/releases/latest/download/photobatch-macos'
 
@@ -792,7 +796,16 @@ def main():
         action='store_true',
         help='use hand-written action templates instead of a sample (best guess)',
     )
+    ap.add_argument(
+        '--prototype',
+        action='store_true',
+        help=f'only the Photos shortcut, named "{NAME_PROTOTYPE}"',
+    )
     args = ap.parse_args()
+    if args.prototype:
+        global NAME_PHOTOS
+        NAME_PHOTOS = NAME_PROTOTYPE
+
     if args.fetch:
         wf.fetch_sample(args.fetch, SAMPLE)
 
@@ -810,6 +823,9 @@ def main():
         photos_workflow(sample, build_photos(sample)),
         not args.no_sign,
     )
+    if args.prototype:
+        return
+
     write(
         NAME_FILES,
         files_workflow(sample, build_files(sample)),

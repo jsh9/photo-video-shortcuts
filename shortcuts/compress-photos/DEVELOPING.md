@@ -978,26 +978,32 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   original order. Kept: the picture and its tiles, its thumbnails, its Exif and
   XMP items, and, unless `--sdr`, the gain map (an auxiliary image of Apple's
   `hdrgainmap` type, or the inputs of a `tmap` item) with its tiles, `tmap` and
-  XMP, plus the `altr` group. Dropped: Apple's Photographic Styles data (the
-  linear style-delta image, three mattes, the linear thumbnail, the styles
-  metadata; about 0.3 MB of a 2.7 MB photo) and any other auxiliary image. A
-  date or other metadata from Photos replaces the data of the picture's Exif
-  item (the 4-byte offset header put back) or, when the file has none, adds one
-  (`hb_rewrite_t` `add`: a hidden `infe`, a `cdsc` reference to the picture, an
-  `iloc` entry, its data last in `mdat`), and likewise the picture's XMP item
-  (added as a `mime` item, `application/rdf+xml`), as in the JPEG XL route.
-  Replaced data always goes to `mdat`; when an item kept in `idat`
-  (construction method 1, where some writers put the Exif) is replaced or
-  dropped, `idat` is written anew with only the kept items' data, each in one
-  piece (their `iloc` offsets moved), so that no old Exif (a hidden location's
-  GPS) stays in the file (a kept item there that can't be read, in a malformed
-  file, keeps `idat`'s layout instead, with the replaced and dropped items'
-  bytes zeroed in place); otherwise it stays byte for byte. A single `hvc1`
-  picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N gives
-  the same size as x265 on the whole picture at CRF N (within 0.3%), and for a
-  still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers run
-  finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈ JPEG
-  XL 83).
+  XMP, plus the `altr` group, and every other auxiliary image of the picture
+  (an `auxl` reference to it) with its tiles and XMP, byte for byte: a Portrait
+  photo's depth or disparity and its mattes, the semantic mattes, and Apple's
+  Photographic Styles data (the linear style-delta image, the linear thumbnail,
+  and the `uri ` item `tag:apple.com,2023:photo:metadata:styles`, about 57 KB,
+  which describes the picture and the style-delta image; about 0.3 MB of a 2.7
+  MB photo in all), which Photos needs to edit the copy as it edits the
+  original (since the revertible-edits prototype; the log says
+  `N auxiliary images kept`). Without the `uri ` item, Photos showed a copy's
+  Style as a filter. A date or other metadata from Photos replaces the data of
+  the picture's Exif item (the 4-byte offset header put back) or, when the file
+  has none, adds one (`hb_rewrite_t` `add`: a hidden `infe`, a `cdsc` reference
+  to the picture, an `iloc` entry, its data last in `mdat`), and likewise the
+  picture's XMP item (added as a `mime` item, `application/rdf+xml`), as in the
+  JPEG XL route. Replaced data always goes to `mdat`; when an item kept in
+  `idat` (construction method 1, where some writers put the Exif) is replaced
+  or dropped, `idat` is written anew with only the kept items' data, each in
+  one piece (their `iloc` offsets moved), so that no old Exif (a hidden
+  location's GPS) stays in the file (a kept item there that can't be read, in a
+  malformed file, keeps `idat`'s layout instead, with the replaced and dropped
+  items' bytes zeroed in place); otherwise it stays byte for byte. A single
+  `hvc1` picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N
+  gives the same size as x265 on the whole picture at CRF N (within 0.3%), and
+  for a still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers
+  run finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈
+  JPEG XL 83).
 - **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
   HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
   several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full

@@ -21,6 +21,7 @@ typedef struct {
   int tiles;          // pictures encoded
   int had_gain_map;   // the file had one (heic_transcode)
   int kept_gain_map;  // and the output has it
+  int kept_aux;       // other auxiliary images kept (depth, mattes, Styles data)
   char note[160];     // heic_transcode's reason for 1: why this file can't be transcoded
 } heic_info_t;
 

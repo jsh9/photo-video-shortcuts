@@ -78,6 +78,8 @@ class Mac:
             self.home / 'Library' / 'Caches' / 'compress-photos-macos'
         )
         self.photobatch = photobatch
+        # Compress Photos Helper's stand-in (fake_helper), if any: PHOTOEDITS
+        self.photoedits = None
 
     def env(self, photobatch=None, watch=False):
         env = dict(
@@ -88,6 +90,9 @@ class Mac:
             WATCH='1' if watch else '0',  # the Terminal progress window
             TZ='America/New_York',  # the Mac's time zone, for the dates
         )
+        if self.photoedits:
+            env['PHOTOEDITS'] = str(self.photoedits)
+
         if watch:
             # a fake `open` first on PATH records what the script opens
             fake = self.root / 'bin'
@@ -671,21 +676,74 @@ def copy_of(path):
     return ('a copy of', pathlib.Path(path).read_bytes())
 
 
-EDITED = 'edited photo(s) are converted as they look in Photos now'
+EDITED = 'edited photo(s) are saved with their edits'
 UNCHECKED = '! could not check'
 
 
+def fake_helper(mac, access='3', check='ok|', create='created', whole=True):
+    """
+    Compress Photos Helper's stand-in (PHOTOEDITS, run directly): "check"
+    answers each job with ``check`` ("ok|notes" or "no|reason") and writes its
+    Adjustments.plist; "create" answers ``create`` with the id "NEW-<n>/L0/001"
+    when the three files are there, and keeps what it got in edits.seen.
+    ``whole``: False leaves out the answer's "end".
+    """
+    end = 'print end' if whole else ':'
+    script = mac.root / 'photoedits-fake'
+    script.write_text(f"""#!/bin/zsh
+E=$2
+h='photoedits 0.13.0-prototype protocol 1'
+case $1 in
+  check)
+    {{ print -r -- $h; print 'access|{access}'
+      while IFS='|' read -r n id; do
+        [ -n "$n" ] || continue
+        print '<plist/>' > "$E/$n/Adjustments.plist"
+        print -r -- "$n|{check}"
+      done < "$E/check.txt"
+      {end}; }} > "$E/check.out";;
+  create)
+    {{ print -r -- $h; print 'access|{access}'
+      while IFS='|' read -r n name; do
+        [ -n "$n" ] || continue
+        b=("$E/$n"/base.*(N))
+        if [ -n "$b[1]" ] && [ -f "$E/$n/look.heic" ] && [ -f "$E/$n/Adjustments.plist" ]; then
+          print -r -- "$n|{create}|NEW-$n/L0/001|"
+        else
+          print -r -- "$n|failed|files missing"
+        fi
+      done < "$E/create.txt"
+      {end}; }} > "$E/create.out"
+    cp -R "$E" "$E.seen";;
+esac
+""")
+    script.chmod(0o755)
+    mac.photoedits = script
+
+
+def look(mac, index):
+    """The bytes of the edited photo's look staged as job ``index``."""
+    return copy_of(mac.selection_work / 'looks' / f'jxl_in_{index}.orig')
+
+
+def seen(mac, n):
+    """The folder the helper got for edited photo ``n`` (base, look, plist)."""
+    return mac.logdir / 'edits.seen' / str(n)
+
+
 @pytest.mark.parametrize(
-    ('fmt', 'quality', 'ext'), [('jxl', '83', 'jxl'), ('heic', '26', 'heic')]
+    ('fmt', 'quality', 'ext', 'look_rf'),
+    [('jxl', '83', 'jxl', '26'), ('heic', '24', 'heic', '24')],
 )
-def test_selection_converts_an_edited_photo_as_photos_shows_it(
-        mac, fmt, quality, ext
+def test_selection_saves_an_edited_photo_with_its_edit(
+        mac, fmt, quality, ext, look_rf
 ):
-    # Find Photos gives an edited photo as Photos' rendering (here as Photos
-    # saves an edit: upright at its new size, a new unlabeled gain map), an
-    # unedited one as its original's bytes. The edited one's rendering is
-    # converted, under the original's name and with its id; the unedited one's
-    # original. Photos' date and location still reach photobatch by job index.
+    # Prototype: an edited photo's original is converted (the base, in the
+    # chosen format) and Photos' rendering apart (the look, always HEIC); the
+    # helper saves both with the edit record and answers the new photo's id,
+    # which the result line carries ("id:..."), with the original's id. The
+    # unedited photo goes as before. Photos' date and location reach both.
+    fake_helper(mac)
     exported(mac, 'hdr/o6.heic', 'IMG_0001.HEIC')
     exported(mac, 'hdr/srgb.heic', 'IMG_0002.HEIC')
     edited = rendering(mac, 'hdr/edited_in_photos.heic', 'IMG_0001.heic')
@@ -702,37 +760,47 @@ def test_selection_converts_an_edited_photo_as_photos_shows_it(
             'A1\tgps\t40.758442,-73.829767\n'
         ),
     )
-    assert staged(mac, 1) == copy_of(edited)
+    assert staged(mac, 1) == mac.selection_work / 'in' / 'IMG_0001.HEIC'
     assert staged(mac, 2) == mac.selection_work / 'in' / 'IMG_0002.HEIC'
-    folder = mac.selection_work / 'out'
-    keywords = 'heic,RF=26' if fmt == 'heic' else 'jxl,q=83'
-    assert [line.split('|')[1:4:2] for line in out.splitlines()] == [
-        ['A1', f'IMG_0001.{ext}'],
-        ['A2', f'IMG_0002.{ext}'],
+    assert look(mac, 1) == copy_of(edited)
+    keywords = f'heic,RF={quality}' if fmt == 'heic' else f'jxl,q={quality}'
+    first, second = out.splitlines()
+    fields = first.split('|')
+    assert fields[0] == 'id:NEW-1/L0/001' and fields[1] == 'A1'
+    assert fields[3:] == [f'IMG_0001.{ext}', keywords]
+    assert second.split('|')[1:4:2] == ['A2', f'IMG_0002.{ext}']
+    # what the helper got: the base, the HEIC look, the edit record
+    got = seen(mac, 1)
+    assert sorted(p.name for p in got.iterdir()) == [
+        'Adjustments.plist',
+        f'base.{ext}',
+        'look.heic',
+        'original',
     ]
-    assert all(line.endswith(keywords) for line in out.splitlines())
-    log = mac.log_file('selection').read_text()
-    assert (
-        f"1 {EDITED} (the edit can't be reverted on the copy): IMG_0001.HEIC"
-        in log
+    assert (got / 'look.heic').read_bytes()[4:12] == b'ftypheic'
+    tags = ph.exif_tags(got / f'base.{ext}')
+    assert tags['GPS:GPSLatitude'] == pytest.approx(40.758442, abs=1e-7)
+    looks = mac.selection_work / 'looks'
+    assert (looks / 'jxl_dates.txt').read_text() == (
+        '1|2024-01-01T17:00:00-0500\n'
     )
-    assert UNCHECKED not in log
-    # the rendering's HDR is kept, and its size is the edited photo's
-    assert 'saved as SDR' not in log and 'orientation check' not in log
-    assert 'HEIF 62x46' in log
-    assert (mac.selection_work / 'jxl_dates.txt').read_text() == (
-        '1|2024-01-01T17:00:00-0500\n2|2024-07-01T09:30:00-0400\n'
-    )
-    assert (mac.selection_work / 'jxl_meta.txt').read_text() == (
+    assert (looks / 'jxl_meta.txt').read_text() == (
         '1|gps|40.758442,-73.829767\n'
     )
-    tags = ph.exif_tags(folder / f'IMG_0001.{ext}')
-    assert tags['GPS:GPSLatitude'] == pytest.approx(40.758442, abs=1e-7)
+    log = mac.log_file('selection').read_text()
+    assert (
+        f'1 {EDITED}, which can be reverted in Photos (prototype): '
+        'IMG_0001.HEIC'
+    ) in log
+    assert f'HEIC, RF {look_rf}' in log  # the looks' run
+    # no "!" line of the script's own (photobatch's are indented)
+    assert not re.search(r'^!', log, re.MULTILINE)
 
 
-def test_selection_converts_a_jpeg_rendering_of_a_heic(mac):
+def test_selection_saves_a_jpeg_rendering_of_a_heic_as_its_look(mac):
     # An edit may come as a JPEG (Shortcuts names it .jpeg); photobatch reads
     # the format from the file, and the copy keeps the original's name.
+    fake_helper(mac)
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     (mac.root / 'renderings').mkdir()
     edit = ph.noise_jpeg(mac.root / 'renderings' / 'IMG_0001.jpeg')
@@ -741,7 +809,7 @@ def test_selection_converts_a_jpeg_rendering_of_a_heic(mac):
         renderings=[edit],
         lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
     )
-    assert out.split('|')[1:4:2] == ['A1', 'IMG_0001.jxl']
+    assert out.split('|')[:4:3] == ['id:NEW-1/L0/001', 'IMG_0001.jxl']
     log = mac.log_file('selection').read_text()
     assert 'JPEG 320x240' in log and f'1 {EDITED}' in log
 
@@ -753,6 +821,7 @@ def test_selection_converts_a_jpeg_rendering_of_a_heic(mac):
 def test_selection_pairs_renderings_by_name_without_extension(mac, name):
     # Shortcuts names the files after the original, with its own extension
     # ("IMG_1711.JPG" came as "IMG_1711.jpeg" on macOS 27); case aside.
+    fake_helper(mac)
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     r = rendering(mac, 'hdr/o1.heic', name)
     mac.batch(
@@ -760,7 +829,7 @@ def test_selection_pairs_renderings_by_name_without_extension(mac, name):
         renderings=[r],
         lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
     )
-    assert staged(mac, 1) == copy_of(r)
+    assert look(mac, 1) == copy_of(r)
 
 
 def test_selection_pairs_one_name_by_date(mac):
@@ -768,6 +837,7 @@ def test_selection_pairs_one_name_by_date(mac):
     # and a JPEG from two cameras): each rendering goes with the photo of its
     # date, to the second (Photos' AppleScript and Shortcuts' Date Taken give
     # the same; a second apart still counts).
+    fake_helper(mac)
     exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
     jpeg = ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0001.JPG')
     edit = rendering(mac, 'hdr/o1.heic', 'IMG_0001.heic')
@@ -784,10 +854,84 @@ def test_selection_pairs_one_name_by_date(mac):
     )
     jobs = (mac.selection_work / 'jxl_job.txt').read_text().splitlines()
     by_name = {line.split('|')[1]: int(line.split('|')[0]) for line in jobs}
-    assert staged(mac, by_name['IMG_0001.HEIC']) == copy_of(edit)
+    assert staged(mac, by_name['IMG_0001.HEIC']) == (
+        mac.selection_work / 'in' / 'IMG_0001.HEIC'
+    )
+    assert look(mac, 1) == copy_of(edit)
     assert staged(mac, by_name['IMG_0001.JPG']) == jpeg
     log = mac.log_file('selection').read_text()
     assert f'1 {EDITED}' in log and UNCHECKED not in log
+
+
+@pytest.mark.parametrize(
+    ('helper', 'said'),
+    [
+        (
+            None,
+            '! Compress Photos Helper is not installed (~/Applications): '
+            '1 edited photo(s) not converted: IMG_0001.HEIC',
+        ),
+        (
+            {'access': '2'},
+            '! Compress Photos Helper has no full access to '
+            'Photos (System Settings > Privacy & Security > Photos): 1 edited '
+            'photo(s) not converted: IMG_0001.HEIC',
+        ),
+        (
+            {'whole': False},
+            '! Compress Photos Helper gave no answer: 1 edited '
+            'photo(s) not converted: IMG_0001.HEIC',
+        ),
+        (
+            {'check': 'no|Photos has no edit for it'},
+            '! IMG_0001.HEIC: its '
+            "edit can't be read (Photos has no edit for it): not converted",
+        ),
+        (
+            {'create': 'failed'},
+            "! IMG_0001.HEIC: Photos didn't take the copy "
+            'with its edit (NEW-1/L0/001): not saved',
+        ),
+    ],
+)
+def test_selection_never_bakes_an_edit_in(mac, helper, said):
+    # Prototype: an edited photo whose edit can't be kept gets no copy at all
+    # (and so its original isn't collected), never one with the edit baked in
+    # or without it; the log says why. The unedited photo goes as before.
+    if helper is not None:
+        fake_helper(mac, **helper)
+
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    exported(mac, 'hdr/o1.heic', 'IMG_0002.HEIC')
+    out = mac.batch(
+        'selection',
+        renderings=[
+            rendering(mac, 'hdr/o6.heic', 'IMG_0001.heic'),
+            rendering(mac, 'hdr/o1.heic', 'IMG_0002.heic'),
+        ],
+        lines=(
+            'A1|2024-01-01 17:00:00|IMG_0001.HEIC\n'
+            'A2|2024-01-02 17:00:00|IMG_0002.HEIC\n'
+        ),
+    )
+    assert [line.split('|')[1] for line in out.splitlines()] == ['A2']
+    log = mac.log_file('selection').read_text()
+    assert said in log
+
+
+def test_selection_notes_what_may_not_come_out_right(mac):
+    fake_helper(mac, check='ok|a Portrait photo: the copy has no depth data')
+    exported(mac, 'hdr/srgb.heic', 'IMG_0001.HEIC')
+    out = mac.batch(
+        'selection',
+        renderings=[rendering(mac, 'hdr/o6.heic', 'IMG_0001.heic')],
+        lines='A1|2024-01-01 17:00:00|IMG_0001.HEIC\n',
+    )
+    assert out.startswith('id:NEW-1/L0/001|A1|')
+    assert (
+        'IMG_0001.HEIC (may not come out right: a Portrait photo: the copy '
+        'has no depth data)'
+    ) in mac.log_file('selection').read_text()
 
 
 @pytest.mark.parametrize(
@@ -932,6 +1076,7 @@ def test_selection_names_photobatch_reads_but_the_check_does_not_know(mac):
     # doesn't know (an exiftool backup, ".JPG_original") is still converted
     # by photobatch, which goes by the content, so the log says it wasn't
     # checked for edits.
+    fake_helper(mac)
     ph.noise_jpeg(mac.selection_work / 'in' / 'scan.jpe')
     ph.noise_jpeg(mac.selection_work / 'in' / 'IMG_0002.jpg').rename(
         mac.selection_work / 'in' / 'IMG_0002.JPG_original'
@@ -946,7 +1091,8 @@ def test_selection_names_photobatch_reads_but_the_check_does_not_know(mac):
         ),
     )
     assert [line.split('|')[1] for line in out.splitlines()] == ['A2', 'A1']
-    assert staged(mac, 2) == copy_of(edit)
+    assert out.splitlines()[1].startswith('id:NEW-2/L0/001|A1|')
+    assert look(mac, 1) == copy_of(edit)
     log = mac.log_file('selection').read_text()
     assert f'1 {EDITED}' in log and 'scan.jpe' in log
     assert (

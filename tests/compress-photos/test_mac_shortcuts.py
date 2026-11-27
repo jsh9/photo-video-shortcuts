@@ -1292,3 +1292,23 @@ def test_photos_locations_in_photos_go_to_photobatch(gen, shortcuts):
     assert '1|gps|40.5,-73.25\nJXL_META' in script
     assert 'my metaLines(itemId, p)' in gen.applescript_text('export')
     assert not ph.check_photo_locations(shortcuts[FILES])
+
+
+def test_import_adopts_copies_already_in_photos(gen):
+    # Prototype: a result line "id:<Photos' id>|original id|flag|name|keywords"
+    # is a copy Compress Photos Helper already saved with its edit: it isn't
+    # imported, but found by id and handled like an imported copy (the check
+    # against its original, keywords, albums, the original collected); an id
+    # Photos doesn't know is a "!" line.
+    script = gen.applescript_text('import')
+    assert 'else if (item 1 of parts) starts with "id:" then' in script
+    assert (
+        'set end of adopted to {text 4 thru -1 of (item 1 of parts), '
+        'item 2 of parts, own, item 4 of parts}'
+    ) in script
+    assert (
+        'tell application "Photos" to set found to media item id '
+        '((item 1 of a) as text)'
+    ) in script
+    assert 'set end of pairs to {item 2 of a, found, item 3 of a}' in script
+    assert '": its copy isn\'t in Photos"' in script

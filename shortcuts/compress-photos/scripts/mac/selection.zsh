@@ -94,7 +94,9 @@ for f in "$WORK"/in/*(.N); do
   candidates "${f:t}"
   for k in $reply; do claims[$k]=$(( ${claims[$k]:-0} + 1 )); done
 done
-typeset -a origs edited unchecked
+typeset -a origs edited unchecked ens
+# the edited photos, by job index: Photos' rendering and the photo's id
+typeset -A erender eid
 n=0; live=0; videos=0
 for f in "$WORK"/in/*(.N); do
   name=${f:t}
@@ -118,18 +120,13 @@ for f in "$WORK"/in/*(.N); do
       case $? in
         0) ;;  # unedited: its original
         1)
-          # Edited: a copy of the rendering. photobatch can't read it where
-          # Shortcuts keeps it (its group container, which macOS guards as
-          # another app's data, kTCCServiceSystemPolicyAppDataDetailed, and a
-          # background run can't ask for: "Operation not permitted"); Apple's
-          # cp and cmp can (macOS 27), so by their paths, not another on PATH.
-          if /bin/cp "$r" "$WORK/jxl_in_$n.orig" 2>/dev/null; then
-            src=''
-            edited+=("$name")
-          else
-            rm -f "$WORK/jxl_in_$n.orig"
-            unchecked+=("$name")
-          fi;;
+          # Edited (prototype): its original is converted as job n (the
+          # base); Photos' rendering is converted apart, as the look, and
+          # Compress Photos Helper saves both with the edit (below).
+          edited+=("$name")
+          ens+=($n)
+          erender[$n]=$r
+          eid[$n]=${ids[$name]};;
         *) unchecked+=("$name");;  # unreadable
       esac
     else
@@ -173,10 +170,97 @@ skipped=''
 [ "$live" -gt 0 ] && skipped="$live Live Photo(s)"
 [ "$videos" -gt 0 ] && skipped="${skipped:+$skipped, }$videos video(s)"
 [ -n "$skipped" ] && echo "Skipped $skipped: only still photos are converted." >> "$LOG"
-# The edited photos (no "!": it is what Photos shows), and those that couldn't
-# be checked: each, or, when no rendering came at all, the reason in one line.
-if (( ${#edited} )); then
-  echo "${#edited} edited photo(s) are converted as they look in Photos now (the edit can't be reverted on the copy): ${(j:, :)edited}" >> "$LOG"
+# Edited photos (prototype): each is saved with its edit, so that the edit can
+# still be reverted in Photos. Compress Photos Helper (PhotoKit) reads its
+# edit record now, and after the conversion makes one photo of three things:
+# the copy of its original (job n, the chosen format), the edit record, and
+# the copy of Photos' rendering (the look, always HEIC: Photos keeps no JPEG
+# XL look), converted apart in $WORK/looks. Nothing is baked in: a photo whose
+# edit can't be kept gets no copy, and its original isn't collected. The
+# helper's files are in $E (where its PhotoKit calls were checked); it is
+# found in ~/Applications or /Applications (PHOTOEDITS: another program,
+# run directly; the tests use it), started with `open -W`, and answers in
+# $E/COMMAND.out, whole only with its "photoedits ... protocol 1" first line
+# and "end" last.
+E="$HOME/Library/Caches/compress-photos-macos/edits"
+typeset -A eok enote lookof
+helper=''
+# photoedits COMMAND: runs the helper's COMMAND on $E; 0 if it answered whole
+photoedits() {
+  /bin/rm -f "$E/$1.out"
+  if [[ $helper == *.app ]]; then
+    open -W -n -g -a "$helper" --args "$1" "$E" 2>> "$LOG"
+  else
+    "$helper" "$1" "$E" 2>> "$LOG"
+  fi
+  [ -f "$E/$1.out" ] && head -1 "$E/$1.out" | grep -q '^photoedits .* protocol 1$' && [ "$(tail -1 "$E/$1.out")" = end ]
+}
+if (( ${#ens} )); then
+  [ -d "$E" ] && /bin/rm -r "$HOME/Library/Caches/compress-photos-macos/edits"
+  mkdir -p "$E"
+  for n in $ens; do
+    mkdir -p "$E/$n"
+    ln -s "$WORK/in/${origs[$n]}" "$E/$n/original"
+    print -r -- "$n|${eid[$n]}" >> "$E/check.txt"
+  done
+  for c in "${PHOTOEDITS:-}" "$HOME/Applications/Compress Photos Helper.app" "/Applications/Compress Photos Helper.app"; do
+    if [ -n "$c" ] && [ -e "$c" ]; then helper=$c; break; fi
+  done
+  names=()
+  for n in $ens; do names+=("${origs[$n]}"); done
+  if [ -z "$helper" ]; then
+    echo "! Compress Photos Helper is not installed (~/Applications): ${#ens} edited photo(s) not converted: ${(j:, :)names}" >> "$LOG"
+  elif ! photoedits check; then
+    echo "! Compress Photos Helper gave no answer: ${#ens} edited photo(s) not converted: ${(j:, :)names}" >> "$LOG"
+  elif ! grep -qx 'access|3' "$E/check.out"; then
+    echo "! Compress Photos Helper has no full access to Photos (System Settings > Privacy & Security > Photos): ${#ens} edited photo(s) not converted: ${(j:, :)names}" >> "$LOG"
+  else
+    while IFS='|' read -r n verdict note || [ -n "$n" ]; do
+      [[ $n == <-> ]] && [ -n "${eid[$n]}" ] || continue
+      if [ "$verdict" = ok ]; then
+        eok[$n]=1
+        enote[$n]=$note
+      else
+        echo "! ${origs[$n]}: its edit can't be read ($note): not converted" >> "$LOG"
+      fi
+    done < "$E/check.out"
+  fi
+  # The looks: a copy of each rendering (photobatch can't read it where
+  # Shortcuts keeps it, in its group container, which macOS guards as another
+  # app's data; Apple's cp can), with the photo's date and location lines.
+  mkdir -p "$WORK/looks"
+  k=0
+  for n in $ens; do
+    [ -n "${eok[$n]}" ] || continue
+    if ! /bin/cp "${erender[$n]}" "$WORK/looks/jxl_in_$((k + 1)).orig" 2>/dev/null; then
+      echo "! ${origs[$n]}: Photos' rendering of it can't be read: not converted" >> "$LOG"
+      unset "eok[$n]"
+      continue
+    fi
+    k=$((k + 1))
+    lookof[$n]=$k
+    printf '%d|%s\n' "$k" "${origs[$n]}" >> "$WORK/looks/jxl_job.txt"
+    for f in jxl_dates.txt jxl_meta.txt; do
+      [ -f "$WORK/$f" ] && grep "^$n|" "$WORK/$f" | sed "s/^$n|/$k|/" >> "$WORK/looks/$f"
+    done
+  done
+  # An edited photo whose edit can't be kept isn't converted at all.
+  if [ -f "$WORK/jxl_job.txt" ]; then
+    : > "$WORK/jxl_job.kept"
+    while IFS='|' read -r n rest || [ -n "$n" ]; do
+      [ -n "${erender[$n]}" ] && [ -z "${eok[$n]}" ] && continue
+      print -r -- "$n|$rest" >> "$WORK/jxl_job.kept"
+    done < "$WORK/jxl_job.txt"
+    mv "$WORK/jxl_job.kept" "$WORK/jxl_job.txt"
+    [ -s "$WORK/jxl_job.txt" ] || /bin/rm -f "$WORK/jxl_job.txt"
+  fi
+  kept=()
+  for n in $ens; do
+    [ -n "${eok[$n]}" ] && kept+=("${origs[$n]}${enote[$n]:+ (may not come out right: ${enote[$n]})}")
+  done
+  if (( ${#kept} )); then
+    echo "${#kept} edited photo(s) are saved with their edits, which can be reverted in Photos (prototype): ${(j:, :)kept}" >> "$LOG"
+  fi
 fi
 if (( ${#unchecked} && ${#renderings} )); then
   echo "! could not check ${#unchecked} photo(s) for edits: converted from the original file(s), without edits made in Photos. Look at the copies before deleting the originals: ${(j:, :)unchecked}" >> "$LOG"
@@ -190,6 +274,58 @@ elif (( ${#unchecked} )); then
   echo "! could not check the photos for edits ($why): edited photos are converted from their original files, without the edits. Look at the copies before deleting the originals." >> "$LOG"
 fi
 @RUN@
+# The edited photos' looks, as HEIC (at the chosen RF; 26 when the copies are
+# JPEG XL), then the helper makes each edited photo's copy.
+typeset -A ecreated
+if [ -f "$WORK/looks/jxl_job.txt" ]; then
+  { echo; echo "The edited photos' looks, as Photos shows them (HEIC):"; } >> "$LOG"
+  case $FORMAT in
+    heic) lrf=$QUALITY;;
+    *) lrf=26;;
+  esac
+  "$photobatch" --mac --heic --rf "$lrf" "${cores[@]}" "${hdr[@]}" -C "$WORK/looks" jxl_job.txt >> "$LOG" 2>&1
+  typeset -A basefile basename_ lookfile
+  if [ -f "$WORK/jxl_done.txt" ]; then
+    while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
+      [ -n "$file" ] || continue
+      basefile[$idx]=$file
+      basename_[$idx]=${name:-$flag}
+    done < "$WORK/jxl_done.txt"
+  fi
+  if [ -f "$WORK/looks/jxl_done.txt" ]; then
+    while IFS='|' read -r file idx rest || [ -n "$file" ]; do
+      [ -n "$file" ] && lookfile[$idx]=$file
+    done < "$WORK/looks/jxl_done.txt"
+  fi
+  : > "$E/create.txt"
+  for n in $ens; do
+    [ -n "${lookof[$n]}" ] || continue
+    b=${basefile[$n]}
+    l=${lookfile[${lookof[$n]}]}
+    if [ -z "$b" ] || [ -z "$l" ]; then
+      echo "! ${origs[$n]}: not saved (its original or its look didn't convert; see above)" >> "$LOG"
+      continue
+    fi
+    /bin/cp "$WORK/$b" "$E/$n/base.${b:e}" && /bin/cp "$WORK/looks/$l" "$E/$n/look.heic" &&
+      print -r -- "$n|${basename_[$n]}" >> "$E/create.txt"
+  done
+  if [ -s "$E/create.txt" ]; then
+    if ! photoedits create; then
+      echo "! Compress Photos Helper gave no answer when saving the edited photos: none of them saved" >> "$LOG"
+    else
+      while IFS='|' read -r n verdict id note || [ -n "$n" ]; do
+        [[ $n == <-> ]] && [ -n "${eid[$n]}" ] || continue
+        case $verdict in
+          created) ecreated[$n]=$id
+            [ -n "$note" ] && echo "! ${origs[$n]}: saved with its edit; note: $note" >> "$LOG";;
+          unsure) ecreated[$n]=$id
+            echo "! ${origs[$n]}: saved with its edit, but $note" >> "$LOG";;
+          *) echo "! ${origs[$n]}: Photos didn't take the copy with its edit ($id): not saved" >> "$LOG";;
+        esac
+      done < "$E/create.out"
+    fi
+  fi
+fi
 # A photo photobatch converted though readable() doesn't know its name (a
 # JPEG named ".jpeg2", say: photobatch goes by the content) was never checked
 # for edits.
@@ -216,6 +352,13 @@ if [ -f "$WORK/jxl_done.txt" ]; then
   while IFS='|' read -r file idx flag name || [ -n "$file" ]; do
     [ -n "$file" ] || continue
     [ -z "$name" ] && name=$flag  # a line from an older photobatch: file|index|name
+    # An edited photo: its copy is already in Photos ("id:<its id>"), or it
+    # has none (the log says why).
+    if [ -n "${erender[$idx]}" ]; then
+      [ -n "${ecreated[$idx]}" ] &&
+        printf 'id:%s|%s|%s|%s|%s\n' "${ecreated[$idx]}" "${ids[${origs[$idx]}]}" "$flag" "$name" "$KEYWORDS"
+      continue
+    fi
     dest=$(unique "$WORK/out/$name")
     mv "$WORK/$file" "$dest" || continue
     printf '%s|%s|%s|%s|%s\n' "$dest" "${ids[${origs[$idx]}]}" "$flag" "${dest:t}" "$KEYWORDS"

@@ -13,6 +13,10 @@
 -- and is not acted on here. A "|" in an original's name is "_" in its copy's
 -- (photobatch's clean_name; Compress Videos' encode.zsh), so the path and
 -- the name never hold one and the line splits on "|".
+-- A line whose path is "id:<Photos' id>" is a copy already in Photos (Compress
+-- Photos' edited photos, saved with their edits by its helper): it isn't
+-- imported, but is checked against its original, given its albums and
+-- keywords, and its original collected, like an imported one.
 -- Returns "imported=N", "collected=M", a line saying how long Photos took for
 -- each step, then one "! ..." line per problem.
 --
@@ -28,6 +32,7 @@ on run {input, parameters}
 	set pairs to {} -- {original id, imported item, its own keywords}
 	set toCollect to {} -- original ids
 	set orphans to {} -- {imported item, its own keywords, name}: original unknown
+	set adopted to {} -- {its id in Photos, original id, its own keywords, name}
 	set tImport to 0
 	set tCheck to 0
 	set tAlbums to 0
@@ -58,6 +63,10 @@ on run {input, parameters}
 			set parts to text items of ln
 			if (count of parts) < 4 then
 				set problems to problems & "! unexpected result line: " & ln & linefeed
+			else if (item 1 of parts) starts with "id:" then
+				set own to ""
+				if (count of parts) > 4 then set own to item 5 of parts
+				set end of adopted to {text 4 thru -1 of (item 1 of parts), item 2 of parts, own, item 4 of parts}
 			else
 				set end of theFiles to POSIX file (item 1 of parts)
 				set end of origIds to item 2 of parts
@@ -128,6 +137,24 @@ on run {input, parameters}
 		end repeat
 		set tImport to (current date) - t0
 	end if
+	-- The copies already in Photos, by their ids.
+	repeat with a in adopted
+		set found to missing value
+		try
+			tell application "Photos" to set found to media item id ((item 1 of a) as text)
+		end try
+		if found is missing value then
+			set problems to problems & "! " & (item 4 of a) & ": its copy isn't in Photos" & linefeed
+		else
+			set imported to imported + 1
+			if (item 2 of a) is not "" then
+				set end of pairs to {item 2 of a, found, item 3 of a}
+				set end of toCollect to item 2 of a
+			else
+				set end of orphans to {found, item 3 of a, item 4 of a}
+			end if
+		end if
+	end repeat
 	-- What Photos has for each original: photobatch wrote its date and
 	-- location into the copy's file, for Photos to read on import; should
 	-- Photos have read something else, the copy gets the original's. Its

@@ -17,6 +17,8 @@ GRID = HDR / 'grid_o6.heic'  # a 2x2 grid of tiles, turned by its 'irot'
 SINGLE = HDR / 'o1.heic'  # one 'hvc1' item with an ISO gain map
 OLDER = HDR / 'apple_older.heic'  # Apple's older gain map (auxiliary image)
 SDR_HEIC = FIXTURES / 'heif' / 'rotate_then_crop.heic'
+# ImageIO's HEIC with a Portrait effects matte (make_portrait_matte.swift)
+MATTE = FIXTURES / 'heif' / 'portrait_matte.heic'
 
 
 def items(path):
@@ -906,3 +908,26 @@ def test_an_unreadable_item_in_idat_still_loses_the_old_location(
         assert gps == {}
 
     assert ph.exif_tags(out)['IFD0:Make'] == 'TestMake'
+
+
+def test_other_auxiliary_images_are_kept_byte_for_byte(encoder, tmp_path):
+    # A Portrait photo's depth (or disparity) and mattes, the semantic mattes
+    # and Photographic Styles' data are auxiliary images of the picture
+    # ('auxl'); the HEIC copy keeps each, with its data byte for byte, so that
+    # Photos can edit the copy as it edits the original (a Portrait's depth of
+    # field). Only the picture is encoded again.
+    log, done = ph.convert(encoder, tmp_path, [MATTE], ['--heic'])
+    assert '1 auxiliary image kept' in ph.unwrapped(log)
+    before = items(MATTE)
+    after = items(done[1])
+    primary = 1  # ImageIO's picture
+    kept = {
+        data
+        for iid, (typ, data) in before.items()
+        if iid != primary and typ == 'hvc1'
+    }
+    assert kept and kept <= {data for _, data in after.values()}
+    # with its type ('auxC' property)
+    assert b'urn:com:apple:photo:2018:aux:portraiteffectsmatte' in (
+        done[1].read_bytes()
+    )

@@ -192,11 +192,17 @@ static int keep_image(const hb_file_t *f, idset_t *keep, uint32_t id) {
   return 0;
 }
 
-// Adds the Exif and XMP ('mime') items describing `id`.
+// Adds the metadata items describing `id`: Exif, XMP ('mime'), and 'uri '
+// items such as Apple's Photographic Styles metadata
+// (tag:apple.com,2023:photo:metadata:styles, which Photos needs to show a
+// Style as a Style rather than a filter).
 static int keep_metadata(const hb_file_t *f, idset_t *keep, uint32_t id) {
   for (size_t i = 0; i < f->num_items; i++) {
     const hb_item_t *item = &f->items[i];
-    if (item->type != FOURCC('E', 'x', 'i', 'f') && item->type != FOURCC('m', 'i', 'm', 'e')) continue;
+    if (item->type != FOURCC('E', 'x', 'i', 'f') && item->type != FOURCC('m', 'i', 'm', 'e') &&
+        item->type != FOURCC('u', 'r', 'i', ' ')) {
+      continue;
+    }
     if (hb_has_ref(f, item->id, FOURCC('c', 'd', 's', 'c'), id) && idset_add(keep, item->id) != 0) return -1;
   }
   return 0;
@@ -454,7 +460,11 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
   info->tiles = (int)num_tiles;
 
   // What stays: the picture and its tiles, its thumbnails, its Exif and XMP;
-  // the gain map (and its tiles, 'tmap' item, XMP) unless --sdr.
+  // the gain map (and its tiles, 'tmap' item, XMP) unless --sdr; and every
+  // other auxiliary image of the picture, with its tiles and XMP, byte for
+  // byte: a Portrait photo's depth (or disparity) and mattes, the semantic
+  // mattes and Photographic Styles' data, which Photos needs to edit the copy
+  // as it edits the original (a Portrait's depth of field, a Style).
   if (keep_image(&f, &keep, f.primary) != 0 || keep_metadata(&f, &keep, f.primary) != 0) goto oom;
   for (size_t i = 0; i < f.num_items; i++) {
     const uint32_t id = f.items[i].id;
@@ -475,6 +485,9 @@ int heic_transcode(const uint8_t *buf, size_t len, const heic_opts_t *opt, const
         }
       }
       info->kept_gain_map = 1;
+    } else if (hb_has_ref(&f, id, FOURCC('a', 'u', 'x', 'l'), f.primary)) {
+      if (!idset_has(&keep, id)) info->kept_aux++;
+      if (keep_image(&f, &keep, id) != 0 || keep_metadata(&f, &keep, id) != 0) goto oom;
     }
   }
 
