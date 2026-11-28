@@ -20,7 +20,8 @@ encoder. Every release includes the current files of all shortcuts.
     before converting; Shortcuts needs full access to the photo library for
     this (it may ask once). A video that can't be checked for edits is
     converted from its original, with `! could not check ... for edits` in the
-    log. `EDITS=0` in the script turns all of this off.
+    log. `EDITS=0` in the script turns all of this off. With `SLOMO=0`, a video
+    taken for slo-mo is converted from its original, as before.
   - Update the shortcut and `vidmeta-macos` together (`vidmeta` only carries
     the new version number, which the shortcut checks); `ffmpeg-macos` and
     `ffprobe-macos` carry it too, but you don't need to update them.

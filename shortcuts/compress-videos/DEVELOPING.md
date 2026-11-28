@@ -59,7 +59,7 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
 
    Run Shell Script (/bin/zsh; scripts/mac/common.zsh + selection.zsh, with
    encode.zsh at its @RUN@; the settings, the lines, Bridge, Dates and Closed
-   as variables, Renderings as arguments):
+   as variables, Renderings as Media, as arguments):
      checks the settings and the tools (compress-videos-ffmpeg and -ffprobe
      in ~/.local/bin, else Homebrew's ffmpeg 7.1+; vidmeta), sorts in/: photos
      and Live Photos (a photo whose .mov isn't an item of its own) skipped;
@@ -214,27 +214,40 @@ action takes an item's id, so the shortcut does as Compress Photos (0.12.0,
 issue #29; its DEVELOPING.md 1.1): an album bridges the two. The planning pass
 prints the videos the conversion will convert, `bridge.applescript` (this
 tool's own copy: Compress Photos' leaves videos out) puts them into the album
-*Compress Videos (working)*, and Find Photos gets them as library items. For a
-video, Shortcuts' file is what PhotoKit gives for the asset's current version
-(ContentKit's `retrieveFileWithImageManager:forType:`, `requestAVAssetForVideo`
-with the default version, `PHVideoRequestOptionsVersionCurrent`: the edit
-rendered, or the unedited original); an `AVURLAsset` is copied as it is, never
-encoded again (see [the plan](../../docs/compress-videos-edits-plan.md), 2.1).
+*Compress Videos (working)*, and Find Photos gets them as library items, which
+the conversion gets **as Media** (`as_media` in `build_mac_shortcuts.py`: the
+variable typed `WFAVAssetContentItem`). That matters: Run Shell Script asks
+each item for a file of any type, and for a video that isn't audiovisual
+content, ContentKit (`WFPhotoMediaContentItem`, iOS 18.2:
+`preferredAssetResourceForType:`) takes the first full-size rendering among the
+asset's resources, which for an edited video is a still JPEG (the owner's
+second test: `IMG_1970.jpeg`, 301 KB, for an edited 4K .MOV). As Media, the
+item becomes PhotoKit's `AVAsset` of the current version (`generateAVAsset`:
+`requestAVAssetForVideo` with the default version,
+`PHVideoRequestOptionsVersionCurrent`: the edit rendered, or the unedited
+original), and an `AVURLAsset`'s file is copied as it is, never encoded again
+(see [the plan](../../docs/compress-videos-edits-plan.md), 2.1). With that, the
+owner's third test converted an edited video from Photos' version.
 
 Only the videos to convert go into the album: Shortcuts has no try, and a
 slo-mo, the one kind whose hand-over was seen to fail (an AVComposition), would
-stop the run for every video. So the script runs twice, the planning pass up to
-`@PLAN_END@` (no conversion, no window), the conversion in full; both apply the
-same rules, and the planning pass's log is replaced by the conversion's. The
-album is deleted before the conversion (it would otherwise show in Photos, and
-sync, for the whole batch): Renderings holds library items, not the album's.
+stop the run for every video. A video taken for slo-mo that `SLOMO=0` lets
+through stays out of the album too, and is converted from its original with a
+plain log line, whichever of the two scripts has `SLOMO=0`. So the script runs
+twice, the planning pass up to `@PLAN_END@` (no conversion, no window), the
+conversion in full; both apply the same rules, and the planning pass's log is
+replaced by the conversion's. The album is deleted before the conversion (it
+would otherwise show in Photos, and sync, for the whole batch): Renderings
+holds library items, not the album's.
 
 The conversion pairs each video to convert with a file by name without
 extension (case aside) and date (a second at most, when both have one), one
 match on both sides, as Compress Photos does, and compares them with
 `/usr/bin/cmp` (2.4 s per GB). The same bytes: unedited, its original is
-converted. Different: edited; the file is copied with `/bin/cp` (ffprobe and
-ffmpeg can't read Shortcuts' group container, Apple's tools can) to
+converted. Different: edited; the file (only a video's, by its name: never a
+still) is cloned with `/bin/cp -c` (no room taken, on one disk), else copied
+plainly, and copied plainly too if ffprobe can't read the clone (ffprobe and
+ffmpeg can't read Shortcuts' group container, Apple's tools can), to
 `vid_in_N.<ext>`, probed, and converted in the original's place, with its own
 size, frame rate, duration, sound and HDR. What the video is (slo-mo, spatial,
 a log recording, its codec) is decided by the original first; Photos' version
@@ -249,17 +262,16 @@ says what the original was and what Photos' version lost
 `has no sound`), and a `!` line before Photos' work names every video whose
 edit is burnt in. A video with no pair, or one `cmp` can't read, is converted
 from its original with `! could not check ... for edits`; when no file came at
-all, one line says why (`BRIDGE`). `EDITS=0` (in both Run Shell Script actions)
-skips all of it.
+all, one line says why (`BRIDGE`); nothing about edits when nothing is
+converted. `EDITS=0` (in both Run Shell Script actions) skips all of it.
 
 Not checked on a device when this was written: what Photos' version of each
 kind of edit is (codec, bit depth, HDR, sound), Cinematic videos, how long the
-hand-over takes for large videos. In the owner's first test (macOS 27), the
-album, Find Photos and the pairing worked, but ffprobe couldn't read a clone
-(`cp -c`) of an edited video's file, perhaps because a clone keeps the group
-container's guard; a plain copy, as Compress Photos makes of a photo's
-rendering, takes the room and time of a copy, and the log now says what ffprobe
-answered when it fails.
+hand-over takes for large videos, whether a clone of a real video's file is
+readable (the first test's unreadable file was the still JPEG), and a Cinematic
+video (if PhotoKit gives a composition for it, it is handed over like a
+slo-mo's). When ffprobe can't read Photos' version, the log says what it
+answered, with the file's name and size.
 
 ## 2. Layout
 

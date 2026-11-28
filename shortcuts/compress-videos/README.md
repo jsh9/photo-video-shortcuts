@@ -167,10 +167,12 @@ recorded at 120 fps in normal Video mode (4K at 120 fps on an iPhone 16 Pro and
 later) is converted, at 120 fps. A fast video without the mark, from an older
 iPhone or another camera (an action camera's 100 or 120 fps video, say), is
 skipped as *perhaps slo-mo*, as the log says. To convert those too: open the
-shortcut in Shortcuts, find the Run Shell Script action whose script starts
-with `# Compress Videos (macOS)`, and change its line `SLOMO=${SLOMO:-1}` to
-`SLOMO=0`. Then no video is skipped as slo-mo, real ones included (their copies
-play at normal speed); change it back afterwards.
+shortcut in Shortcuts, find the two Run Shell Script actions whose script
+starts with `# Compress Videos (macOS)` (the second converts), and change the
+line `SLOMO=${SLOMO:-1}` to `SLOMO=0` in the second, or in both. Then no video
+is skipped as slo-mo, real ones included (their copies play at normal speed),
+and these videos are converted from their original recordings, without edits
+made in Photos; change it back afterwards.
 
 Not kept in the copies:
 
@@ -186,7 +188,8 @@ Not kept in the copies:
   says when Photos' version lost the HDR, Dolby Vision, 10 bits or the sound
   the recording had (`! Photos' version of it ...`);
 - Cinematic mode's focus changes, and other timed data tracks (the copy is the
-  recording with its focus as shot).
+  recording with its focus as shot; not checked since 0.4.0, which converts
+  Photos' version of a video when it differs from the recording).
 
 ## 4. Which devices play the copies
 
@@ -239,6 +242,13 @@ used.
 - **`Skipped ...: edited in Photos, and ...`**: Photos' version of that video
   can't be converted (the reason follows); nothing was made of it, and its
   original stays where it was.
+- **The shortcut stops with an error from Shortcuts while getting the videos**
+  (Shortcuts has no way to skip one video it can't hand over, so the whole run
+  stops before anything is converted): convert that selection with `EDITS=0`
+  (below), or leave the video out.
+- **Disk space**: Shortcuts copies Photos' version of each video it hands over
+  to the shortcut; with the photo library on another disk than your home
+  folder, that is a full copy of every video, on the home disk.
 - **To convert every video from its original recording**, edits or not: open
   the shortcut in Shortcuts and change the line `EDITS=${EDITS:-1}` to
   `EDITS=0` in both Run Shell Script actions whose script starts with

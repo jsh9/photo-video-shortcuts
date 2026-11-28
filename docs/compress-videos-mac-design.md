@@ -320,7 +320,9 @@ Not kept in the copies that are made (noted in the log once per batch):
   its focus as shot. Not detectable today (spike V5); if it becomes detectable,
   skipped like the four above.
 - **Edits** on the selection route (the original is exported); on the picker
-  route Shortcuts probably hands over the edited rendering (spike V2).
+  route Shortcuts probably hands over the edited rendering (spike V2). Since
+  0.4.0 an edited video is converted from Photos' version, the edit burnt in
+  ([its plan](compress-videos-edits-plan.md)).
 
 Playback: H.265 10-bit plays on every Apple device since 2017. Opus in MP4
 plays on iOS 17 and macOS 14 or later (and in most other players). **AV1 plays

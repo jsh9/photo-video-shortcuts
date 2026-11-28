@@ -199,7 +199,7 @@ for f in "$WORK"/in/*(.N); do
   candidates "${f:t}"
   for k in $reply; do claims[$k]=$(( ${claims[$k]:-0} + 1 )); done
 done
-typeset -a unchecked burnt
+typeset -a unchecked burnt slowlist
 typeset -A J  # the videos to convert: J[N,key]
 njobs=0 unreadable=0 photos=0 live=0 novideo=0 slomo=0 spatial=0 logvideos=0 noaudio=0 dolby=0 editskip=0 others=0 total_in=0
 for f in "$WORK"/in/*(.N); do
@@ -244,9 +244,13 @@ for f in "$WORK"/in/*(.N); do
   # slo-mo above 61 fps on average. The average, not ffprobe's r_frame_rate,
   # which a variable-rate video can put far above its real rate (150 for a
   # Live Photo's video that averages 28). SLOMO=0: none is skipped.
-  if [ "$SLOMO" = 1 ] && (( avg > 61 )); then
+  # With SLOMO=0, such a video is converted from its original, never looked
+  # at for edits (slow): Photos' version of a slo-mo is a composition, the
+  # hand-over seen to fail, which would stop the run.
+  slow=''
+  if (( avg > 61 )); then
     intent=$("$vidmeta" key "$f" com.apple.quicktime.full-frame-rate-playback-intent 2>/dev/null)
-    if [ "$intent" != 1 ]; then
+    if [ "$intent" != 1 ] && [ "$SLOMO" = 1 ]; then
       slomo=$((slomo + 1))
       if [ "$intent" = 0 ]; then
         echo "Skipped $name: slo-mo ($(printf '%.0f' $avg) fps on average); a copy would play at normal speed" >> "$LOG"
@@ -255,6 +259,7 @@ for f in "$WORK"/in/*(.N); do
       fi
       continue
     fi
+    [ "$intent" != 1 ] && slow=1
   fi
   # Spatial video (MV-HEVC, two views): ffmpeg would keep one view.
   if [[ $p_sd == *(Stereo 3D|Stereoscopic)* || $p_profile == *Multiview* ]]; then
@@ -293,10 +298,14 @@ for f in "$WORK"/in/*(.N); do
     continue
   fi
   # Edited in Photos? (the conversion only; see above)
+  # A file that isn't a video (by its name) is never taken for Photos'
+  # version: Shortcuts once handed over a still JPEG of an edited video.
   file=$f edited=''
-  if [ "$PHASE" = convert ] && [ "$EDITS" = 1 ]; then
+  if [ -n "$slow" ]; then
+    [ "$PHASE" = convert ] && [ "$EDITS" = 1 ] && slowlist+=("$name")
+  elif [ "$PHASE" = convert ] && [ "$EDITS" = 1 ]; then
     candidates "$name"
-    if [ -n "${ids[$name]}" ] && (( ${#reply} == 1 )) && (( ${claims[${reply[1]}]:-0} == 1 )) && [ -r "${renderings[${reply[1]}]}" ]; then
+    if [ -n "${ids[$name]}" ] && (( ${#reply} == 1 )) && (( ${claims[${reply[1]}]:-0} == 1 )) && [ -r "${renderings[${reply[1]}]}" ] && is_video "${renderings[${reply[1]}]:t}"; then
       r=${renderings[${reply[1]}]}
       /usr/bin/cmp -s "$r" "$f" 2>/dev/null
       case $? in
@@ -311,18 +320,20 @@ for f in "$WORK"/in/*(.N); do
   if [ -n "$edited" ]; then
     # Photos' version, copied into the work folder: ffprobe and ffmpeg can't
     # read it where Shortcuts keeps it (its group container, which macOS
-    # guards as another app's data); Apple's cp can. A plain copy, as Compress
-    # Photos makes: ffprobe couldn't read a clone (cp -c) of an edited video's
-    # file (macOS 27), which may keep the container's guard. It is converted
-    # as it is, with its own size, length, sound and HDR; the original keeps
-    # telling what the video is (above) and its metadata.
+    # guards as another app's data); Apple's cp can. A clone (cp -c: no room
+    # taken, on one disk), else a plain copy, as Compress Photos makes of a
+    # photo's rendering; and a plain copy too if ffprobe can't read the clone,
+    # in case a clone kept the folder's guard. It is converted as it is, with
+    # its own size, length, sound and HDR; the original keeps telling what
+    # the video is (above) and its metadata.
     okind=$(kind_text "$p_w" "$p_h" "$avg" "$p_transfer" "$p_pix" "$dv")
     osize=$(stat -f %z "$f") otransfer=$p_transfer opix=$p_pix odv=$dv oaudio=$#p_audio
     file="$WORK/vid_in_$((njobs + 1)).${edited:e:l}"
     why=''
-    if ! /bin/cp "$edited" "$file" 2>/dev/null; then
-      why="Photos' version of it can't be read"
-    elif ! probe "$file" || (( p_videos == 0 )); then
+    if ! /bin/cp -c "$edited" "$file" 2>/dev/null && ! /bin/cp "$edited" "$file" 2>/dev/null; then
+      why="Photos' version of it couldn't be copied into the work folder"
+    elif ! { probe "$file" && (( p_videos > 0 )); } &&
+        ! { /bin/rm -f "$file" && /bin/cp "$edited" "$file" 2>/dev/null && probe "$file" && (( p_videos > 0 )); }; then
       # what ffprobe says, and what the file is, for the log
       said=$("$ffprobe" -v error -show_entries format=format_name "$file" 2>&1 | head -2)
       why="ffprobe can't read Photos' version of it (${edited:t}, $(size_text $(stat -f %z "$file" 2>/dev/null || print 0))${said:+: ${said//$'\n'/; }})"
@@ -352,6 +363,7 @@ for f in "$WORK"/in/*(.N); do
   J[$njobs,avg]=$avg J[$njobs,rate]=$p_avg J[$njobs,frames]=$p_frames J[$njobs,duration]=$p_duration
   J[$njobs,audio]=$a_pick J[$njobs,ac2]=$a_ac2 J[$njobs,dv]=$dv J[$njobs,videos]=$p_videos
   [ -n "$dv" ] && [ "$DOLBY" = 1 ] && J[$njobs,carry]=1
+  [ -n "$slow" ] && J[$njobs,slow]=1
   if [ -n "$edited" ]; then
     J[$njobs,edited]=1 J[$njobs,okind]=$okind J[$njobs,osize]=$osize
     J[$njobs,otransfer]=$otransfer J[$njobs,opix]=$opix J[$njobs,odv]=$odv J[$njobs,oaudio]=$oaudio
@@ -387,7 +399,7 @@ if [ "$PHASE" = plan ]; then
   if [ "$EDITS" = 1 ]; then
     for (( n = 1; n <= njobs; n++ )); do
       name=${J[$n,name]}
-      [ -n "${ids[$name]}" ] && print -r -- "${line_of[$name]}"
+      [ -n "${ids[$name]}" ] && [ -z "${J[$n,slow]-}" ] && print -r -- "${line_of[$name]}"
     done
   fi
   exit 0
@@ -397,16 +409,21 @@ fi
 # file came at all, the reason in one line.
 if [ "$EDITS" != 1 ]; then
   echo "Edits made in Photos are not looked for (EDITS=0): every video is converted from its original recording." >> "$LOG"
+elif (( ! njobs )); then
+  :  # nothing to convert (or no room): nothing was checked either
 elif (( ${#unchecked} && ${#renderings} )); then
   echo "! could not check ${#unchecked} video(s) for edits: converted from the original file(s), without edits made in Photos. Play the copies before deleting the originals: ${(j:, :)unchecked}" >> "$LOG"
 elif (( ${#unchecked} )); then
   case $BRIDGE in
     ERROR*) why=$BRIDGE;;
     'BRIDGE '[1-9]*) why='Shortcuts found no videos in the album @BRIDGE_ALBUM@';;
-    'BRIDGE 0') why='Photos put none of them into the album @BRIDGE_ALBUM@';;
+    'BRIDGE 0') why='none of them went into the album @BRIDGE_ALBUM@';;
     *) why='the album script gave no answer';;
   esac
   echo "! could not check the videos for edits ($why): edited videos are converted from their original files, without the edits. Play the copies before deleting the originals." >> "$LOG"
+fi
+if (( njobs && ${#slowlist} )); then
+  echo "${#slowlist} fast video(s) that may be slo-mo are converted from their original recordings (SLOMO=0), without looking for edits made in Photos: ${(j:, :)slowlist}" >> "$LOG"
 fi
 if [ "$EDITS" = 1 ] && [ "$CLOSED" != CLOSED ]; then
   echo "! could not delete the album @BRIDGE_ALBUM@ (${CLOSED:-the album script gave no answer}): Photos may add the copies to it too. Delete that album in Photos (its videos stay in the library)." >> "$LOG"

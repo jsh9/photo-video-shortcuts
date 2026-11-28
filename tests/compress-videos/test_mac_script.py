@@ -12,6 +12,7 @@ test_conversion.py runs it with the real tools.
 """
 
 import itertools
+from fractions import Fraction
 import re
 import subprocess
 
@@ -595,7 +596,15 @@ def test_slo_mo_rule(mac, fake, rate, avg, intent, env, skipped):
         assert fake.calls() == []
     else:
         assert len(lines) == 1
-        assert 'slo-mo' not in mac.log
+        assert 'Skipped' not in mac.log
+        # converted; with SLOMO=0, a note that edits weren't looked for (a
+        # video Photos marked full rate is checked like any other)
+        slow = (
+            env.get('SLOMO') == '0'
+            and intent != '1'
+            and Fraction(avg or rate) > 61
+        )
+        assert ('may be slo-mo are converted' in mac.log) == slow
         assert len(fake.calls()) == 1
 
 
@@ -1537,14 +1546,14 @@ def test_album_left_in_photos_is_logged(mac, fake, gen):
     assert re.search(gen.WARNINGS, mac.log)
 
 
-def test_photos_version_is_a_plain_copy_and_ffprobe_says_why(mac, fake):
-    # A clone (cp -c) of Photos' version couldn't be read by ffprobe in the
-    # owner's test (macOS 27): the copy is a plain one, as Compress Photos
-    # makes; and when ffprobe can't read it, the log has what ffprobe said.
+def test_photos_version_is_cloned_and_ffprobe_says_why(mac, fake):
+    # Photos' version is cloned (cp -c), else copied plainly, and copied
+    # plainly too when ffprobe can't read the clone; when ffprobe can't read
+    # it either way, the log has what ffprobe said.
     video(mac, fake, 'IMG_0001.MOV')
     conversion = mac.conversion('A1|2024-01-01 17:00:00|IMG_0001.MOV\n')
-    assert '/bin/cp -c' not in conversion
-    assert '/bin/cp "$edited" "$file"' in conversion
+    assert '/bin/cp -c "$edited" "$file"' in conversion
+    assert conversion.count('/bin/cp "$edited" "$file"') == 2
     mac.convert(
         'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
         renderings=[photos_version(mac, 'IMG_0001.mov')],
@@ -1553,3 +1562,60 @@ def test_photos_version_is_a_plain_copy_and_ffprobe_says_why(mac, fake):
         "Skipped IMG_0001.MOV: edited in Photos, and ffprobe can't read "
         "Photos' version of it (IMG_0001.mov, 1 KB)"
     ) in mac.log
+
+
+def test_a_still_is_never_taken_for_photos_version(mac, fake, gen):
+    # Shortcuts once handed over a still JPEG for an edited video: a file that
+    # isn't a video by its name leaves the video unchecked (its original, with
+    # the "!" line), never converted as "Photos' version".
+    video(mac, fake, 'IMG_0001.MOV')
+    lines = mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        renderings=[photos_version(mac, 'IMG_0001.jpeg')],
+    )
+    assert lines[0].split('|')[1:] == ['A1', 'delete', 'IMG_0001.mp4']
+    assert fake.calls()[0][fake.calls()[0].index('-i') + 1] == str(
+        mac.work / 'in/IMG_0001.MOV'
+    )
+    assert (
+        '! could not check 1 video(s) for edits: converted from the original '
+        'file(s)'
+    ) in mac.log
+
+
+def test_slo_mo_let_through_is_never_checked_for_edits(mac, fake, gen):
+    # SLOMO=0 (in either script or both): a video taken for slo-mo is
+    # converted from its original; it never goes into the album (Photos'
+    # version of a slo-mo is a composition, whose hand-over failed), and the
+    # log says so without a "!".
+    ids = 'A1|2024-01-01 17:00:00|IMG_0001.MOV\n'
+    video(mac, fake, 'IMG_0001.MOV', rate='240/1', avg='177/1', intent='0')
+    result = mac.run(mac.planning(ids), SLOMO='0')
+    assert result.stdout == ''
+    lines = mac.convert(
+        ids,
+        renderings=[photos_version(mac, 'IMG_0001.mov')],
+        env={'SLOMO': '0'},
+    )
+    assert lines[0].split('|')[1:] == ['A1', 'delete', 'IMG_0001.mp4']
+    assert (
+        '1 fast video(s) that may be slo-mo are converted from their original '
+        'recordings (SLOMO=0), without looking for edits made in Photos: '
+        'IMG_0001.MOV'
+    ) in mac.log
+    assert not re.search(gen.WARNINGS, mac.log)
+
+
+def test_no_edit_check_line_when_nothing_is_converted(mac, fake):
+    # No room: nothing converted, so nothing about edits either (Photos did
+    # nothing wrong).
+    video(mac, fake, 'IMG_0001.MOV')
+    folder = fake_df(fake, 1)
+    mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        path=folder,
+        renderings=[],
+        Bridge='BRIDGE 0',
+    )
+    assert 'ERROR: not enough free space' in mac.log
+    assert 'could not check' not in mac.log

@@ -45,10 +45,13 @@ edited video's copy gets the keyword `burnt-in`, and the log names them in a
 `!` line at its end (so it opens), as Compress Photos does for the photos whose
 edits it burns in. The album is deleted before the conversion (D7); should G6
 fail, the videos come unchecked, with a `!` line, and the album moves after the
-conversion. The owner's first test passed G1 and G2 (the album, Find Photos,
-the pairing; an unedited video converted as before), but ffprobe couldn't read
-the `cp -c` clone of the edited video's file, so 4.4's copy is a plain
-`/bin/cp` now, as in Compress Photos.
+conversion. The owner's tests: the album, Find Photos and the pairing worked,
+and an unedited video converted as before (G1, G2); Shortcuts then handed over
+a still JPEG for the edited video, because Run Shell Script asks for a file of
+any type (2.1's code path is taken only for audiovisual content); typed as
+Media, the third test converted the edited video from Photos' version (G3, as
+far as one trimmed 4K SDR video shows). 4.4's copy is a clone, else a plain
+copy, and only a video's file is taken.
 
 Plan written 2026-11-27, the day Compress Photos 0.12.0 did the same for photos
 (issue #29, PR #30, [its plan](compress-photos-edits-plan.md)). Nothing is
