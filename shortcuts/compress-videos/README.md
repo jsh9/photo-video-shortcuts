@@ -58,7 +58,9 @@ ______________________________________________________________________
 
 4. **Grant permissions.** The first time you run it from Photos, macOS asks
    whether Shortcuts may control Photos: choose Always Allow. Allow the other
-   questions too (Photos, notifications).
+   questions too: Shortcuts needs full access to your photo library to get
+   Photos' version of an edited video (System Settings ▸ Privacy & Security ▸
+   Photos ▸ Shortcuts), and notifications.
 
 ## 2. Use
 
@@ -96,11 +98,21 @@ last settings in its title) or **Choose…**.
 
 Photos exports the original files, and a Terminal window follows the
 conversion, one video at a time, with its progress and the time left (close it
-whenever you like; it doesn't stop anything). Each copy, `IMG_1234.mp4` for
-`IMG_1234.MOV`, is checked, gets the original's metadata, and is imported into
-Photos, into every album its original is in. The originals go into the album
-**Videos already compressed**. Notifications say what was skipped and how many
-videos were saved. If something went wrong, the log opens; it is kept in
+whenever you like; it doesn't stop anything). An **edited video** (trimmed,
+cropped, rotated, filtered or adjusted in Photos) is converted as it plays in
+Photos now: from Photos' own version of it, the edit burnt in, so its copy
+can't be reverted to the unedited recording. Its copy gets the keyword
+`burnt-in` in Photos, and the log ends with a `!` line naming these videos, so
+it opens. To get Photos' version of each video, the shortcut puts the videos it
+will convert into an album **Compress Videos (working)** for a moment and
+deletes the album (not the videos) before converting. A video that can't be
+checked for edits (the log says `! could not check ... for edits`) is converted
+from its original recording, without the edits: play its copy before deleting
+the original. Each copy, `IMG_1234.mp4` for `IMG_1234.MOV`, is checked, gets
+the original's metadata, and is imported into Photos, into every album its
+original is in. The originals go into the album **Videos already compressed**.
+Notifications say what was skipped and how many videos were saved. If something
+went wrong, the log opens; it is kept in
 `~/Library/Caches/compress-videos-macos/videos.log`.
 
 When you're happy with the copies, open *Videos already compressed* in Photos,
@@ -155,10 +167,12 @@ recorded at 120 fps in normal Video mode (4K at 120 fps on an iPhone 16 Pro and
 later) is converted, at 120 fps. A fast video without the mark, from an older
 iPhone or another camera (an action camera's 100 or 120 fps video, say), is
 skipped as *perhaps slo-mo*, as the log says. To convert those too: open the
-shortcut in Shortcuts, find the Run Shell Script action whose script starts
-with `# Compress Videos (macOS)`, and change its line `SLOMO=${SLOMO:-1}` to
-`SLOMO=0`. Then no video is skipped as slo-mo, real ones included (their copies
-play at normal speed); change it back afterwards.
+shortcut in Shortcuts, find the two Run Shell Script actions whose script
+starts with `# Compress Videos (macOS)` (the second converts), and change the
+line `SLOMO=${SLOMO:-1}` to `SLOMO=0` in the second, or in both. Then no video
+is skipped as slo-mo, real ones included (their copies play at normal speed),
+and these videos are converted from their original recordings, without edits
+made in Photos; change it back afterwards.
 
 Not kept in the copies:
 
@@ -167,10 +181,15 @@ Not kept in the copies:
 - ProRes's full color resolution: its 4:2:2 color becomes 4:2:0, as in every
   H.265 and AV1 video (the iPhone's own H.265 included); the brightness keeps
   its full resolution and 10 bits;
-- edits: the original recording is converted, without trims or filters made in
-  Photos;
+- an edit as an edit: an edited video's copy is made from Photos' version, with
+  the edit in its pictures (trimmed to the trim, cropped, filtered), so it
+  can't be undone on the copy. Photos' version is what Photos rendered when you
+  edited, so the copy is one generation further from the recording; the log
+  says when Photos' version lost the HDR, Dolby Vision, 10 bits or the sound
+  the recording had (`! Photos' version of it ...`);
 - Cinematic mode's focus changes, and other timed data tracks (the copy is the
-  recording with its focus as shot).
+  recording with its focus as shot; not checked since 0.4.0, which converts
+  Photos' version of a video when it differs from the recording).
 
 ## 4. Which devices play the copies
 
@@ -211,6 +230,29 @@ used.
   other videos are converted anyway, and the original stays where it was.
 - **No Terminal window**: Terminal may have asked for permission; the
   conversion runs anyway.
+- **The shortcut stops with "Photo Album Not Found"** (*Find Photos couldn't
+  find the album "Compress Videos (working)"*), and nothing was converted:
+  Shortcuts can't read your photo library. Give it full access in System
+  Settings ▸ Privacy & Security ▸ Photos, then run it again. The album it made
+  is deleted on the next run (or delete it yourself; its videos stay in the
+  library).
+- **`! could not check ... for edits`**: those videos were converted from their
+  original recordings, without the edits made in Photos. Play each copy before
+  deleting its original.
+- **`Skipped ...: edited in Photos, and ...`**: Photos' version of that video
+  can't be converted (the reason follows); nothing was made of it, and its
+  original stays where it was.
+- **The shortcut stops with an error from Shortcuts while getting the videos**
+  (Shortcuts has no way to skip one video it can't hand over, so the whole run
+  stops before anything is converted): convert that selection with `EDITS=0`
+  (below), or leave the video out.
+- **Disk space**: Shortcuts copies Photos' version of each video it hands over
+  to the shortcut; with the photo library on another disk than your home
+  folder, that is a full copy of every video, on the home disk.
+- **To convert every video from its original recording**, edits or not: open
+  the shortcut in Shortcuts and change the line `EDITS=${EDITS:-1}` to
+  `EDITS=0` in both Run Shell Script actions whose script starts with
+  `# Compress Videos (macOS)`.
 
 ## 7. Updating
 

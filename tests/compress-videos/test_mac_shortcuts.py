@@ -34,6 +34,9 @@ VALUES = {
     'AppleScript Result': 'ID|IMG_0001.MOV',
     'Shell Script Result': 'H.265 · preset medium',
     'Matches': '3',
+    'Bridge': 'BRIDGE 1',
+    'Dates': '1|2024-01-01T17:00:00-05:00',
+    'Closed': 'CLOSED',
 }
 
 
@@ -428,13 +431,29 @@ def test_shell_scripts_use_zsh(gen, actions):
         assert p['Shell'] == '/bin/zsh'
         assert p['InputMode'] in ('as arguments', 'to stdin')
 
-    # Only the finish script has an input: the outcome, on stdin.
+    # Two scripts have an input: the conversion, Photos' version of each
+    # video (Renderings) as its arguments, and the finish script, the outcome
+    # on stdin.
     with_input = [a for a in scripts if 'Input' in vh.params(a)]
-    assert len(with_input) == 1
-    assert vh.params(with_input[0])['InputMode'] == 'to stdin'
-    finish = vh.params(with_input[0])['Script']
+    assert len(with_input) == 2
+    conversion, finish = (vh.params(a) for a in with_input)
+    assert 'vid_done.txt' in str(conversion['Script'])
+    assert conversion['InputMode'] == 'as arguments'
+    (renderings,) = vh.references(conversion['Input'])
+    assert renderings['VariableName'] == 'Renderings'
+    # as Media: a library video's own file, not the still JPEG Shortcuts
+    # hands over for an edited video otherwise (the owner's test)
+    assert renderings['Aggrandizements'] == [
+        {
+            'Type': 'WFCoercionVariableAggrandizement',
+            'CoercionItemClass': 'WFAVAssetContentItem',
+        }
+    ]
+    assert finish['InputMode'] == 'to stdin'
+    finish = finish['Script']
     assert 'Done. You can close this window.' in finish
-    assert 'rm -rf "$W/in" "$W"/vid_*' in finish
+    # (N): no "no matches found" error when nothing was converted
+    assert 'rm -rf "$W/in" "$W"/vid_*(N)' in finish
     text = next(
         t for t in vh.shell_scripts(actions, VALUES) if 'vid_done.txt' in t
     )
@@ -448,12 +467,13 @@ def test_shell_scripts_use_zsh(gen, actions):
 def test_applescripts_in_order_with_their_inputs(gen, actions):
     scripts = of(actions, RUN_APPLESCRIPT)
     assert [vh.params(a)['Script'] for a in scripts] == [
-        gen.applescript_text(n) for n in ('probe', 'export', 'import')
+        gen.applescript_text(n)
+        for n in ('probe', 'export', 'bridge', 'bridge', 'import')
     ]
     for a in scripts:
         assert isinstance(vh.params(a)['Script'], str)  # no variables inside
 
-    probe, export, imp = scripts
+    probe, export, _, _, imp = scripts
     assert 'Input' not in vh.params(probe)
     ids = {vh.params(a)['UUID']: a for a in actions if 'UUID' in vh.params(a)}
     for a, marker in ((export, 'mkdir -p "$W/in"'), (imp, 'vid_done.txt')):
@@ -498,7 +518,7 @@ def test_applescripts_compile(gen):
     # osacompile reads Photos' dictionary without launching it.
     vh.need(shutil.which('osacompile'), 'osacompile is needed')
     with tempfile.TemporaryDirectory() as folder:
-        for name in ('probe', 'export', 'import'):
+        for name in ('probe', 'export', 'import', 'bridge'):
             src = pathlib.Path(folder) / f'{name}.applescript'
             src.write_text(gen.applescript_text(name))
             result = subprocess.run(
@@ -508,6 +528,49 @@ def test_applescripts_compile(gen):
                 timeout=120,
             )
             assert result.returncode == 0, (name, result.stderr)
+
+
+def test_photos_version_through_the_album(gen, actions):
+    # The planning pass (the same script, PHASE "plan", up to where it exits)
+    # names the videos to convert; bridge.applescript puts them into the
+    # album; only if it holds any, Find Photos gets them (Renderings) with
+    # their dates; the album is deleted before the conversion, which gets the
+    # files as its arguments.
+    ids = {vh.params(a)['UUID']: a for a in actions if 'UUID' in vh.params(a)}
+    shells = of(actions, RUN_SHELL)
+    plan = next(
+        a
+        for a in shells
+        if "PHASE='plan'" in vh.render(vh.params(a)['Script'], VALUES)
+    )
+    plan_text = vh.render(vh.params(plan)['Script'], VALUES)
+    assert 'vid_done.txt' not in plan_text and 'ffmpeg -hide' not in plan_text
+    assert plan_text.rstrip().endswith('exit 0\nfi')
+    fill, close = (
+        a
+        for a in of(actions, RUN_APPLESCRIPT)
+        if vh.params(a)['Script'] == gen.applescript_text('bridge')
+    )
+    ref = next(vh.references(vh.params(fill)['Input']))
+    assert ids[ref['OutputUUID']] is plan
+    closing = next(vh.references(vh.params(close)['Input']))
+    closing = vh.params(ids[closing['OutputUUID']])['WFTextActionText']
+    assert vh.render(closing, {}) == 'close'
+    assert gen.BRIDGE_ALBUM == 'Compress Videos (working)'
+    assert f'"{gen.BRIDGE_ALBUM}"' in gen.applescript_text('bridge')
+    # Find Photos inside the If on "^BRIDGE [1-9]", and the order of it all
+    (bridged,) = matches(actions, r'^BRIDGE [1-9]')
+    inside = [
+        vh.ident(a)
+        for a, yes in vh.inside_if_on(actions, vh.params(bridged)['UUID'])
+        if yes
+    ]
+    assert 'is.workflow.actions.filter.photos' in inside
+    order = [a for a in actions if a in (plan, fill, close)] + [
+        a for a in shells if 'vid_done.txt' in str(vh.params(a)['Script'])
+    ]
+    positions = [actions.index(a) for a in order]
+    assert positions == sorted(positions)
 
 
 def test_log_shown_only_with_warnings(gen, actions):

@@ -91,15 +91,7 @@ if (( njobs )); then
   for n in {1..$njobs}; do
     in=${J[$n,file]} name=${J[$n,name]} out="$WORK/vid_out_$n.mp4"
     w=${J[$n,w]} h=${J[$n,h]} dur=${J[$n,duration]:-0} pix=${J[$n,pix]}
-    fps=$(printf '%.3f' ${J[$n,avg]})
-    fps=${${fps%%0#}%.}
-    kind="${w}×${h} $fps fps"
-    case ${J[$n,transfer]} in
-      arib-std-b67) kind+=" HLG";;
-      smpte2084) kind+=" PQ";;
-    esac
-    [[ $pix =~ 'p(10|12)' ]] && kind+=" ${match[1]}-bit"
-    [ -n "${J[$n,dv]}" ] && kind+=" Dolby Vision"
+    kind=$(kind_text "$w" "$h" "${J[$n,avg]}" "${J[$n,transfer]}" "$pix" "${J[$n,dv]}")
     target="$CODEC_TEXT $PRESET${TUNE:+ tune $TUNE} RF $RF"
     if [ -n "${J[$n,audio]}" ]; then
       target+=", Opus $AUDIO kbps"
@@ -110,6 +102,17 @@ if (( njobs )); then
     [ -n "${J[$n,carry]}" ] && target+=", Dolby Vision kept"
     { echo; echo "[$n/$njobs] $name  $kind, $(size_text ${J[$n,size]}) → $target"; } >> "$LOG"
     (( ${J[$n,videos]} > 1 )) && echo "  (it has ${J[$n,videos]} video tracks; the first is converted)" >> "$LOG"
+    # An edited video: what its original is, and what Photos' version lost
+    if [ -n "${J[$n,edited]-}" ]; then
+      {
+        echo "  (edited in Photos: this is Photos' version, its edit burnt in; the original is ${J[$n,okind]}, $(size_text ${J[$n,osize]}))"
+        [[ ${J[$n,otransfer]} == (arib-std-b67|smpte2084) && ${J[$n,transfer]} != (arib-std-b67|smpte2084) ]] &&
+          echo "  ! Photos' version of it is not HDR"
+        [ -n "${J[$n,odv]}" ] && [ -z "${J[$n,dv]}" ] && echo "  ! Photos' version of it has no Dolby Vision"
+        [[ ${J[$n,opix]} =~ 'p(10|12)' && ! $pix =~ 'p(10|12)' ]] && echo "  ! Photos' version of it is 8-bit"
+        (( ${J[$n,oaudio]} > 0 )) && [ -z "${J[$n,audio]}" ] && echo "  ! Photos' version of it has no sound"
+      } >> "$LOG"
+    fi
     # The command: HandBrake's settings as ffmpeg options (see DEVELOPING.md).
     cmd=(nice -n "$NICE" "$ffmpeg" -hide_banner -nostdin -v warning -nostats -progress pipe:1 -y
       -hwaccel none -noautorotate -i "$in" -map 0:v:0)
@@ -192,7 +195,8 @@ if (( njobs )); then
       fail "only $(printf '%.0f' $(( 100.0 * od / dur )))% of the video was written"
       continue
     fi
-    if ! "$vidmeta" copy "$in" "$out" > /dev/null 2> "$WORK/vid_err.txt"; then
+    # the original's metadata, also for an edited video's copy
+    if ! "$vidmeta" copy "${J[$n,orig]:-$in}" "$out" > /dev/null 2> "$WORK/vid_err.txt"; then
       fail "the metadata could not be copied: $(cat "$WORK/vid_err.txt")"
       continue
     fi

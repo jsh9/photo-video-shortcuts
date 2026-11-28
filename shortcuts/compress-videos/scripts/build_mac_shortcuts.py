@@ -16,8 +16,12 @@ no picker.
 
 The conversion is one Run Shell Script (scripts/mac/*.zsh with lib/mac's
 progress window and finish step), which Shortcuts waits for however long it
-takes; the AppleScripts are lib/mac/*.applescript, shared with Compress Photos
-(macOS). tests/compress-videos/test_mac_script.py runs the script for real. See
+takes; a first run of the same script, its planning pass, names the videos it
+will convert, which scripts/mac/bridge.applescript puts into an album so that
+Find Photos gets Photos' current version of each (an edited video is converted
+as it looks, its edit burnt in). The other AppleScripts are
+lib/mac/*.applescript, shared with Compress Photos (macOS).
+tests/compress-videos/test_mac_script.py runs the script for real. See
 ../README.md and ../DEVELOPING.md.
 
 Usage::
@@ -36,7 +40,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import vf  # noqa: E402
-from vf import VERSION, Sample, variable, workflow  # noqa: E402
+from vf import VERSION, Ref, Sample, variable, workflow  # noqa: E402
 
 SAMPLE = HERE / 'sample' / 'Mac Sample.plist'
 DIST = HERE.parent / 'dist'
@@ -75,6 +79,11 @@ ROOM_PER_ITEM = 500_000_000  # bytes
 # The album that collects the originals of the converted videos (a script
 # can't delete them; the user deletes them from there).
 ORIGINALS_ALBUM = 'Videos already compressed'
+# The album through which Find Photos gets Photos' current version of each
+# video to convert (bridge.applescript fills it by id): top level, made after
+# the planning pass and deleted before the conversion, so it shows for
+# seconds. A run that dies leaves it, and the next run deletes it first.
+BRIDGE_ALBUM = 'Compress Videos (working)'
 # The keyword each copy gets in Photos after the import (import.applescript,
 # copyKeywords), with its original's, to find the copies there; in Photos'
 # library only, the same word as Compress Photos' (wfkit's). No format or
@@ -97,8 +106,10 @@ MAC = HERE / 'mac'
 # (progress.zsh, at encode.zsh's @PROGRESS@), finish.zsh and the AppleScripts.
 LIB_MAC = HERE.parents[2] / 'lib' / 'mac'
 # The placeholders that become Shortcuts variables: the six answers (vf.py)
-# and Reuse ("1" for the last run's settings), and @LINES@, the export's
-# "id|date|filename" lines (its Run AppleScript's result).
+# and Reuse ("1" for the last run's settings), @LINES@, the export's
+# "id|date|filename" lines (its Run AppleScript's result), and, in the
+# conversion only (empty in the planning pass, which runs before them), the
+# album script's answer, the files' dates and the album's deletion.
 SLOTS = {
     '@CODEC@': 'Codec',
     '@PRESET@': 'Preset',
@@ -108,21 +119,34 @@ SLOTS = {
     '@AUDIO@': 'Audio',
     '@REUSE@': 'Reuse',
     '@LINES@': None,
+    '@BRIDGE@': 'Bridge',
+    '@DATES@': 'Dates',
+    '@CLOSED@': 'Closed',
 }
+# The slots the planning pass leaves empty
+CONVERSION_SLOTS = {'@BRIDGE@', '@DATES@', '@CLOSED@'}
 
 
-def script_text():
+def script_text(phase='convert'):
     """
-    The conversion script as one text with the @SLOTS@ still in it: common.zsh,
-    then selection.zsh with encode.zsh (and lib/mac's progress.zsh) at its
-    @RUN@.
+    The script as one text with the @SLOTS@ still in it: common.zsh, then
+    selection.zsh with encode.zsh (and lib/mac's progress.zsh) at its @RUN@.
+    The planning pass (``phase`` "plan") ends at selection.zsh's @PLAN_END@,
+    where it exits.
     """
     text = (MAC / 'common.zsh').read_text() + (
         MAC / 'selection.zsh'
     ).read_text()
+    if phase == 'plan':
+        text = text[: text.index('@PLAN_END@\n')]
+    else:
+        text = text.replace('@PLAN_END@\n', '')
+
     text = text.replace('@RUN@\n', (MAC / 'encode.zsh').read_text())
     text = text.replace('@PROGRESS@\n', (LIB_MAC / 'progress.zsh').read_text())
     for placeholder, value in {
+        '@PHASE@': phase,
+        '@BRIDGE_ALBUM@': BRIDGE_ALBUM,
         '@NAME@': NAME,
         '@VERSION@': VERSION,
         '@HELP_URL@': HELP_URL,
@@ -145,14 +169,18 @@ def script_text():
     return text
 
 
-def script(lines):
+def script(lines, phase='convert'):
     """
-    The conversion script's text parts: strings, the @SLOTS@ variables, and
-    ``lines`` (the export's output) for @LINES@.
+    The script's text parts: strings, the @SLOTS@ variables, and ``lines`` (the
+    export's output) for @LINES@; the planning pass has nothing for the
+    conversion's slots.
     """
     parts = []
-    for piece in re.split(f'({"|".join(SLOTS)})', script_text()):
+    for piece in re.split(f'({"|".join(SLOTS)})', script_text(phase)):
         if piece in SLOTS:
+            if phase == 'plan' and piece in CONVERSION_SLOTS:
+                continue
+
             parts.append(variable(SLOTS[piece]) if SLOTS[piece] else lines)
         elif piece:
             parts.append(piece)
@@ -162,16 +190,22 @@ def script(lines):
 
 def applescript_text(name):
     """
-    lib/mac/<name>.applescript, with @NAME@, @ORIGINALS_ALBUM@, @COPY_KEYWORD@,
-    @FORMAT_KEYWORDS@ and @QUALITY_PREFIXES@ (AppleScript lists, empty here)
-    filled in, and @OLD_ORIGINALS_ALBUM@, an earlier version's review album,
-    which Compress Videos never had: the same album again
-    (``vf.applescript_text``: plain text, the values going in through the
-    action's input).
+    lib/mac/<name>.applescript (shared with the other tools), or this tool's
+    own mac/<name>.applescript (bridge), with @NAME@, @ORIGINALS_ALBUM@,
+    @BRIDGE_ALBUM@, @COPY_KEYWORD@, @FORMAT_KEYWORDS@ and @QUALITY_PREFIXES@
+    (AppleScript lists, empty here) filled in, and @OLD_ORIGINALS_ALBUM@, an
+    earlier version's review album, which Compress Videos never had: the same
+    album again (``vf.applescript_text``: plain text, the values going in
+    through the action's input).
     """
+    path = MAC / f'{name}.applescript'
+    if not path.exists():
+        path = LIB_MAC / f'{name}.applescript'
+
     return vf.applescript_text(
-        LIB_MAC / f'{name}.applescript',
+        path,
         NAME=NAME,
+        BRIDGE_ALBUM=BRIDGE_ALBUM,
         ORIGINALS_ALBUM=ORIGINALS_ALBUM,
         OLD_ORIGINALS_ALBUM=ORIGINALS_ALBUM,
         COPY_KEYWORD=COPY_KEYWORD,
@@ -218,7 +252,7 @@ def finish_script():
         f'W={WORK}; LOGDIR={LOG_DIR}; LOG="$LOGDIR/{ROUTE}.log"\n'
         '{ echo; cat; echo; } >> "$LOG"\n'
         + (LIB_MAC / 'finish.zsh').read_text().replace('@ROUTE@', ROUTE)
-        + 'rm -rf "$W/in" "$W"/vid_*'
+        + 'rm -rf "$W/in" "$W"/vid_*(N)'
     )
 
 
@@ -235,8 +269,10 @@ def build(sample):
         'metadata (date, location, camera, lens), HDR and Dolby Vision. It works '
         'only on videos selected in Photos: select them there, then Share > '
         f'{NAME}. Run from the Shortcuts app or anywhere else, it only says so; it '
-        'has no picker. Photos exports the originals, the copies are imported into '
-        "the originals' albums, and the originals go into the album "
+        'has no picker. Photos exports the originals (an edited video is converted '
+        'as it looks in Photos, its edit burnt in, through the album '
+        f'"{BRIDGE_ALBUM}", which it deletes before converting), the copies are '
+        "imported into the originals' albums, and the originals go into the album "
         f'"{ORIGINALS_ALBUM}" for you to delete. Photos, Live Photos and slo-mo '
         'videos are skipped. AV1 plays only on Macs with M3 or later, iPhone 15 Pro '
         'or later. Needs ffmpeg, ffprobe and vidmeta in ~/.local/bin and Allow '
@@ -285,7 +321,8 @@ def build(sample):
         ' item(s) selected in Photos… A Terminal window follows the progress.',
     )
     ids = b.run_applescript(applescript_text('export'), input_ref=work)
-    result = b.run_shell_script(*script(ids))
+    renderings(b, ids)
+    result = b.run_shell_script(*script(ids), input_ref=as_media('Renderings'))
     # "imported=N", "collected=M", the times, then "! ..." problem lines.
     outcome = b.run_applescript(applescript_text('import'), input_ref=result)
     lines = b.split(outcome, '\n')
@@ -321,6 +358,93 @@ def build(sample):
         ),
     )
     return b.actions
+
+
+def renderings(b, ids):
+    """
+    Photos' current version of each video the conversion will convert, for the
+    script to compare with the exported original (selection.zsh): the planning
+    pass (the same script, PHASE "plan") prints their "id|date|filename" lines;
+    bridge.applescript puts those videos into the album BRIDGE_ALBUM and
+    answers "BRIDGE n" (the variable Bridge); if it holds any, Find Photos gets
+    them as library items (the variable Renderings), whose files Shortcuts
+    makes from Photos' current version (an edited video's rendering, an
+    unedited one's original), and their dates in Photos go to the variable
+    Dates (by position). The album is deleted then, before the conversion (the
+    variable Closed, "CLOSED"): Renderings holds library items, not the
+    album's. Otherwise Renderings stays unset, and the conversion gets no
+    files.
+
+    Find Photos has no try: should it fail (Shortcuts without access to the
+    photo library), Shortcuts stops the run there, before anything is
+    converted, and the next run deletes the album. Only the videos the
+    conversion will convert go into the album: a slo-mo, the one kind seen to
+    fail when Shortcuts made its file, never does.
+    """
+    plan = b.run_shell_script(*script(ids, 'plan'))
+    b.set_variable(
+        'Bridge',
+        b.run_applescript(applescript_text('bridge'), input_ref=plan),
+    )
+
+    def find():
+        found = b.find_photos_in_album(BRIDGE_ALBUM)
+        b.set_variable('Renderings', found)
+        b.repeat_each(
+            found, lambda: video_date(b, vf.REPEAT_ITEM, vf.REPEAT_INDEX)
+        )
+
+    b.if_has_value(
+        b.match_text(variable('Bridge'), r'^BRIDGE [1-9]'), find, lambda: None
+    )
+    b.set_variable(
+        'Closed',
+        b.run_applescript(
+            applescript_text('bridge'), input_ref=b.text('close')
+        ),
+    )
+
+
+def as_media(name):
+    """
+    The variable ``name`` as Media (Shortcuts' type menu on a variable:
+    WFAVAssetContentItem), so that a library video becomes its video. Passed as
+    it is, Run Shell Script asks each item for a file of any type, and
+    ContentKit (WFPhotoMediaContentItem, iOS 18.2:
+    preferredAssetResourceForType:) gives the first full-size rendering among
+    the asset's resources: for an edited video, a still JPEG of it (seen on
+    macOS 27: IMG_1970.jpeg, 301 KB, for an edited .MOV). As Media, the item is
+    PhotoKit's AVAsset of the video's current version (generateAVAsset:
+    requestAVAssetForVideo, default version), whose file Shortcuts copies (an
+    AVURLAsset) or exports passthrough: an unedited video's original, an edited
+    one's rendering.
+    """
+    ref = variable(name)
+    return Ref({
+        **ref.value,
+        'Aggrandizements': [
+            {
+                'Type': 'WFCoercionVariableAggrandizement',
+                'CoercionItemClass': 'WFAVAssetContentItem',
+            }
+        ],
+    })
+
+
+def video_date(b, item, index):
+    """
+    Appends "index|date" to the variable Dates: ``item``'s date in Photos (Get
+    Details ▸ Date Taken, the asset's creation date), as ISO 8601 with the
+    time, to tell apart two videos whose files share a name.
+    """
+    taken = b.photo_details(item, 'Date Taken')
+    b.if_has_value(
+        b.match_text(taken, '.'),
+        lambda: b.append_variable(
+            'Dates', b.text(index, '|', b.format_date(taken))
+        ),
+        lambda: None,
+    )
 
 
 def videos_workflow(sample, actions):

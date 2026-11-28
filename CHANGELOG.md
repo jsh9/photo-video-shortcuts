@@ -3,6 +3,33 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Videos 0.4.0] - 2026-11-28
+
+- Changed
+  - An edited video (trimmed, cropped, rotated, filtered or adjusted in Photos)
+    is converted as it plays in Photos now, from Photos' own version of it:
+    before, the original recording was converted, so deleting the original lost
+    the edit. The edit is in the copy's pictures and can't be reverted there.
+    Such copies get the keyword `burnt-in` in Photos, and the log ends with a
+    `!` line naming them, so it opens; it also says what Photos' version lost
+    of the recording's HDR, Dolby Vision, 10 bits or sound. Unedited videos are
+    converted from their originals as before; what was skipped (slo-mo,
+    spatial, Apple Log...) still is, decided by the original. To get Photos'
+    version, the shortcut puts the videos it will convert into the album
+    *Compress Videos (working)* for a moment and deletes it (not the videos)
+    before converting; Shortcuts needs full access to the photo library for
+    this (it may ask once). A video that can't be checked for edits is
+    converted from its original, with `! could not check ... for edits` in the
+    log. `EDITS=0` in the script turns all of this off. With `SLOMO=0`, a video
+    taken for slo-mo is converted from its original, as before.
+  - Update the shortcut and `vidmeta-macos` together (`vidmeta` only carries
+    the new version number, which the shortcut checks); `ffmpeg-macos` and
+    `ffprobe-macos` carry it too, but you don't need to update them.
+- Fixed
+  - The finish step failed when a run left no work file (for example, when the
+    tools weren't installed), so the exported originals stayed in the work
+    folder until the next run.
+
 ## [Compress Photos 0.13.0] - 2026-11-27
 
 - Added

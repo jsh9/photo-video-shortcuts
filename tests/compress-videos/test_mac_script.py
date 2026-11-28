@@ -12,6 +12,7 @@ test_conversion.py runs it with the real tools.
 """
 
 import itertools
+from fractions import Fraction
 import re
 import subprocess
 
@@ -595,7 +596,15 @@ def test_slo_mo_rule(mac, fake, rate, avg, intent, env, skipped):
         assert fake.calls() == []
     else:
         assert len(lines) == 1
-        assert 'slo-mo' not in mac.log
+        assert 'Skipped' not in mac.log
+        # converted; with SLOMO=0, a note that edits weren't looked for (a
+        # video Photos marked full rate is checked like any other)
+        slow = (
+            env.get('SLOMO') == '0'
+            and intent != '1'
+            and Fraction(avg or rate) > 61
+        )
+        assert ('may be slo-mo are converted' in mac.log) == slow
         assert len(fake.calls()) == 1
 
 
@@ -1323,3 +1332,290 @@ def test_ffprobe_named_like_ffmpeg(mac, fake):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.endswith('|A|delete|IMG_0001.mp4\n')
+
+
+# ---------------------------------------------------------------------------
+# Edited videos: the planning pass, and Photos' version of each video
+
+
+EDITED_IDS = 'A1|2024-01-01 17:00:00|IMG_0001.MOV\nA2|2024-01-02 17:00:00|IMG_0002.MOV\n'
+
+
+def photos_version(mac, name, data=b'r' * 600):
+    """A file as Find Photos gives it: Photos' version of a video."""
+    folder = mac.root / 'renderings'
+    folder.mkdir(exist_ok=True)
+    path = folder / name
+    path.write_bytes(data)
+    return path
+
+
+def test_planning_pass_names_the_videos_to_convert(mac, fake):
+    # The first run of the script prints the export's line of each video it
+    # would convert (not the photo, not the slo-mo), and exits: no window, no
+    # conversion; with EDITS=0, nothing.
+    video(mac, fake, 'IMG_0001.MOV')
+    video(mac, fake, 'IMG_0002.MOV', rate='240/1', intent='0')
+    (mac.work / 'in' / 'IMG_0003.HEIC').write_bytes(b'photo')
+    ids = (
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n'
+        'A2|2024-01-02 17:00:00|IMG_0002.MOV\n'
+        'A3|2024-01-03 17:00:00|IMG_0003.HEIC\n'
+    )
+    script = mac.planning(ids)
+    result = mac.run(script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'A1|2024-01-01 17:00:00|IMG_0001.MOV\n'
+    assert fake.calls() == [] and fake.vidmeta == []
+    assert not (mac.logdir / 'videos.command').exists()
+    assert mac.run(script, EDITS='0').stdout == ''
+
+
+def test_edited_video_is_converted_from_photos_version(mac, fake, gen):
+    # IMG_0001 was edited (trimmed and made SDR, say): Photos' version is
+    # copied into the work folder and converted, with the original's
+    # metadata; its copy gets the keyword "burnt-in", and the log says what
+    # Photos' version lost and lists the burnt-in videos at its end.
+    # IMG_0002 is unedited: its original, as before.
+    video(mac, fake, 'IMG_0001.MOV')
+    video(mac, fake, 'IMG_0002.MOV')
+    edit = photos_version(mac, 'IMG_0001.mov')
+    same = photos_version(mac, 'IMG_0002.mov', b'v' * 1000)
+    fake.describe(
+        'vid_in_1.mov',
+        width=1920,
+        height=1080,
+        transfer='bt709',
+        pix='yuv420p',
+        frames=90,
+        duration='3.000000',
+    )
+    lines = mac.convert(
+        EDITED_IDS,
+        renderings=[edit, same],
+        Dates='1|2024-01-01T17:00:00-05:00\n2|2024-01-02T17:00:00-05:00\n',
+    )
+    out = mac.work / 'out'
+    assert lines == [
+        f'{out}/IMG_0001.mp4|A1|delete|IMG_0001.mp4|burnt-in',
+        f'{out}/IMG_0002.mp4|A2|delete|IMG_0002.mp4',
+    ]
+    first, second = fake.calls()
+    assert first[first.index('-i') + 1] == str(mac.work / 'vid_in_1.mov')
+    assert (mac.work / 'vid_in_1.mov').read_bytes() == edit.read_bytes()
+    assert second[second.index('-i') + 1] == str(mac.work / 'in/IMG_0002.MOV')
+    assert fake.vidmeta == [
+        f'copy {mac.work}/in/IMG_0001.MOV {mac.work}/vid_out_1.mp4',
+        f'copy {mac.work}/in/IMG_0002.MOV {mac.work}/vid_out_2.mp4',
+    ]
+    log = mac.log
+    # the header says what is converted: Photos' version (600 bytes)
+    assert '[1/2] IMG_0001.MOV  1920×1080 30 fps, 1 KB → H.265' in log
+    assert (
+        "  (edited in Photos: this is Photos' version, its edit burnt in; the "
+        'original is 3840×2160 30 fps HLG 10-bit, 1 KB)'
+    ) in log
+    assert "  ! Photos' version of it is not HDR" in log
+    assert "  ! Photos' version of it is 8-bit" in log
+    assert (
+        '! 1 edited video(s) are converted as they look in Photos, their edits '
+        'burnt in'
+    ) in log
+    assert log.rstrip().endswith(
+        'Now Photos imports the videos, adds them to their albums and '
+        'collects the originals...'
+    )
+    assert '! could not check' not in log
+    assert re.search(gen.WARNINGS, log)
+
+
+def test_unedited_videos_are_converted_as_before(mac, fake, gen):
+    # Photos' version of every video is its original byte for byte: nothing
+    # changes, no "!" of the edit check.
+    video(mac, fake, 'IMG_0001.MOV')
+    video(mac, fake, 'IMG_0002.MOV')
+    lines = mac.convert(EDITED_IDS)
+    assert [line.split('|')[1:] for line in lines] == [
+        ['A1', 'delete', 'IMG_0001.mp4'],
+        ['A2', 'delete', 'IMG_0002.mp4'],
+    ]
+    assert not list(mac.work.glob('vid_in_*'))
+    assert not re.search(gen.WARNINGS, mac.log)
+
+
+@pytest.mark.parametrize(
+    ('renderings', 'bridge', 'said'),
+    [
+        (
+            None,
+            'ERROR: Photos could not fill the album Compress Videos (working) '
+            '(-1728: no)',
+            '! could not check the videos for edits (ERROR: Photos could not '
+            'fill the album Compress Videos (working) (-1728: no)): edited '
+            'videos are converted from their original files, without the '
+            'edits. Play the copies before deleting the originals.',
+        ),
+        (
+            None,
+            '',
+            '! could not check the videos for edits (the album script gave no '
+            'answer)',
+        ),
+        (
+            'other date',
+            'BRIDGE 2',
+            '! could not check 1 video(s) for edits: converted from the '
+            'original file(s), without edits made in Photos. Play the copies '
+            'before deleting the originals: IMG_0001.MOV',
+        ),
+    ],
+)
+def test_videos_that_could_not_be_checked(mac, fake, renderings, bridge, said):
+    # Converted from their originals, with a "!" line, so the log opens.
+    video(mac, fake, 'IMG_0001.MOV')
+    video(mac, fake, 'IMG_0002.MOV')
+    files, dates = [], ''
+    if renderings == 'other date':
+        files = [
+            photos_version(mac, 'IMG_0001.mov'),
+            photos_version(mac, 'IMG_0002.mov', b'v' * 1000),
+        ]
+        dates = '1|2024-01-01T18:00:00-05:00\n'
+
+    lines = mac.convert(
+        EDITED_IDS, renderings=files, Bridge=bridge, Dates=dates
+    )
+    assert [line.split('|')[1] for line in lines] == ['A1', 'A2']
+    assert all(not line.endswith('burnt-in') for line in lines)
+    assert said in mac.log
+    assert fake.vidmeta[0] == (
+        f'copy {mac.work}/in/IMG_0001.MOV {mac.work}/vid_out_1.mp4'
+    )
+
+
+def test_edited_video_photos_version_cant_be_converted(mac, fake):
+    # ffprobe can't read Photos' version: skipped and counted, not converted
+    # from its original.
+    video(mac, fake, 'IMG_0001.MOV')
+    video(mac, fake, 'IMG_0002.MOV')
+    lines = mac.convert(
+        EDITED_IDS,
+        renderings=[
+            photos_version(mac, 'IMG_0001.mov'),
+            photos_version(mac, 'IMG_0002.mov', b'v' * 1000),
+        ],
+    )
+    assert [line.split('|')[1] for line in lines] == ['A2']
+    assert (
+        "Skipped IMG_0001.MOV: edited in Photos, and ffprobe can't read "
+        "Photos' version of it"
+    ) in mac.log
+    assert mac.skipped == (
+        "Skipped 1 edited video(s) whose Photos version can't be converted."
+    )
+    assert not list(mac.work.glob('vid_in_*'))
+
+
+def test_edits_switched_off(mac, fake):
+    # EDITS=0: every video from its original recording, as in 0.3.0.
+    video(mac, fake, 'IMG_0001.MOV')
+    lines = mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        renderings=[photos_version(mac, 'IMG_0001.mov')],
+        env={'EDITS': '0'},
+    )
+    assert not lines[0].endswith('burnt-in')
+    assert (
+        'Edits made in Photos are not looked for (EDITS=0): every video is '
+        'converted from its original recording.'
+    ) in mac.log
+
+
+def test_album_left_in_photos_is_logged(mac, fake, gen):
+    video(mac, fake, 'IMG_0001.MOV')
+    mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        Closed='ERROR: Photos could not delete the album Compress Videos '
+        '(working) (-1728: no)',
+    )
+    assert (
+        '! could not delete the album Compress Videos (working) (ERROR: Photos '
+        'could not delete the album Compress Videos (working) (-1728: no)): '
+        'Photos may add the copies to it too.'
+    ) in mac.log
+    assert re.search(gen.WARNINGS, mac.log)
+
+
+def test_photos_version_is_cloned_and_ffprobe_says_why(mac, fake):
+    # Photos' version is cloned (cp -c), else copied plainly, and copied
+    # plainly too when ffprobe can't read the clone; when ffprobe can't read
+    # it either way, the log has what ffprobe said.
+    video(mac, fake, 'IMG_0001.MOV')
+    conversion = mac.conversion('A1|2024-01-01 17:00:00|IMG_0001.MOV\n')
+    assert '/bin/cp -c "$edited" "$file"' in conversion
+    assert conversion.count('/bin/cp "$edited" "$file"') == 2
+    mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        renderings=[photos_version(mac, 'IMG_0001.mov')],
+    )
+    assert (
+        "Skipped IMG_0001.MOV: edited in Photos, and ffprobe can't read "
+        "Photos' version of it (IMG_0001.mov, 1 KB)"
+    ) in mac.log
+
+
+def test_a_still_is_never_taken_for_photos_version(mac, fake, gen):
+    # Shortcuts once handed over a still JPEG for an edited video: a file that
+    # isn't a video by its name leaves the video unchecked (its original, with
+    # the "!" line), never converted as "Photos' version".
+    video(mac, fake, 'IMG_0001.MOV')
+    lines = mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        renderings=[photos_version(mac, 'IMG_0001.jpeg')],
+    )
+    assert lines[0].split('|')[1:] == ['A1', 'delete', 'IMG_0001.mp4']
+    assert fake.calls()[0][fake.calls()[0].index('-i') + 1] == str(
+        mac.work / 'in/IMG_0001.MOV'
+    )
+    assert (
+        '! could not check 1 video(s) for edits: converted from the original '
+        'file(s)'
+    ) in mac.log
+
+
+def test_slo_mo_let_through_is_never_checked_for_edits(mac, fake, gen):
+    # SLOMO=0 (in either script or both): a video taken for slo-mo is
+    # converted from its original; it never goes into the album (Photos'
+    # version of a slo-mo is a composition, whose hand-over failed), and the
+    # log says so without a "!".
+    ids = 'A1|2024-01-01 17:00:00|IMG_0001.MOV\n'
+    video(mac, fake, 'IMG_0001.MOV', rate='240/1', avg='177/1', intent='0')
+    result = mac.run(mac.planning(ids), SLOMO='0')
+    assert result.stdout == ''
+    lines = mac.convert(
+        ids,
+        renderings=[photos_version(mac, 'IMG_0001.mov')],
+        env={'SLOMO': '0'},
+    )
+    assert lines[0].split('|')[1:] == ['A1', 'delete', 'IMG_0001.mp4']
+    assert (
+        '1 fast video(s) that may be slo-mo are converted from their original '
+        'recordings (SLOMO=0), without looking for edits made in Photos: '
+        'IMG_0001.MOV'
+    ) in mac.log
+    assert not re.search(gen.WARNINGS, mac.log)
+
+
+def test_no_edit_check_line_when_nothing_is_converted(mac, fake):
+    # No room: nothing converted, so nothing about edits either (Photos did
+    # nothing wrong).
+    video(mac, fake, 'IMG_0001.MOV')
+    folder = fake_df(fake, 1)
+    mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        path=folder,
+        renderings=[],
+        Bridge='BRIDGE 0',
+    )
+    assert 'ERROR: not enough free space' in mac.log
+    assert 'could not check' not in mac.log

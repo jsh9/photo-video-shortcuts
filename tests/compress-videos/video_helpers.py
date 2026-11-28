@@ -177,6 +177,11 @@ class Mac:
             'Reuse': '',
             'AppleScript Result': ids,
             'Matches': '1',  # the number of items selected in Photos
+            # the conversion's: the album script's answer, the files' dates,
+            # the album's deletion (see renderings)
+            'Bridge': '',
+            'Dates': '',
+            'Closed': 'CLOSED',
         }
         values.update(settings)
         return shell_scripts(self.actions, values)
@@ -187,6 +192,32 @@ class Mac:
         ]
         assert len(found) == 1
         return found[0]
+
+    def planning(self, ids='', **settings):
+        """The planning pass: the same script, up to where it exits."""
+        found = [
+            s for s in self.scripts(ids, **settings) if "PHASE='plan'" in s
+        ]
+        assert len(found) == 1
+        return found[0]
+
+    VIDEO_EXTENSIONS = {'.mov', '.mp4', '.m4v'}
+
+    def renderings(self):
+        """
+        What Find Photos gives the conversion when no video is edited: each
+        exported video's bytes, named as Shortcuts names them
+        (``IMG_0001.mov``), in a folder of their own.
+        """
+        folder = self.root / 'renderings'
+        folder.mkdir(exist_ok=True)
+        files = []
+        for f in sorted((self.work / 'in').iterdir()):
+            if f.suffix.lower() in self.VIDEO_EXTENSIONS:
+                files.append(folder / (f.stem + f.suffix.lower()))
+                shutil.copyfile(f, files[-1])
+
+        return files
 
     def follow_ups(self):
         """The log script, the skipped script and the finish script."""
@@ -202,19 +233,34 @@ class Mac:
         finish = next(s for s in scripts if 'Done. You can close' in s)
         return show_log, skipped, finish
 
-    def run(self, script, stdin='', watch=False, path=None, **extra):
+    def run(self, script, *args, stdin='', watch=False, path=None, **extra):
         return subprocess.run(
-            ['zsh', '-c', script, 'zsh'],
+            ['zsh', '-c', script, 'zsh', *map(str, args)],
             env=self.env(watch, path, **extra),
             input=stdin,
             capture_output=True,
             text=True,
         )
 
-    def convert(self, ids='', watch=False, path=None, env=None, **settings):
-        """Runs the conversion script; returns its output lines."""
+    def convert(
+            self,
+            ids='',
+            watch=False,
+            path=None,
+            env=None,
+            renderings=None,
+            **settings,
+    ):
+        """
+        Runs the conversion script, with ``renderings`` (by default
+        ``self.renderings()``: every video unedited) as its arguments and
+        "BRIDGE n" for them; returns its output lines.
+        """
+        files = self.renderings() if renderings is None else renderings
+        settings.setdefault('Bridge', f'BRIDGE {len(files)}')
         result = self.run(
             self.conversion(ids, **settings),
+            *files,
             watch=watch,
             path=path,
             **(env or {}),
