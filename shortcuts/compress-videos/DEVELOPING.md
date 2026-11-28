@@ -233,13 +233,13 @@ The conversion pairs each video to convert with a file by name without
 extension (case aside) and date (a second at most, when both have one), one
 match on both sides, as Compress Photos does, and compares them with
 `/usr/bin/cmp` (2.4 s per GB). The same bytes: unedited, its original is
-converted. Different: edited; the file is copied with `/bin/cp -c` (a clone on
-one volume; ffprobe and ffmpeg can't read Shortcuts' group container, Apple's
-tools can) to `vid_in_N.<ext>`, probed, and converted in the original's place,
-with its own size, frame rate, duration, sound and HDR. What the video is
-(slo-mo, spatial, a log recording, its codec) is decided by the original first;
-Photos' version must then be readable and decodable, with readable sound and
-Dolby Vision this ffmpeg can carry, or the video is skipped and counted
+converted. Different: edited; the file is copied with `/bin/cp` (ffprobe and
+ffmpeg can't read Shortcuts' group container, Apple's tools can) to
+`vid_in_N.<ext>`, probed, and converted in the original's place, with its own
+size, frame rate, duration, sound and HDR. What the video is (slo-mo, spatial,
+a log recording, its codec) is decided by the original first; Photos' version
+must then be readable and decodable, with readable sound and Dolby Vision this
+ffmpeg can carry, or the video is skipped and counted
 (`edited video(s) whose Photos version can't be converted`). `vidmeta copy`
 still takes the original, so the copy has the recording's date, location and
 camera keys. The copy's result line ends with `|burnt-in`, which
@@ -254,7 +254,12 @@ skips all of it.
 
 Not checked on a device when this was written: what Photos' version of each
 kind of edit is (codec, bit depth, HDR, sound), Cinematic videos, how long the
-hand-over takes for large videos, and a library on another disk (no clone).
+hand-over takes for large videos. In the owner's first test (macOS 27), the
+album, Find Photos and the pairing worked, but ffprobe couldn't read a clone
+(`cp -c`) of an edited video's file, perhaps because a clone keeps the group
+container's guard; a plain copy, as Compress Photos makes of a photo's
+rendering, takes the room and time of a copy, and the log now says what ffprobe
+answered when it fails.
 
 ## 2. Layout
 

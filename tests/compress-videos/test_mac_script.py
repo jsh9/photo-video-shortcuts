@@ -1535,3 +1535,21 @@ def test_album_left_in_photos_is_logged(mac, fake, gen):
         'Photos may add the copies to it too.'
     ) in mac.log
     assert re.search(gen.WARNINGS, mac.log)
+
+
+def test_photos_version_is_a_plain_copy_and_ffprobe_says_why(mac, fake):
+    # A clone (cp -c) of Photos' version couldn't be read by ffprobe in the
+    # owner's test (macOS 27): the copy is a plain one, as Compress Photos
+    # makes; and when ffprobe can't read it, the log has what ffprobe said.
+    video(mac, fake, 'IMG_0001.MOV')
+    conversion = mac.conversion('A1|2024-01-01 17:00:00|IMG_0001.MOV\n')
+    assert '/bin/cp -c' not in conversion
+    assert '/bin/cp "$edited" "$file"' in conversion
+    mac.convert(
+        'A1|2024-01-01 17:00:00|IMG_0001.MOV\n',
+        renderings=[photos_version(mac, 'IMG_0001.mov')],
+    )
+    assert (
+        "Skipped IMG_0001.MOV: edited in Photos, and ffprobe can't read "
+        "Photos' version of it (IMG_0001.mov, 1 KB)"
+    ) in mac.log

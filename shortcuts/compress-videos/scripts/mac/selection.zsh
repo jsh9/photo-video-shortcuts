@@ -309,19 +309,23 @@ for f in "$WORK"/in/*(.N); do
     fi
   fi
   if [ -n "$edited" ]; then
-    # Photos' version, copied (a clone, on one disk) into the work folder:
-    # ffprobe and ffmpeg can't read it where Shortcuts keeps it (its group
-    # container, which macOS guards as another app's data); Apple's cp can.
-    # It is converted as it is, with its own size, length, sound and HDR; the
-    # original keeps telling what the video is (above) and its metadata.
+    # Photos' version, copied into the work folder: ffprobe and ffmpeg can't
+    # read it where Shortcuts keeps it (its group container, which macOS
+    # guards as another app's data); Apple's cp can. A plain copy, as Compress
+    # Photos makes: ffprobe couldn't read a clone (cp -c) of an edited video's
+    # file (macOS 27), which may keep the container's guard. It is converted
+    # as it is, with its own size, length, sound and HDR; the original keeps
+    # telling what the video is (above) and its metadata.
     okind=$(kind_text "$p_w" "$p_h" "$avg" "$p_transfer" "$p_pix" "$dv")
     osize=$(stat -f %z "$f") otransfer=$p_transfer opix=$p_pix odv=$dv oaudio=$#p_audio
     file="$WORK/vid_in_$((njobs + 1)).${edited:e:l}"
     why=''
-    if ! /bin/cp -c "$edited" "$file" 2>/dev/null; then
+    if ! /bin/cp "$edited" "$file" 2>/dev/null; then
       why="Photos' version of it can't be read"
     elif ! probe "$file" || (( p_videos == 0 )); then
-      why="ffprobe can't read Photos' version of it"
+      # what ffprobe says, and what the file is, for the log
+      said=$("$ffprobe" -v error -show_entries format=format_name "$file" 2>&1 | head -2)
+      why="ffprobe can't read Photos' version of it (${edited:t}, $(size_text $(stat -f %z "$file" 2>/dev/null || print 0))${said:+: ${said//$'\n'/; }})"
     elif [ -z "$p_vcodec" ] || ! (( ${+decodable[$p_vcodec]} )); then
       why="this ffmpeg can't decode Photos' version of it (${p_vcodec:-unknown codec})"
     elif ! sound; then
