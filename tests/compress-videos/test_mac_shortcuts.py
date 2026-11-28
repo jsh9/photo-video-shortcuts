@@ -439,9 +439,16 @@ def test_shell_scripts_use_zsh(gen, actions):
     conversion, finish = (vh.params(a) for a in with_input)
     assert 'vid_done.txt' in str(conversion['Script'])
     assert conversion['InputMode'] == 'as arguments'
-    assert [
-        r.get('VariableName') for r in vh.references(conversion['Input'])
-    ] == ['Renderings']
+    (renderings,) = vh.references(conversion['Input'])
+    assert renderings['VariableName'] == 'Renderings'
+    # as Media: a library video's own file, not the still JPEG Shortcuts
+    # hands over for an edited video otherwise (the owner's test)
+    assert renderings['Aggrandizements'] == [
+        {
+            'Type': 'WFCoercionVariableAggrandizement',
+            'CoercionItemClass': 'WFAVAssetContentItem',
+        }
+    ]
     assert finish['InputMode'] == 'to stdin'
     finish = finish['Script']
     assert 'Done. You can close this window.' in finish

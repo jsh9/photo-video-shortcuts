@@ -40,7 +40,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import vf  # noqa: E402
-from vf import VERSION, Sample, variable, workflow  # noqa: E402
+from vf import VERSION, Ref, Sample, variable, workflow  # noqa: E402
 
 SAMPLE = HERE / 'sample' / 'Mac Sample.plist'
 DIST = HERE.parent / 'dist'
@@ -322,7 +322,7 @@ def build(sample):
     )
     ids = b.run_applescript(applescript_text('export'), input_ref=work)
     renderings(b, ids)
-    result = b.run_shell_script(*script(ids), input_ref=variable('Renderings'))
+    result = b.run_shell_script(*script(ids), input_ref=as_media('Renderings'))
     # "imported=N", "collected=M", the times, then "! ..." problem lines.
     outcome = b.run_applescript(applescript_text('import'), input_ref=result)
     lines = b.split(outcome, '\n')
@@ -403,6 +403,32 @@ def renderings(b, ids):
             applescript_text('bridge'), input_ref=b.text('close')
         ),
     )
+
+
+def as_media(name):
+    """
+    The variable ``name`` as Media (Shortcuts' type menu on a variable:
+    WFAVAssetContentItem), so that a library video becomes its video. Passed as
+    it is, Run Shell Script asks each item for a file of any type, and
+    ContentKit (WFPhotoMediaContentItem, iOS 18.2:
+    preferredAssetResourceForType:) gives the first full-size rendering among
+    the asset's resources: for an edited video, a still JPEG of it (seen on
+    macOS 27: IMG_1970.jpeg, 301 KB, for an edited .MOV). As Media, the item is
+    PhotoKit's AVAsset of the video's current version (generateAVAsset:
+    requestAVAssetForVideo, default version), whose file Shortcuts copies (an
+    AVURLAsset) or exports passthrough: an unedited video's original, an edited
+    one's rendering.
+    """
+    ref = variable(name)
+    return Ref({
+        **ref.value,
+        'Aggrandizements': [
+            {
+                'Type': 'WFCoercionVariableAggrandizement',
+                'CoercionItemClass': 'WFAVAssetContentItem',
+            }
+        ],
+    })
 
 
 def video_date(b, item, index):
