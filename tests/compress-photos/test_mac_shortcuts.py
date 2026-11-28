@@ -834,7 +834,9 @@ def test_photos_selection_route_through_applescript(gen, shortcuts):
         '*) FORMAT_NAME=\'JPEG XL\'; KEYWORDS="jxl,q=$QUALITY";;'
         in selection[0]
     )
-    assert '"${dest:t}" "$KEYWORDS"' in selection[0]
+    assert '|${dest:t}|$KEYWORDS${5:+,$5}' in selection[0]
+    # an edited photo whose edit is burnt in gets "burnt-in" too
+    assert '"$name" burnt-in' in selection[0]
     # a copy whose original is unknown (two selected photos with one name)
     # gets them too, with the keywords Photos read from its file
     assert (
@@ -1292,3 +1294,25 @@ def test_photos_locations_in_photos_go_to_photobatch(gen, shortcuts):
     assert '1|gps|40.5,-73.25\nJXL_META' in script
     assert 'my metaLines(itemId, p)' in gen.applescript_text('export')
     assert not ph.check_photo_locations(shortcuts[FILES])
+
+
+def test_import_adopts_copies_already_in_photos(gen):
+    # A result line "id:<Photos' id>|original id|flag|name|keywords" is a
+    # copy Compress Photos Helper already saved with its edit: it isn't
+    # imported, but found by id and handled like an imported copy (the check
+    # against its original, keywords, albums, the original collected); an id
+    # Photos doesn't know is a "!" line. Compress Photos' own (the EDITS
+    # blocks of the shared script, which Compress Videos leaves out).
+    script = gen.applescript_text('import')
+    assert '-- @' not in script
+    assert 'else if (item 1 of parts) starts with "id:" then' in script
+    assert (
+        'set end of adopted to {text 4 thru -1 of (item 1 of parts), '
+        'item 2 of parts, own, item 4 of parts}'
+    ) in script
+    assert (
+        'tell application "Photos" to set found to media item id '
+        '((item 1 of a) as text)'
+    ) in script
+    assert 'set end of pairs to {item 2 of a, found, item 3 of a}' in script
+    assert '": its copy isn\'t in Photos"' in script

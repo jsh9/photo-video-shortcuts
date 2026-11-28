@@ -34,7 +34,7 @@ declares:
 
 ```json
 {
-  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
+  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos", "compress-photos-helper-macos.zip"],
   "shortcuts": {
     "iphone": ["Compress Photos.shortcut", "Compress-Photos-Import.shortcut"],
     "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]
@@ -46,9 +46,12 @@ declares:
 `iphone` and `mac`. A file can be listed under one platform only: Stack Photos,
 one shortcut for both, lists it under `iphone`, so its one ZIP is
 `stack-photos-shortcuts-v<version>.zip` (and the notes say iPhone), and has no
-encoders (`"encoders": []`). An encoder is a `.wasm` file (run with `wasmtime`)
-or a native Mac executable, a name without an extension (run directly; releases
-are built on a Mac).
+encoders (`"encoders": []`). An encoder is a `.wasm` file (run with
+`wasmtime`), a native Mac executable, a name without an extension (run
+directly; releases are built on a Mac), or a Mac app in a ZIP, `<name>.zip`
+(Compress Photos Helper, `compress-photos-helper-macos.zip`, built by
+`build-helper.sh`), whose executable the check runs after unzipping it with
+`ditto -x -k`.
 
 Encoder files and signed shortcuts come from that tool's `dist/`. Every
 declared file must exist, contain data, and have been regenerated during its
@@ -109,7 +112,7 @@ The script:
 - builds every shortcut, not only the one being released, because every release
   carries the current files of all shortcuts, so the README's "latest" download
   links keep working (for Compress Photos: `build-wasm.sh`, `build-macos.sh`,
-  `build_shortcuts.py` and `build_mac_shortcuts.py`);
+  `build-helper.sh`, `build_shortcuts.py` and `build_mac_shortcuts.py`);
 - checks the complete `release.json` file lists, freshness, nonempty outputs,
   encoder versions and ZIP integrity;
 - zips each platform's `.shortcut` files into `<name>-shortcuts-v<version>.zip`

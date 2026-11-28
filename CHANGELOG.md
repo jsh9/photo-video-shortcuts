@@ -3,6 +3,40 @@
 Each shortcut has its own version, shared by its `.shortcut` files and its
 encoder. Every release includes the current files of all shortcuts.
 
+## [Compress Photos 0.13.0] - 2026-11-27
+
+- Added
+  - On the Mac, *Compress Photos (macOS)* started from Photos saves an edited
+    photo's copy with its edit, which Photos can still revert: the copy looks
+    as Photos shows the photo, and Image ▸ Revert to Original undoes the edit,
+    leaving the compressed original. This needs a new small app, *Compress
+    Photos Helper* (`compress-photos-helper-macos.zip`, installed into
+    `~/Applications`; see Installation in README-mac), with full access to
+    Photos, which it asks for once (again after each update of the app). On a
+    HEIC copy, a Portrait photo's depth and a Photographic Style can be
+    adjusted again; a JPEG XL copy reverts, but can't adjust them. Photos keeps
+    the edited look apart from the original, always as HEIC (at your RF, or RF
+    26 for JPEG XL copies), so such a copy takes about twice the space of one
+    with the edit burnt in. The log lists these photos; an edit the helper
+    hasn't been tested with (Clean Up, Retouch, any other part) is kept too,
+    with a `!` line asking you to look at the copy.
+  - When an edit can't be kept that way (the helper isn't installed or has no
+    full access, another app made the edit, Photos didn't take the copy), the
+    photo is converted as in 0.12.0, with the edit burnt into its pixels. Such
+    copies get the keyword `burnt-in` in Photos, and the log ends with a `!`
+    list of them by reason, so that it opens in Quick Look.
+- Changed
+  - HEIC copies keep every auxiliary image of the picture (a Portrait photo's
+    depth and mattes, the semantic mattes, the Photographic Styles data) and
+    Apple's Photographic Styles metadata, byte for byte: about 0.3 MB of a 2.7
+    MB iPhone photo. Before, they were dropped. The log says
+    `N auxiliary images kept`. On the iPhone too (`photobatch.wasm`), where
+    whether Photos lets you adjust a copy's depth or Style hasn't been checked.
+  - Update *Compress Photos (macOS)* and `photobatch-macos`, and install
+    *Compress Photos Helper* to keep edits revertible. On the iPhone, update
+    `photobatch.wasm` for the HEIC change above; the iPhone shortcuts work as
+    in 0.12.0.
+
 ## [Compress Photos 0.12.0] - 2026-11-27
 
 - Changed

@@ -1308,8 +1308,12 @@ static int process_heic_job(const char *dir, const job_t *job, size_t pos, size_
     fmt_bytes(out_s, sizeof out_s, (double)heic_len);
     const char *what = transcoded ? (info.kept_gain_map ? ", HDR kept" : info.had_gain_map ? ", HDR dropped" : "")
                                   : ", SDR HEIC";
-    snprintf(res->info, sizeof res->info, "%s %ux%u%s, %d tile%s%s", format_name(format), info.w, info.h, what,
-             info.tiles, info.tiles == 1 ? "" : "s", exif_len || xmp_len ? "" : ", no metadata");
+    char aux[48] = "";
+    if (info.kept_aux) {
+      snprintf(aux, sizeof aux, ", %d auxiliary image%s kept", info.kept_aux, info.kept_aux == 1 ? "" : "s");
+    }
+    snprintf(res->info, sizeof res->info, "%s %ux%u%s, %d tile%s%s%s", format_name(format), info.w, info.h, what,
+             info.tiles, info.tiles == 1 ? "" : "s", aux, exif_len || xmp_len ? "" : ", no metadata");
     snprintf(res->sizes, sizeof res->sizes, "%s -> %s (%.0f%%), %.1f s", in_s, out_s,
              orig_len > 0 ? 100.0 * heic_len / orig_len : 0.0, now_seconds() - t0);
   }

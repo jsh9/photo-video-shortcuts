@@ -262,7 +262,9 @@ def applescript_text(name):
     lib/mac/<name>.applescript (shared with the other tools), or this tool's
     own mac/<name>.applescript (bridge), with @NAME@, @ORIGINALS_ALBUM@,
     @OLD_ORIGINALS_ALBUM@, @BRIDGE_ALBUM@, @COPY_KEYWORD@, @FORMAT_KEYWORDS@
-    and @QUALITY_PREFIXES@ (AppleScript lists) filled in
+    and @QUALITY_PREFIXES@ (AppleScript lists) filled in, and the shared
+    scripts' EDITS blocks kept (import.applescript: the copies of edited photos
+    that Compress Photos Helper already saved in Photos)
     (``wf.applescript_text``: plain text, the values going in through the
     action's input).
     """
@@ -272,6 +274,7 @@ def applescript_text(name):
 
     return wf.applescript_text(
         path,
+        blocks=('EDITS',),
         NAME=NAME_PHOTOS,
         BRIDGE_ALBUM=BRIDGE_ALBUM,
         ORIGINALS_ALBUM=ORIGINALS_ALBUM,
@@ -293,7 +296,7 @@ def finish_script(work):
     """
     route = ROUTES[work]
     cleanup = (
-        'rm -rf "$W/in" "$W"/jxl_*'
+        'rm -rf "$W/in" "$W/renders" "$W/looks" "$W/bake" "$W"/jxl_*(N)'
         if work == WORK_SELECTION
         else 'rm -rf "$W"'
     )
@@ -368,8 +371,9 @@ def build_photos(sample):
         'metadata. Only still photos are converted: Live Photos and videos are '
         'skipped. Started while Photos is in front with photos selected (Share menu, '
         'right-click > Shortcuts, menu bar), it converts that selection: Photos '
-        'exports the originals (an edited photo is converted as it looks in Photos, '
-        f'through the album "{BRIDGE_ALBUM}", which it deletes after), the copies '
+        'exports the originals (an edited photo is saved with its edit, which '
+        'Compress Photos Helper keeps revertible, or else burnt in, as it looks in '
+        f'Photos, through the album "{BRIDGE_ALBUM}", which it deletes after), the copies '
         "are imported into the originals' "
         f'albums, and the converted originals go into the album "{ORIGINALS_ALBUM}" '
         'for you to review and delete. Started any other way, it shows a photo picker, saves the '
@@ -418,9 +422,11 @@ def selection_route(b):
     The photos selected in Photos, through AppleScript (see mac/*.applescript):
     Photos exports their originals into WORK_SELECTION/in, Shortcuts gets
     Photos' current version of each through the album BRIDGE_ALBUM
-    (renderings), the script converts each original, or an edited photo's
-    current version, and Photos imports the results into the originals' albums
-    and collects the converted originals in ORIGINALS_ALBUM.
+    (renderings), the script converts each original (an edited photo's copy is
+    saved with its edit by Compress Photos Helper, or its current version
+    converted instead, the edit burnt in), and Photos imports the results (and
+    takes the helper's copies by id) into the originals' albums and collects
+    the converted originals in ORIGINALS_ALBUM.
     """
     fmt, quality = choose_format(b)
     cores = choose_cores(b)

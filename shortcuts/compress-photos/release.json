@@ -1,5 +1,5 @@
 {
-  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos"],
+  "encoders": ["photobatch.wasm", "photobatch-scalar.wasm", "photobatch-macos", "compress-photos-helper-macos.zip"],
   "shortcuts": {
     "iphone": ["Compress Photos.shortcut", "Compress-Photos-Import.shortcut"],
     "mac": ["Compress Photos (macOS).shortcut", "Compress Photo Files (macOS).shortcut"]

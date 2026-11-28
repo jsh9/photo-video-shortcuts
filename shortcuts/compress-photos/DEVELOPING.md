@@ -173,15 +173,21 @@ Compress Photos (macOS)                      (shortcut)
    extension, case aside, and the same date to a second, one match on both
    sides) and stages in/* (a photo plus
    a .mov of the same name is a Live Photo: skipped; a video alone: skipped;
-   an edited photo, whose rendering isn't the original's bytes: a copy of
-   the rendering, under the original's name; an unpaired one: the original,
-   with a "!" line),
+   an edited photo, whose rendering isn't the original's bytes: its
+   original, its rendering copied to renders/N; an unpaired one: the
+   original, with a "!" line),
    writes jxl_dates.txt (each date with the Mac's offset on that date, by
    `date -j`; none for a clock time in the hour repeated when daylight
-   saving time ends) and jxl_meta.txt (the other lines, by job index), runs
-   photobatch, renames each result to out/Name.jxl (or .heic) and
-   prints
-   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,RF=26)"
+   saving time ends) and jxl_meta.txt (the other lines, by job index), has
+   Compress Photos Helper check the edited photos (below; one it refuses,
+   or every one without the helper: its rendering becomes its job, the edit
+   burnt in), runs photobatch, then photobatch on the edited photos'
+   renderings as HEIC (looks/), has the helper save each edited photo with
+   its edit, converts the renderings of those Photos didn't take (bake/),
+   renames each result to out/Name.jxl (or .heic) and prints
+   "path|id|delete or keep|Name.jxl (or .heic)|jxl,q=83 (or heic,RF=26)",
+   with ",burnt-in" for an edit burnt in, or "id:<Photos' id>|id|..." for a
+   copy the helper saved
    (a "|", ":", "/", "\" or control character in the original's name is
    "_" in the copy's: photobatch's clean_name, so the line splits on "|");
    Run AppleScript bridge.applescript (input: the text "close") deletes the
@@ -398,6 +404,58 @@ try: with no album (only when Shortcuts lacks full access to the library:
 ContentKit's `photoAlbums` is then empty) it stops the run with "Photo Album
 Not Found", before anything is converted; the If on `^BRIDGE [1-9]` keeps it
 from running on an album that wasn't made.
+
+**Revertible edits (0.13.0).** Photos keeps an edited photo as three resources:
+the original (PhotoKit's type 1), the edit record (`Adjustments.plist`, type 7)
+and the look (Photos' full-size rendering, type 5). `PHAssetCreationRequest`
+takes the same three from files, so *Compress Photos Helper* (`src/photoedits`,
+Swift; built by `scripts/build-helper.sh`, signed ad hoc) saves an edited
+photo's copy as Photos would: the compressed original as type 1, the original's
+edit record as it is, and the compressed rendering as the look. Facts from the
+spike and the prototype (macOS 27, in
+[the plan](../../docs/compress-photos-revertible-edits-plan.md), section 9):
+such a photo is edited (`hasAdjustments`), its current picture is the look byte
+for byte, and Revert leaves the compressed original, with a HEIC or a JPEG XL
+original; a HEIC look is kept byte for byte, a JPEG XL look is not (Photos
+stores a JPEG of its own, which came out wrong for a photo stored upside down),
+so the look is always HEIC (the chosen RF, or RF 26 with JPEG XL); without a
+look, the photo's thumbnails stay gray on the Mac. Photos edits the copy as the
+original only with the data the edit needs: a HEIC copy keeps every auxiliary
+image and the Styles metadata (1.6), so the owner could adjust a Portrait's
+depth and a Photographic Style on HEIC copies; on JPEG XL copies these revert
+but can't be adjusted. The helper runs as its own app, started with
+`open -W -n -g -a`, so that macOS asks for access to Photos for the app itself,
+not for Shortcuts' script runner (which has no usage string for it); an ad hoc
+signature changes with each build, and macOS then asks again. It works in
+`~/Library/Caches/compress-photos-macos/edits` (emptied by each run, and of the
+photos' files once the helper is done; `n/original` is a link to the exported
+original, for the size check): `check` reads `check.txt` ("n|id") and answers
+in `check.out`, `n|ok|notes` (it saved the edit record as
+`n/Adjustments.plist`) or `n|no|why`; `create` reads `create.txt` ("n|name",
+with `n/base.heic` or `base.jxl` and `n/look.heic`) and answers
+`n|created|id|notes`, `n|unsure|id|why` (created, but its picture isn't the
+look within 10 s) or `n|failed|why`. Each answer starts with
+`photoedits <version> protocol 2`, which `selection.zsh` checks (the protocol
+only, so that a helper of another release still works when it speaks the same;
+1 was the prototype's, which took other apps' edits), and ends with `end`, or
+`end|timeout` from its watchdog (150 s plus 45 s per photo). The file is
+written again after each line, so the lines so far count also when the helper
+stops early (a photo with no line is burnt in; after `create`, Photos may then
+have its copy too, which the log says). It refuses an edit made by another app
+(its `adjustmentFormatIdentifier` isn't `com.apple.photo`), an edit record it
+can't read, one without edit data or not based on the original
+(`adjustmentBaseVersion` not 0); every edit Photos made itself is tried, with a
+note for a part it hasn't seen work (Clean Up, Retouch, an unknown identifier;
+the parts' names are PhotoImaging's) and for a copy whose shown size isn't its
+original's. A refused photo, every edited photo without the helper or its full
+access (status 3), and one whose `create` failed or got no answer have their
+edits burnt in, as in 0.12.0, with the keyword `burnt-in` and a `!` block at
+the log's end, grouped by reason. A copy the helper saved is in Photos already:
+`import.applescript` finds it by id (`media item id`, as Photos' AppleScript
+takes PhotoKit's ids) and handles it like an imported one. Those lines are in
+`-- @IF EDITS` blocks of the shared script, which only Compress Photos' build
+keeps (`wfkit.applescript_text(..., blocks=('EDITS',))`), so Compress Videos'
+shortcut has the same text as before.
 
 ### 1.2. XMP
 
@@ -978,26 +1036,31 @@ HDR JPEG XL (see [HDR](#13-hdr)). No HEIF writer can attach a gain map (libheif
   original order. Kept: the picture and its tiles, its thumbnails, its Exif and
   XMP items, and, unless `--sdr`, the gain map (an auxiliary image of Apple's
   `hdrgainmap` type, or the inputs of a `tmap` item) with its tiles, `tmap` and
-  XMP, plus the `altr` group. Dropped: Apple's Photographic Styles data (the
-  linear style-delta image, three mattes, the linear thumbnail, the styles
-  metadata; about 0.3 MB of a 2.7 MB photo) and any other auxiliary image. A
-  date or other metadata from Photos replaces the data of the picture's Exif
-  item (the 4-byte offset header put back) or, when the file has none, adds one
-  (`hb_rewrite_t` `add`: a hidden `infe`, a `cdsc` reference to the picture, an
-  `iloc` entry, its data last in `mdat`), and likewise the picture's XMP item
-  (added as a `mime` item, `application/rdf+xml`), as in the JPEG XL route.
-  Replaced data always goes to `mdat`; when an item kept in `idat`
-  (construction method 1, where some writers put the Exif) is replaced or
-  dropped, `idat` is written anew with only the kept items' data, each in one
-  piece (their `iloc` offsets moved), so that no old Exif (a hidden location's
-  GPS) stays in the file (a kept item there that can't be read, in a malformed
-  file, keeps `idat`'s layout instead, with the replaced and dropped items'
-  bytes zeroed in place); otherwise it stays byte for byte. A single `hvc1`
-  picture is one tile. Measured on a 24 MP photo: per-tile x265 at CRF N gives
-  the same size as x265 on the whole picture at CRF N (within 0.3%), and for a
-  still, CRF N means QP ≈ N − 5.3 (x265's I-frame offset), so RF numbers run
-  finer than in video: RF 26 is 61% of the original at SSIMULACRA2 81 (≈ JPEG
-  XL 83).
+  XMP, plus the `altr` group, and every other auxiliary image of the picture
+  (an `auxl` reference to it) with its tiles and XMP, byte for byte: a Portrait
+  photo's depth or disparity and its mattes, the semantic mattes, and Apple's
+  Photographic Styles data (the linear style-delta image, the linear thumbnail,
+  and the `uri ` item `tag:apple.com,2023:photo:metadata:styles`, about 57 KB,
+  which describes the picture and the style-delta image; about 0.3 MB of a 2.7
+  MB photo in all), which Photos needs to edit the copy as it edits the
+  original (since 0.13.0; the log says `N auxiliary images kept`). Without the
+  `uri ` item, Photos showed a copy's Style as a filter. A date or other
+  metadata from Photos replaces the data of the picture's Exif item (the 4-byte
+  offset header put back) or, when the file has none, adds one (`hb_rewrite_t`
+  `add`: a hidden `infe`, a `cdsc` reference to the picture, an `iloc` entry,
+  its data last in `mdat`), and likewise the picture's XMP item (added as a
+  `mime` item, `application/rdf+xml`), as in the JPEG XL route. Replaced data
+  always goes to `mdat`; when an item kept in `idat` (construction method 1,
+  where some writers put the Exif) is replaced or dropped, `idat` is written
+  anew with only the kept items' data, each in one piece (their `iloc` offsets
+  moved), so that no old Exif (a hidden location's GPS) stays in the file (a
+  kept item there that can't be read, in a malformed file, keeps `idat`'s
+  layout instead, with the replaced and dropped items' bytes zeroed in place);
+  otherwise it stays byte for byte. A single `hvc1` picture is one tile.
+  Measured on a 24 MP photo: per-tile x265 at CRF N gives the same size as x265
+  on the whole picture at CRF N (within 0.3%), and for a still, CRF N means QP
+  ≈ N − 5.3 (x265's I-frame offset), so RF numbers run finer than in video: RF
+  26 is 61% of the original at SSIMULACRA2 81 (≈ JPEG XL 83).
 - **From pixels.** A JPEG, a PNG, or a HEIF whose picture isn't 8-bit 4:2:0
   HEVC tiles (10-bit, 4:4:4, alpha, an `iden` or `iovl` primary, tiles with
   several `hvcC`s) is decoded upright, converted to YCbCr 4:2:0 (BT.601, full
@@ -1126,11 +1189,12 @@ included), so there is no new library. The plan and its spikes:
   multiply-adds than with WebAssembly's separate ones: decoded pixels from
   `photobatch-macos` differ from `photobatch.wasm`'s by at most 1 of 255 in
   about 0.02% of an 8-bit picture's samples, and by at most 6 of 65535 in 2% of
-  an HDR one's (measured on this tool's copies and `cjxl` files, 2026-10-16),
-  so their copies differ a little too. The SIMD and scalar WebAssembly builds
-  decode alike, so every iPhone gives the same copy. `test_jxl_input.py` checks
-  both (allowing 1 of 255, 16 of 65535 on the Mac); the encoder's own output
-  from a given picture is still the same on every build.
+  an HDR one's (measured on this tool's copies and `cjxl` files, 2026-10-16; 19
+  of 65535 on GitHub's macos-latest runners, 2026-11-27), so their copies
+  differ a little too. The SIMD and scalar WebAssembly builds decode alike, so
+  every iPhone gives the same copy. `test_jxl_input.py` checks both (allowing 1
+  of 255, 32 of 65535 on the Mac); the encoder's own output from a given
+  picture is still the same on every build.
 - **Memory** (WebAssembly, 48 MP, `test_memory.py`): 0.55 GB to JPEG XL and
   0.48 GB to HEIC for a single-pass file such as `cjxl` and this tool write;
   0.64 GB for a progressive one (`cjxl -p`). The other 48 MP conversions take
@@ -1147,6 +1211,8 @@ included), so there is no new library. The plan and its spikes:
 | `VERSION`                                             | the version, shared by the shortcuts and `photobatch`; read by the build scripts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `src/`                                                | `photobatch`: `photobatch.c` (batch, encoding), `meta.c` (EXIF/XMP/ICC from HEIF, JPEG, PNG and JPEG XL; the capture date), `pixels.c` (decoded images, orientation), `heif.c` (libheif decoding), `jxl.c` (JPEG XL decoding and metadata boxes with libjxl; CICP and libjxl's color encodings), `hdr.c` (whether and how an HDR photo's gain map is used), `gainmap.c` (HDR from gain maps), `grain.c` (grain against banding, off by default; the bright-sky warning), `hevcenc.c` (one HEVC picture with x265), `heifbox.c` (HEIF containers: reading, rewriting, writing; `boxes.h` shares the box reader with `meta.c`), `heicout.c` (HEIC output: tiles re-encoded in the original's container, or a new file from pixels), `xmp.cpp` (namespace-aware XML/RDF), `selftest_heic.h` and `selftest_hdr_heic.h` (tiny HEICs for `--selftest`) |
 | `third_party/`                                        | `stb_image.h` (JPEG and PNG decoding), `tinyxml2/` 11.0.0 (XMP XML parsing; zlib license)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `src/photoedits/`                                     | Compress Photos Helper, the Mac selection route's PhotoKit app that saves an edited photo's copy with its edit: `main.swift`, `Info.plist` (see [Revertible edits](#11-on-the-mac))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `scripts/build-helper.sh`                             | builds `dist/Compress Photos Helper.app` and its release file `dist/compress-photos-helper-macos.zip` (arm64, macOS 14 or later, signed ad hoc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `scripts/build-wasm.sh`                               | builds `dist/photobatch.wasm` and `dist/photobatch-scalar.wasm` for a-Shell                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `scripts/build-macos.sh`                              | builds `dist/photobatch-macos`, the static arm64 macOS encoder for the Mac shortcuts (macOS 14 or later)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `scripts/build-native.sh`                             | builds `build/photobatch` for the Mac, against Homebrew's libjxl, libheif and x265 (fast tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1167,6 +1233,7 @@ Run these from this folder (`shortcuts/compress-photos`):
 ./scripts/build-native.sh
 ./scripts/build-wasm.sh
 ./scripts/build-macos.sh
+./scripts/build-helper.sh
 python3 scripts/build_shortcuts.py --guess
 python3 scripts/build_mac_shortcuts.py --guess
 ```
@@ -1229,6 +1296,12 @@ python3 scripts/build_mac_shortcuts.py --guess
   signed. It refuses to run on an Intel Mac. The output is byte for byte
   `photobatch.wasm`'s (`test_mac_script.py`, `test_heic.py`). Linking x265
   makes the encoders GPL, as the repository is.
+- **What `build-helper.sh` does:** compiles `src/photoedits/main.swift` with
+  Xcode's `swiftc` for arm64 macOS 14, puts it into
+  `Compress Photos Helper.app` with `Info.plist` (`@VERSION@` filled in; the
+  helper's `--version` reads it), signs the app ad hoc and zips it with `ditto`
+  (no extended attributes), into `dist/` or the folder given (the tests).
+  `scripts/release.py` runs it and checks the zipped app's `--version`.
 - **`photobatch --selftest`** checks file access, large-file I/O, HEIF decoding
   (a tiny built-in HEIC), HDR decoding and keeping Apple's HDR profile (a tiny
   built-in HDR HEIC), a HEIC round trip (the HDR HEIC re-encoded keeps its gain

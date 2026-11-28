@@ -91,7 +91,9 @@ def test_mac_only_tool():
         ('photobatch.wasm', 'wasm'),
         ('photobatch-scalar.wasm', 'wasm'),
         ('photobatch-macos', 'native'),
+        ('compress-photos-helper-macos.zip', 'app'),
         ('.wasm', None),
+        ('.zip', None),
         ('', None),
         ('photobatch.exe', None),
         ('photobatch.macos.bin', None),
@@ -317,6 +319,7 @@ def test_build_runs_every_build_script(tmp_path, monkeypatch):
     for name in (
         'build-wasm.sh',
         'build-macos.sh',
+        'build-helper.sh',
         'build_shortcuts.py',
         'build_mac_shortcuts.py',
     ):
@@ -332,11 +335,35 @@ def test_build_runs_every_build_script(tmp_path, monkeypatch):
     assert [c[-2:] if c[-1] == '--no-sign' else c[-1:] for c in commands] == [
         [str(scripts / 'build-wasm.sh')],
         [str(scripts / 'build-macos.sh')],
+        [str(scripts / 'build-helper.sh')],
         ['--guess', '--no-sign'],
         ['--guess', '--no-sign'],
     ]
-    assert commands[2][1] == str(scripts / 'build_shortcuts.py')
-    assert commands[3][1] == str(scripts / 'build_mac_shortcuts.py')
+    assert commands[3][1] == str(scripts / 'build_shortcuts.py')
+    assert commands[4][1] == str(scripts / 'build_mac_shortcuts.py')
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='ditto is macOS only')
+@pytest.mark.parametrize('reported,ok', [('0.1.0', True), ('0.0.9', False)])
+def test_zipped_app_version_is_its_executables(tmp_path, reported, ok):
+    """
+    A zipped app (Compress Photos Helper) is unzipped as a user would, and its
+    executable, named in its Info.plist, reports the version.
+    """
+    t = tool(tmp_path)
+    app = tmp_path / 'app' / 'Helper.app' / 'Contents'
+    (app / 'MacOS').mkdir(parents=True)
+    (app / 'Info.plist').write_bytes(
+        release.plistlib.dumps({'CFBundleExecutable': 'tool'})
+    )
+    exe = app / 'MacOS' / 'tool'
+    exe.write_text(f'#!/bin/sh\necho "tool {reported} protocol 1"\n')
+    exe.chmod(0o755)
+    zipped = t.path / 'dist' / 'helper-macos.zip'
+    zipped.parent.mkdir(exist_ok=True)
+    release.run(['ditto', '-c', '-k', '--keepParent', app.parent, zipped])
+    with pytest.raises(release.ReleaseError) if not ok else nullcontext():
+        release.check_encoder_version(t, zipped)
 
 
 def baseline(versions=None):
