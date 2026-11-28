@@ -37,6 +37,16 @@ ______________________________________________________________________
 
 <!--TOC-->
 
+**Built as 0.4.0 (2026-11-28), without the spike.** The owner chose to test the
+real shortcut instead of a spike (section 5), so the gates of 5.4 are checked
+by the owner's test of 0.4.0, and section 9 stays empty. Decisions as
+recommended in section 3, with one change after Compress Photos 0.13.0: every
+edited video's copy gets the keyword `burnt-in`, and the log names them in a
+`!` line at its end (so it opens), as Compress Photos does for the photos whose
+edits it burns in. The album is deleted before the conversion (D7); should G6
+fail, the videos come unchecked, with a `!` line, and the album moves after the
+conversion.
+
 Plan written 2026-11-27, the day Compress Photos 0.12.0 did the same for photos
 (issue #29, PR #30, [its plan](compress-photos-edits-plan.md)). Nothing is
 built yet. Section 5 (the spike) comes first and can change the design: read

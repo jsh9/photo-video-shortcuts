@@ -1,6 +1,10 @@
 # @NAME@ @VERSION@: converts the videos selected in Photos with ffmpeg.
 # Help: @HELP_URL@
 setopt extendedglob
+# The shortcut runs this script twice (selection.zsh): "plan" prints the
+# videos it would convert, for the album through which Shortcuts gets Photos'
+# version of each (bridge.applescript); "convert" converts them.
+PHASE='@PHASE@'
 # Photos exported the originals into $WORK/in (export.applescript); the copies
 # go to $WORK/out, where Photos imports them from (import.applescript).
 WORK=@WORK@
@@ -16,6 +20,7 @@ WATCH=${WATCH:-1}  # 0: no Terminal window following the progress
 NICE=${NICE:-10}  # ffmpeg's priority (nice): 10 keeps the Mac responsive
 DOLBY=${DOLBY:-1}  # 0: convert Dolby Vision videos as plain HDR
 SLOMO=${SLOMO:-1}  # 0: skip no video as slo-mo (a slo-mo's copy loses its slow motion)
+EDITS=${EDITS:-1}  # 0: convert every video from its original recording, without edits made in Photos (change it in both Run Shell Script actions)
 PROGRESS_EVERY=${PROGRESS_EVERY:-5}  # seconds between progress lines
 # The shortcut's choices, the first word of each list's title; with REUSE=1,
 # the last run's settings instead (SETTINGS, written after each batch).

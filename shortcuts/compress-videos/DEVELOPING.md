@@ -14,6 +14,7 @@ ______________________________________________________________________
   - [1.1. The ffmpeg command](#11-the-ffmpeg-command)
   - [1.2. Metadata: vidmeta](#12-metadata-vidmeta)
   - [1.3. What is skipped](#13-what-is-skipped)
+  - [1.4. Edited videos (0.4.0)](#14-edited-videos-040)
 - [2. Layout](#2-layout)
 - [3. Building (Mac)](#3-building-mac)
 - [4. Releasing a new version](#4-releasing-a-new-version)
@@ -45,20 +46,35 @@ Compress Videos (macOS)                      (shortcut, from Photos' Share menu)
    Run AppleScript (lib/mac/export.applescript) has Photos export the
    originals into the work folder's in/ and returns "id|date|filename" lines
 
+   Run Shell Script, the planning pass (the same script with PHASE "plan", up
+   to selection.zsh's @PLAN_END@): the same checks and sorting, then prints
+   the "id|date|filename" line of each video it would convert (none with
+   EDITS=0) and exits; Run AppleScript (scripts/mac/bridge.applescript, input:
+   those lines) puts those videos into a new top-level album "Compress Videos
+   (working)" by id and answers "BRIDGE n" (variable Bridge); if n > 0, Find
+   Photos where Album is that album (variable Renderings) and each one's Date
+   Taken (variable Dates, by position); Run AppleScript bridge.applescript
+   (input: the text "close") deletes the album (variable Closed), before the
+   conversion (1.4)
+
    Run Shell Script (/bin/zsh; scripts/mac/common.zsh + selection.zsh, with
-   encode.zsh at its @RUN@; the settings and the lines as variables):
+   encode.zsh at its @RUN@; the settings, the lines, Bridge, Dates and Closed
+   as variables, Renderings as arguments):
      checks the settings and the tools (compress-videos-ffmpeg and -ffprobe
      in ~/.local/bin, else Homebrew's ffmpeg 7.1+; vidmeta), sorts in/: photos
      and Live Photos (a photo whose .mov isn't an item of its own) skipped;
      each video probed with ffprobe and skipped if a copy would lose
-     something (1.3); checks the free space against the exported files' size;
-     then for each video, niced:
-       ffmpeg ... in/IMG_1234.MOV vid_out_N.mp4   (1.1; progress lines)
+     something (1.3); an edited video's file from Renderings copied to
+     vid_in_N.mov and probed in its place (1.4); checks the free space against
+     the files' size; then for each video, niced:
+       ffmpeg ... in/IMG_1234.MOV vid_out_N.mp4   (1.1; progress lines; an
+                                                   edited video: vid_in_N.mov)
        ffprobe vid_out_N.mp4   (codec, 10 bits, the whole duration; its size
                                 for the log)
        vidmeta copy in/IMG_1234.MOV vid_out_N.mp4   (1.2)
      moves each copy to out/IMG_1234.mp4 and prints
-       path|original id|delete|IMG_1234.mp4
+       path|original id|delete|IMG_1234.mp4   (and "|burnt-in" for an
+                                               edited video: its keyword)
        (a "|", ":", "\" or control character in the original's name is "_"
        in the copy's, as photobatch names Compress Photos' copies)
      writes last-settings.txt and vid_skipped.txt
@@ -85,7 +101,8 @@ Terminal window (`lib/mac/progress.zsh`; `WATCH=0` turns it off) follows the
 log, which has the command line of each video, a progress line every 5 s
 (`PROGRESS_EVERY`), and the size and speed of each copy. Switches at the top of
 the script: `NICE=10` (ffmpeg's priority), `DOLBY=1` (0: Dolby Vision videos
-become plain HDR), `SLOMO=1` (0: no video is skipped as slo-mo, 1.3), and
+become plain HDR), `SLOMO=1` (0: no video is skipped as slo-mo, 1.3), `EDITS=1`
+(0: every video from its original recording, without the album, 1.4), and
 `FFMPEG`, `FFPROBE`, `VIDMETA` (other tools, used by the tests). The script
 never exits nonzero for a conversion problem: it writes `ERROR:` and `!` lines
 to the log, which the shortcut shows.
@@ -189,18 +206,69 @@ Before any video is converted, from the exported files and ffprobe:
 - sound none of whose tracks ffmpeg can read (the copy would be silent);
 - Dolby Vision, when the ffmpeg in use has no `-dolbyvision` option.
 
+### 1.4. Edited videos (0.4.0)
+
+Photos' AppleScript exports `with using originals`: the recording, without an
+edit made in Photos. Its AppleScript has no "edited" property, and no Shortcuts
+action takes an item's id, so the shortcut does as Compress Photos (0.12.0,
+issue #29; its DEVELOPING.md 1.1): an album bridges the two. The planning pass
+prints the videos the conversion will convert, `bridge.applescript` (this
+tool's own copy: Compress Photos' leaves videos out) puts them into the album
+*Compress Videos (working)*, and Find Photos gets them as library items. For a
+video, Shortcuts' file is what PhotoKit gives for the asset's current version
+(ContentKit's `retrieveFileWithImageManager:forType:`, `requestAVAssetForVideo`
+with the default version, `PHVideoRequestOptionsVersionCurrent`: the edit
+rendered, or the unedited original); an `AVURLAsset` is copied as it is, never
+encoded again (see [the plan](../../docs/compress-videos-edits-plan.md), 2.1).
+
+Only the videos to convert go into the album: Shortcuts has no try, and a
+slo-mo, the one kind whose hand-over was seen to fail (an AVComposition), would
+stop the run for every video. So the script runs twice, the planning pass up to
+`@PLAN_END@` (no conversion, no window), the conversion in full; both apply the
+same rules, and the planning pass's log is replaced by the conversion's. The
+album is deleted before the conversion (it would otherwise show in Photos, and
+sync, for the whole batch): Renderings holds library items, not the album's.
+
+The conversion pairs each video to convert with a file by name without
+extension (case aside) and date (a second at most, when both have one), one
+match on both sides, as Compress Photos does, and compares them with
+`/usr/bin/cmp` (2.4 s per GB). The same bytes: unedited, its original is
+converted. Different: edited; the file is copied with `/bin/cp -c` (a clone on
+one volume; ffprobe and ffmpeg can't read Shortcuts' group container, Apple's
+tools can) to `vid_in_N.<ext>`, probed, and converted in the original's place,
+with its own size, frame rate, duration, sound and HDR. What the video is
+(slo-mo, spatial, a log recording, its codec) is decided by the original first;
+Photos' version must then be readable and decodable, with readable sound and
+Dolby Vision this ffmpeg can carry, or the video is skipped and counted
+(`edited video(s) whose Photos version can't be converted`). `vidmeta copy`
+still takes the original, so the copy has the recording's date, location and
+camera keys. The copy's result line ends with `|burnt-in`, which
+`import.applescript` gives it as a keyword with `compr`; its header in the log
+says what the original was and what Photos' version lost
+(`! Photos' version of it is not HDR`, `has no Dolby Vision`, `is 8-bit`,
+`has no sound`), and a `!` line before Photos' work names every video whose
+edit is burnt in. A video with no pair, or one `cmp` can't read, is converted
+from its original with `! could not check ... for edits`; when no file came at
+all, one line says why (`BRIDGE`). `EDITS=0` (in both Run Shell Script actions)
+skips all of it.
+
+Not checked on a device when this was written: what Photos' version of each
+kind of edit is (codec, bit depth, HDR, sound), Cinematic videos, how long the
+hand-over takes for large videos, and a library on another disk (no clone).
+
 ## 2. Layout
 
-| Path                             | What it is                                                                                                                                                |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release.json`                   | the release files: `ffmpeg-macos`, `ffprobe-macos`, `vidmeta-macos` and the Mac shortcut                                                                  |
-| `VERSION`                        | the version, shared by the shortcut, `vidmeta` and our ffmpeg's version line                                                                              |
-| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy, and reading a key or the log curve)                                                   |
-| `scripts/build-macos.sh`         | builds `dist/ffmpeg-macos`, `dist/ffprobe-macos`, `dist/vidmeta-macos` and `build/vidmeta` (with the sanitizers, for the tests)                           |
-| `scripts/vf.py`                  | the questions (titles, descriptions, defaults) and their builders; re-exports `lib/wfkit.py`                                                              |
-| `scripts/build_mac_shortcuts.py` | generates and signs `dist/Compress Videos (macOS).shortcut`                                                                                               |
-| `scripts/mac/*.zsh`              | the conversion script: `common.zsh` (settings, tools), `selection.zsh` (staging, probing, skipping, result lines), `encode.zsh` (ffmpeg, checks, vidmeta) |
-| `../../lib/`                     | shared with Compress Photos: the plist builder, the AppleScripts, the progress window and the finish step                                                 |
+| Path                             | What it is                                                                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release.json`                   | the release files: `ffmpeg-macos`, `ffprobe-macos`, `vidmeta-macos` and the Mac shortcut                                                                                                    |
+| `VERSION`                        | the version, shared by the shortcut, `vidmeta` and our ffmpeg's version line                                                                                                                |
+| `src/`                           | `vidmeta.c` (the CLI and its self-test), `mp4meta.c` (the box copy, and reading a key or the log curve)                                                                                     |
+| `scripts/build-macos.sh`         | builds `dist/ffmpeg-macos`, `dist/ffprobe-macos`, `dist/vidmeta-macos` and `build/vidmeta` (with the sanitizers, for the tests)                                                             |
+| `scripts/vf.py`                  | the questions (titles, descriptions, defaults) and their builders; re-exports `lib/wfkit.py`                                                                                                |
+| `scripts/build_mac_shortcuts.py` | generates and signs `dist/Compress Videos (macOS).shortcut`                                                                                                                                 |
+| `scripts/mac/*.zsh`              | the conversion script: `common.zsh` (settings, tools), `selection.zsh` (staging, probing, skipping, the planning pass, edited videos, result lines), `encode.zsh` (ffmpeg, checks, vidmeta) |
+| `scripts/mac/bridge.applescript` | the album through which Find Photos gets Photos' version of each video to convert (1.4)                                                                                                     |
+| `../../lib/`                     | shared with Compress Photos: the plist builder, the AppleScripts, the progress window and the finish step                                                                                   |
 
 `build/` and `dist/` are not committed.
 
